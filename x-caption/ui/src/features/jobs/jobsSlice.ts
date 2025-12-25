@@ -344,6 +344,37 @@ const slice = createSlice({
       apply(job.result);
       apply(job.partialResult);
     },
+    updateSegmentTiming(
+      state,
+      action: PayloadAction<{ jobId: string; segmentId: number; start: number; end: number }>
+    ) {
+      const job = state.jobsById[action.payload.jobId];
+      if (!job) return;
+      const segmentId = action.payload.segmentId;
+      const apply = (result: TranscriptResult | null | undefined) => {
+        const segments = result?.segments;
+        if (!segments || !Array.isArray(segments)) return;
+        const index = segments.findIndex((s) => s.id === segmentId);
+        if (index < 0) return;
+        segments[index] = {
+          ...segments[index],
+          start: action.payload.start,
+          end: action.payload.end
+        };
+      };
+      apply(job.result);
+      apply(job.partialResult);
+      if (job.streamingSegments && Array.isArray(job.streamingSegments)) {
+        const index = job.streamingSegments.findIndex((s) => s.id === segmentId);
+        if (index >= 0) {
+          job.streamingSegments[index] = {
+            ...job.streamingSegments[index],
+            start: action.payload.start,
+            end: action.payload.end
+          };
+        }
+      }
+    },
     setJobSegments(state, action: PayloadAction<{ jobId: string; segments: TranscriptSegment[] }>) {
       const job = state.jobsById[action.payload.jobId];
       if (!job) return;
@@ -456,7 +487,15 @@ const slice = createSlice({
   }
 });
 
-export const { addJob, applyJobUpdate, clearAllJobs, selectJob, setJobSegments, updateSegmentText } = slice.actions;
+export const {
+  addJob,
+  applyJobUpdate,
+  clearAllJobs,
+  selectJob,
+  setJobSegments,
+  updateSegmentText,
+  updateSegmentTiming
+} = slice.actions;
 export const jobsReducer = slice.reducer;
 
 export const selectJobsState = (state: RootState) => state.jobs;

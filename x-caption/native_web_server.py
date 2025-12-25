@@ -502,6 +502,76 @@ def create_app():
                 "error": "Failed to edit segment"
             }), 500
 
+    @app.route('/api/segment/timing', methods=['POST'])
+    def update_segment_timing():
+        """Update start/end timing for a segment."""
+        try:
+            data = request.get_json()
+            job_id = data.get('job_id')
+            segment_id = data.get('segment_id')
+            start = data.get('start')
+            end = data.get('end')
+
+            if not job_id or segment_id is None or start is None or end is None:
+                return jsonify({
+                    "success": False,
+                    "error": "job_id, segment_id, start, and end are required"
+                }), 400
+
+            try:
+                start_val = float(start)
+                end_val = float(end)
+            except Exception:
+                return jsonify({
+                    "success": False,
+                    "error": "start and end must be numbers"
+                }), 400
+
+            if end_val <= start_val:
+                return jsonify({
+                    "success": False,
+                    "error": "end must be greater than start"
+                }), 400
+
+            record = native_history.get_job_record(job_id)
+            transcription = record.get("transcript") if record else None
+            if not transcription:
+                return jsonify({
+                    "success": False,
+                    "error": "Transcription not found"
+                }), 404
+
+            segment_found = False
+            segments = transcription.get("segments") or []
+            for segment in segments:
+                if segment.get('id') == segment_id:
+                    segment['start'] = start_val
+                    segment['end'] = end_val
+                    segment_found = True
+                    break
+
+            if not segment_found:
+                return jsonify({
+                    "success": False,
+                    "error": f"Segment {segment_id} not found"
+                }), 404
+
+            native_history.update_job_transcript(job_id, transcription)
+
+            return jsonify({
+                "success": True,
+                "message": "Segment timing updated"
+            }), 200
+
+        except Exception as e:
+            logger.error(f"Error updating segment timing: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return jsonify({
+                "success": False,
+                "error": "Failed to update segment timing"
+            }), 500
+
     @app.route('/api/job/record', methods=['POST'])
     def upsert_job_record():
         """Create or update a job record in the app database."""

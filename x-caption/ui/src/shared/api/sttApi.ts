@@ -148,6 +148,24 @@ export async function apiEditSegment(args: {
   });
 }
 
+export async function apiUpdateSegmentTiming(args: {
+  jobId: string;
+  segmentId: number;
+  start: number;
+  end: number;
+}): Promise<{ success?: boolean; message?: string }> {
+  return fetchJson<{ success?: boolean; message?: string }>("/api/segment/timing", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      job_id: args.jobId,
+      segment_id: args.segmentId,
+      start: args.start,
+      end: args.end
+    })
+  });
+}
+
 export async function apiConvertChinese(args: {
   text: string;
   target: "traditional" | "simplified";

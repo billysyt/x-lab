@@ -3,7 +3,15 @@ import { setActiveTab, setVersion } from "../features/ui/uiSlice";
 import { setChineseStyle, setLanguage } from "../features/settings/settingsSlice";
 import { setExportLanguage } from "../features/transcript/transcriptSlice";
 import { useAppDispatch, useAppSelector } from "./hooks";
-import { addJob, bootstrapJobs, pollJobUpdates, selectJob, setJobSegments, updateSegmentText } from "../features/jobs/jobsSlice";
+import {
+  addJob,
+  bootstrapJobs,
+  pollJobUpdates,
+  selectJob,
+  setJobSegments,
+  updateSegmentText,
+  updateSegmentTiming
+} from "../features/jobs/jobsSlice";
 import { UploadTab, type UploadTabHandle, type MediaItem } from "../features/upload/components/UploadTab";
 import { TranscriptPanel } from "../features/transcript/components/TranscriptPanel";
 import type { ToastType } from "../shared/components/ToastHost";
@@ -18,7 +26,8 @@ import {
   apiGetWhisperModelDownload,
   apiGetWhisperModelStatus,
   apiStartWhisperModelDownload,
-  apiUpsertJobRecord
+  apiUpsertJobRecord,
+  apiUpdateSegmentTiming
 } from "../shared/api/sttApi";
 import type { ExportLanguage, Job, TranscriptSegment, WhisperModelDownload, WhisperModelStatus } from "../shared/types";
 
@@ -385,6 +394,7 @@ export function App() {
   const subtitleMeasureRef = useRef<HTMLSpanElement | null>(null);
   const subtitleUiSaveRef = useRef<number | null>(null);
   const subtitleUiLoadRef = useRef<string | null>(null);
+  const subtitleEditOpenSizeRef = useRef<{ width: number; height: number } | null>(null);
   const subtitleDragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -496,6 +506,22 @@ export function App() {
   const [timelineScrollLeft, setTimelineScrollLeft] = useState(0);
   const [timelineViewportWidth, setTimelineViewportWidth] = useState(0);
   const dragRegionClass = useCustomDrag ? "stt-drag-region" : "pywebview-drag-region";
+  const captionDragRef = useRef<{
+    pointerId: number;
+    jobId: string;
+    segmentId: number;
+    start: number;
+    end: number;
+    startX: number;
+    mode: "move" | "start" | "end";
+  } | null>(null);
+  const activeJob = useMemo(() => {
+    if (selectedJob) return selectedJob;
+    if (activeMedia?.source === "job" && activeMedia.jobId) {
+      return jobsById[activeMedia.jobId] ?? null;
+    }
+    return null;
+  }, [activeMedia?.jobId, activeMedia?.source, jobsById, selectedJob]);
 
   useEffect(() => {
     if (!isHeaderCompact) {
@@ -572,9 +598,9 @@ export function App() {
   }, [dispatch, jobOrder, jobsById]);
 
   const segments =
-    selectedJob?.result?.segments ||
-    selectedJob?.partialResult?.segments ||
-    selectedJob?.streamingSegments ||
+    activeJob?.result?.segments ||
+    activeJob?.partialResult?.segments ||
+    activeJob?.streamingSegments ||
     [];
   const displaySegments = useMemo(
     () =>
@@ -586,11 +612,11 @@ export function App() {
   );
   const exportSegments = useMemo(
     () =>
-      deriveJobSegments(selectedJob).filter((segment) => {
+      deriveJobSegments(activeJob ?? undefined).filter((segment) => {
         const rawText = String(segment?.originalText ?? segment?.text ?? "");
         return !isBlankAudioText(rawText);
       }),
-    [selectedJob]
+    [activeJob]
   );
   const openCcConverter = useMemo(() => safeOpenCcConverter(exportLanguage), [exportLanguage]);
   const currentSubtitleMatch = useMemo(() => {
@@ -669,10 +695,9 @@ export function App() {
     const el = subtitleBoxRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      const rect = entry?.contentRect;
-      if (!rect) return;
-      setSubtitleEditSize({ width: rect.width, height: rect.height });
+      const box = subtitleBoxRef.current?.getBoundingClientRect();
+      if (!box) return;
+      setSubtitleEditSize({ width: box.width, height: box.height });
       scheduleSubtitleUiSave();
     });
     observer.observe(el);
@@ -719,7 +744,7 @@ export function App() {
             y: Number(uiState.position.y) || 0.85
           });
         }
-        if (uiState.size) {
+        if (uiState.size && !subtitleEditor) {
           const width = Number(uiState.size.width) || subtitleBoxSize.width;
           const height = Number(uiState.size.height) || subtitleBoxSize.height;
           if (width && height) {
@@ -734,7 +759,18 @@ export function App() {
         }
       })
       .catch(() => undefined);
-  }, [selectedJobId, subtitleBoxSize.height, subtitleBoxSize.width]);
+  }, [selectedJobId, subtitleBoxSize.height, subtitleBoxSize.width, subtitleEditor]);
+
+  useEffect(() => {
+    if (!subtitleEditor) return;
+    const requested = subtitleEditOpenSizeRef.current;
+    if (!requested) return;
+    subtitleEditOpenSizeRef.current = null;
+    const raf = window.requestAnimationFrame(() => {
+      setSubtitleEditSize(requested);
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [subtitleEditor]);
 
   const waitlistUrl =
     typeof window !== "undefined" && typeof (window as any).__WAITLIST_URL__ === "string"
@@ -1911,6 +1947,37 @@ export function App() {
   }, [clipTimeline.length, timelineDuration, playback.currentTime, getActiveMediaEl]);
 
   useEffect(() => {
+    if (!activeMedia) return;
+    if (activeMedia.source === "job" && activeMedia.jobId && !jobsById[activeMedia.jobId]) {
+      pendingSeekRef.current = null;
+      pendingPlayRef.current = false;
+      setActiveClipId(null);
+      setActiveMedia(null);
+      setActivePreviewUrl(null);
+      setPlayback((prev) => ({ ...prev, currentTime: 0, duration: 0, isPlaying: false }));
+    }
+  }, [activeMedia, jobsById]);
+
+  useEffect(() => {
+    if (!timelineClips.length) return;
+    setTimelineClips((prev) => {
+      const next = prev.filter((clip) => {
+        if (clip.media.source !== "job") return true;
+        if (!clip.media.jobId) return false;
+        return Boolean(jobsById[clip.media.jobId]);
+      });
+      if (next.length === prev.length) return prev;
+      return next;
+    });
+  }, [jobsById, timelineClips.length]);
+
+  useEffect(() => {
+    if (!activeMedia || activeMedia.source !== "job" || !activeMedia.jobId) return;
+    if (selectedJobId === activeMedia.jobId) return;
+    dispatch(selectJob(activeMedia.jobId));
+  }, [activeMedia, dispatch, selectedJobId]);
+
+  useEffect(() => {
     if (!clipTimeline.length) return;
     if (activeMedia) return;
     if (!playback.isPlaying) return;
@@ -1953,22 +2020,33 @@ export function App() {
       }
     }
     const baseText = currentSubtitleMatch.segment.originalText ?? currentSubtitleMatch.segment.text ?? "";
-    const boxRect = subtitleBoxRef.current?.getBoundingClientRect();
-    if (boxRect) {
-      const isSingleLine = !baseText.includes("\n");
-      let width = boxRect.width;
-      if (isSingleLine) {
-        const available = Math.max(0, subtitleMaxWidth - width);
-        width = width + Math.min(80, available);
+    const measureEl = subtitleMeasureRef.current;
+    if (measureEl) {
+      measureEl.textContent = baseText || " ";
+      const rect = measureEl.getBoundingClientRect();
+      const paddingX = 12;
+      const paddingY = 4;
+      const width = Math.min(subtitleMaxWidth, rect.width + paddingX * 2 + 5);
+      const height = rect.height + paddingY * 2;
+      subtitleEditOpenSizeRef.current = { width, height };
+      setSubtitleEditSize({ width, height });
+    } else {
+      const boxRect = subtitleBoxRef.current?.getBoundingClientRect();
+      if (boxRect) {
+        const width = Math.min(subtitleMaxWidth, boxRect.width + 5);
+        const height = boxRect.height;
+        subtitleEditOpenSizeRef.current = { width, height };
+        setSubtitleEditSize({ width, height });
       }
-      setSubtitleEditSize({ width, height: boxRect.height });
     }
     setSubtitleDraft(baseText);
     setSubtitleEditor({ segmentId: currentSubtitleMatch.segment.id, text: baseText });
   }, [currentSubtitleMatch, getActiveMediaEl, subtitleMaxWidth]);
 
   const handleSaveSubtitleEdit = useCallback(async () => {
-    if (!subtitleEditor || !selectedJobId) {
+    const jobId =
+      selectedJobId ?? (activeMedia?.source === "job" && activeMedia.jobId ? activeMedia.jobId : null);
+    if (!subtitleEditor || !jobId) {
       setSubtitleEditor(null);
       return;
     }
@@ -1978,15 +2056,15 @@ export function App() {
       return;
     }
     try {
-      await apiEditSegment({ jobId: selectedJobId, segmentId: subtitleEditor.segmentId, newText });
-      dispatch(updateSegmentText({ jobId: selectedJobId, segmentId: subtitleEditor.segmentId, newText }));
+      await apiEditSegment({ jobId, segmentId: subtitleEditor.segmentId, newText });
+      dispatch(updateSegmentText({ jobId, segmentId: subtitleEditor.segmentId, newText }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       notify(`Failed to save changes: ${message}`, "error");
     } finally {
       setSubtitleEditor(null);
     }
-  }, [dispatch, notify, selectedJobId, subtitleDraft, subtitleEditor]);
+  }, [activeMedia?.jobId, activeMedia?.source, dispatch, notify, selectedJobId, subtitleDraft, subtitleEditor]);
 
   const handleSubtitlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -2239,6 +2317,7 @@ export function App() {
   const tickCount = 7;
   const minZoom = 0.5;
   const maxZoom = 3;
+  const minCaptionDuration = 0.05;
   const minSegmentSec = 10;
   const maxSegmentSec = 600;
   const zoomT = clamp((timelineZoom - minZoom) / Math.max(0.001, maxZoom - minZoom), 0, 1);
@@ -2271,6 +2350,132 @@ export function App() {
       handleScrub(time);
     },
     [duration, handleScrub, pxPerSec]
+  );
+
+  const computeCaptionTiming = useCallback(
+    (drag: NonNullable<typeof captionDragRef.current>, deltaSec: number) => {
+      let start = drag.start;
+      let end = drag.end;
+      const sorted = [...segments]
+        .map((seg) => ({
+          id: seg.id,
+          start: Number(seg.start) || 0,
+          end: Number(seg.end) || 0
+        }))
+        .sort((a, b) => a.start - b.start);
+      const currentIndex = sorted.findIndex((seg) => seg.id === drag.segmentId);
+      const prevSeg = currentIndex > 0 ? sorted[currentIndex - 1] : null;
+      const nextSeg = currentIndex >= 0 && currentIndex < sorted.length - 1 ? sorted[currentIndex + 1] : null;
+      const prevEnd = prevSeg ? prevSeg.end : 0;
+      const nextStart = nextSeg ? nextSeg.start : (duration > 0 ? duration : Number.POSITIVE_INFINITY);
+      const span = Math.max(minCaptionDuration, drag.end - drag.start);
+      if (drag.mode === "move") {
+        start = drag.start + deltaSec;
+        end = start + span;
+        if (duration > 0) {
+          if (start < 0) {
+            start = 0;
+            end = start + span;
+          }
+          if (end > duration) {
+            end = duration;
+            start = end - span;
+          }
+        }
+        if (Number.isFinite(prevEnd)) {
+          start = Math.max(start, prevEnd);
+          end = start + span;
+        }
+        if (Number.isFinite(nextStart)) {
+          if (end > nextStart) {
+            end = nextStart;
+            start = end - span;
+          }
+        }
+      } else if (drag.mode === "start") {
+        start = drag.start + deltaSec;
+        start = Math.min(start, drag.end - minCaptionDuration);
+        start = Math.max(start, prevEnd);
+        start = Math.max(0, start);
+      } else {
+        end = drag.end + deltaSec;
+        end = Math.max(end, drag.start + minCaptionDuration);
+        end = Math.min(end, nextStart);
+        if (duration > 0) {
+          end = Math.min(end, duration);
+        }
+      }
+      return { start, end };
+    },
+    [activeJob?.id, duration, minCaptionDuration, segments]
+  );
+
+  const handleCaptionPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>, segment: TranscriptSegment) => {
+      if (event.button !== 0) return;
+      if (!activeJob?.id) return;
+      event.stopPropagation();
+      const target = event.target as HTMLElement;
+      const handle = target.closest("[data-handle]") as HTMLElement | null;
+      const handleType = handle?.dataset.handle;
+      const mode: "move" | "start" | "end" =
+        handleType === "start" ? "start" : handleType === "end" ? "end" : "move";
+      captionDragRef.current = {
+        pointerId: event.pointerId,
+        jobId: activeJob.id,
+        segmentId: segment.id,
+        start: Number(segment.start) || 0,
+        end: Number(segment.end) || 0,
+        startX: event.clientX,
+        mode
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      const startSec = Number(segment.start) || 0;
+      handleScrub(startSec);
+      const mediaEl = getActiveMediaEl();
+      if (mediaEl && mediaEl.paused) {
+        void safePlay(mediaEl);
+      }
+    },
+    [activeJob?.id, getActiveMediaEl, handleScrub, safePlay]
+  );
+
+  const handleCaptionPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const drag = captionDragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      event.stopPropagation();
+      const dx = event.clientX - drag.startX;
+      const deltaSec = dx / Math.max(pxPerSec, 0.001);
+      const next = computeCaptionTiming(drag, deltaSec);
+      dispatch(updateSegmentTiming({ jobId: drag.jobId, segmentId: drag.segmentId, start: next.start, end: next.end }));
+    },
+    [computeCaptionTiming, dispatch, pxPerSec]
+  );
+
+  const handleCaptionPointerUp = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const drag = captionDragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      captionDragRef.current = null;
+      event.stopPropagation();
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // Ignore.
+      }
+      const dx = event.clientX - drag.startX;
+      const deltaSec = dx / Math.max(pxPerSec, 0.001);
+      const next = computeCaptionTiming(drag, deltaSec);
+      dispatch(updateSegmentTiming({ jobId: drag.jobId, segmentId: drag.segmentId, start: next.start, end: next.end }));
+      void apiUpdateSegmentTiming({
+        jobId: drag.jobId,
+        segmentId: drag.segmentId,
+        start: next.start,
+        end: next.end
+      }).catch(() => undefined);
+    },
+    [computeCaptionTiming, dispatch, pxPerSec]
   );
 
   const onTrackPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -2780,31 +2985,59 @@ export function App() {
                 ) : null}
               </div>
               {isCompact ? (
-                <div className="flex items-center gap-1">
-                  <button
-                    className={cn(
-                      "pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-800/20 text-[10px]",
-                      compactTab === "player" ? "bg-primary text-white" : "bg-[#151515] text-slate-300 hover:border-slate-600"
-                    )}
-                    onClick={() => setCompactTab("player")}
-                    type="button"
-                    aria-label="Video"
-                    title="Video"
-                  >
-                    <AppIcon name="video" />
-                  </button>
-                  <button
-                    className={cn(
-                      "pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-800/20 text-[10px]",
-                      compactTab === "captions" ? "bg-primary text-white" : "bg-[#151515] text-slate-300 hover:border-slate-600"
-                    )}
-                    onClick={() => setCompactTab("captions")}
-                    type="button"
-                    aria-label="Captions"
-                    title="Captions"
-                  >
-                    <AppIcon name="captions" />
-                  </button>
+                <div className="flex flex-col items-end gap-1">
+                  <div className="flex items-center gap-1">
+                    <button
+                      className={cn(
+                        "pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-800/20 text-[10px]",
+                        compactTab === "player" ? "bg-primary text-white" : "bg-[#151515] text-slate-300 hover:border-slate-600"
+                      )}
+                      onClick={() => setCompactTab("player")}
+                      type="button"
+                      aria-label="Video"
+                      title="Video"
+                    >
+                      <AppIcon name="video" />
+                    </button>
+                    <button
+                      className={cn(
+                        "pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-800/20 text-[10px]",
+                        compactTab === "captions" ? "bg-primary text-white" : "bg-[#151515] text-slate-300 hover:border-slate-600"
+                      )}
+                      onClick={() => setCompactTab("captions")}
+                      type="button"
+                      aria-label="Captions"
+                      title="Captions"
+                    >
+                      <AppIcon name="captions" />
+                    </button>
+                  </div>
+                  {compactTab === "captions" ? (
+                    <button
+                      className={cn(
+                        "pywebview-no-drag inline-flex items-center gap-2 text-[10px] font-medium transition",
+                        isTranscriptEdit ? "text-slate-200" : "text-slate-500"
+                      )}
+                      onClick={() => setIsTranscriptEdit((prev) => !prev)}
+                      type="button"
+                    >
+                      <AppIcon name="edit" className="text-[11px]" />
+                      Edit
+                      <span
+                        className={cn(
+                          "relative inline-flex h-4 w-7 items-center rounded-full border transition",
+                          isTranscriptEdit ? "border-slate-500 bg-[#1b1b22]" : "border-slate-700 bg-[#151515]"
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "absolute h-3 w-3 rounded-full bg-white transition",
+                            isTranscriptEdit ? "translate-x-3" : "translate-x-1"
+                          )}
+                        />
+                      </span>
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -2929,7 +3162,7 @@ export function App() {
                             />
                           ) : (
                             <div
-                              className="whitespace-pre-wrap break-words text-[13px] font-medium text-white pointer-events-none"
+                              className="whitespace-pre-wrap break-words text-[13px] font-medium text-white pointer-events-none text-center"
                               style={{ fontSize: `${13 * subtitleScale}px` }}
                             >
                               {currentSubtitle}
@@ -3164,19 +3397,19 @@ export function App() {
                         />
 
                         <div
-                          className="relative h-10 overflow-hidden rounded-md border border-slate-800/20 bg-[#151515]"
+                          className="relative h-10 overflow-hidden rounded-md bg-transparent"
                           style={{ width: `${timelineWidth}px` }}
                           ref={timelineTrackRef}
                           onPointerDown={onTrackPointerDown}
                           onPointerMove={onTrackPointerMove}
                           onPointerUp={onTrackPointerUp}
                         >
-                          <div className="absolute inset-0 bg-[#222228]" style={faintGridStyle} />
                           {displaySegments.map((segment: any) => {
                             const start = Number(segment.start ?? 0);
                             const end = Number(segment.end ?? 0);
                             const width = Math.max(2, (end - start) * pxPerSec);
                             const left = Math.max(0, start * pxPerSec);
+                            const isActive = playback.currentTime >= start && playback.currentTime <= end;
                             const rawText = segment.originalText ?? segment.text ?? "";
                             let text = rawText;
                             if (openCcConverter) {
@@ -3189,10 +3422,25 @@ export function App() {
                             return (
                               <div
                                 key={`timeline-${segment.id}`}
-                                className="absolute top-1 h-6 cursor-grab rounded-md bg-[#151515] px-2 text-[10px] text-slate-200 transition active:cursor-grabbing"
+                                className={cn(
+                                  "absolute top-0 flex h-full cursor-grab items-center rounded-lg px-2 text-[10px] transition active:cursor-grabbing",
+                                  isActive ? "bg-[#dbeafe] text-[#0b0b0b]" : "bg-[#151515] text-slate-200"
+                                )}
                                 style={{ left: `${left}px`, width: `${width}px` }}
+                                onPointerDown={(event) => handleCaptionPointerDown(event, segment)}
+                                onPointerMove={handleCaptionPointerMove}
+                                onPointerUp={handleCaptionPointerUp}
+                                onPointerCancel={handleCaptionPointerUp}
                               >
                                 <span className="block truncate leading-6">{text}</span>
+                                <span
+                                  data-handle="start"
+                                  className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize"
+                                />
+                                <span
+                                  data-handle="end"
+                                  className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize"
+                                />
                               </div>
                             );
                           })}
