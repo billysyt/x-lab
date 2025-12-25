@@ -4,6 +4,8 @@ import type {
   JobStatusResponse,
   PollResponse,
   PreprocessResponse,
+  WhisperModelDownload,
+  WhisperModelStatus,
   RemoveJobResponse,
   TranscribeResponse
 } from "../types";
@@ -49,6 +51,18 @@ export async function apiPreprocessAudio(file: File): Promise<PreprocessResponse
   const formData = new FormData();
   formData.append("file", file);
   return fetchJson<PreprocessResponse>("/preprocess_audio", { method: "POST", body: formData });
+}
+
+export async function apiGetWhisperModelStatus(): Promise<WhisperModelStatus> {
+  return fetchJson<WhisperModelStatus>("/models/whisper/status");
+}
+
+export async function apiStartWhisperModelDownload(): Promise<WhisperModelDownload> {
+  return fetchJson<WhisperModelDownload>("/models/whisper/download", { method: "POST" });
+}
+
+export async function apiGetWhisperModelDownload(downloadId: string): Promise<WhisperModelDownload> {
+  return fetchJson<WhisperModelDownload>(`/models/whisper/download/${downloadId}`);
 }
 
 export async function apiTranscribeAudio(args: {

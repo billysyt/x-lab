@@ -5,7 +5,7 @@ import {
   apiRemoveJob,
   apiTranscribeAudio
 } from "../../shared/api/sttApi";
-import type { Job, PollUpdate, TranscriptResult } from "../../shared/types";
+import type { Job, PollUpdate, TranscriptResult, TranscriptSegment } from "../../shared/types";
 import { deriveFilenameFromResult, normalizeJobStatus, sanitizeProgressValue } from "../../shared/lib/utils";
 import type { RootState } from "../../app/store";
 
@@ -205,6 +205,11 @@ const slice = createSlice({
   name: "jobs",
   initialState,
   reducers: {
+    addJob(state, action: PayloadAction<Job>) {
+      state.jobsById[action.payload.id] = action.payload;
+      state.order = sortOrder(state.jobsById);
+      state.selectedJobId = action.payload.id;
+    },
     selectJob(state, action: PayloadAction<string | null>) {
       state.selectedJobId = action.payload;
     },
@@ -322,6 +327,22 @@ const slice = createSlice({
       };
       apply(job.result);
       apply(job.partialResult);
+    },
+    setJobSegments(state, action: PayloadAction<{ jobId: string; segments: TranscriptSegment[] }>) {
+      const job = state.jobsById[action.payload.jobId];
+      if (!job) return;
+      job.status = "completed";
+      job.progress = 100;
+      job.message = job.message || "Captions loaded";
+      job.completedAt = Date.now();
+      job.result = {
+        ...(job.result ?? {}),
+        segments: action.payload.segments
+      };
+      job.partialResult = null;
+      job.streamingSegments = action.payload.segments;
+      job.lastSyncedAt = Date.now();
+      state.order = sortOrder(state.jobsById);
     }
   },
   extraReducers(builder) {
@@ -419,7 +440,7 @@ const slice = createSlice({
   }
 });
 
-export const { applyJobUpdate, clearAllJobs, selectJob, updateSegmentText } = slice.actions;
+export const { addJob, applyJobUpdate, clearAllJobs, selectJob, setJobSegments, updateSegmentText } = slice.actions;
 export const jobsReducer = slice.reducer;
 
 export const selectJobsState = (state: RootState) => state.jobs;

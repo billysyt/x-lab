@@ -16,7 +16,6 @@ function stageIcon(status: StageStatus) {
 
 function deriveStageState(job: Job | null) {
   const empty = {
-    segmentation: { status: "waiting" as const, time: "" },
     transcription: { status: "waiting" as const, time: "" }
   };
   if (!job) return empty;
@@ -38,36 +37,19 @@ function deriveStageState(job: Job | null) {
 
   if (job.status === "completed" && result) {
     return {
-      segmentation: { status: "completed" as const, time: "" },
       transcription: { status: "completed" as const, time: transcriptionTime }
     };
   }
 
-  if (stage === "segmentation") {
+  if (stage === "transcription" || stage === "pipeline") {
     return {
-      segmentation: { status: "active" as const, time: "" },
-      transcription: { status: "waiting" as const, time: "" }
-    };
-  }
-
-  if (stage === "transcription") {
-    return {
-      segmentation: { status: "completed" as const, time: "" },
-      transcription: { status: "active" as const, time: "" }
-    };
-  }
-
-  if (stage === "pipeline") {
-    return {
-      segmentation: { status: "completed" as const, time: "" },
-      transcription: { status: "completed" as const, time: transcriptionTime }
+      transcription: { status: stage === "transcription" ? ("active" as const) : ("completed" as const), time: "" }
     };
   }
 
   if (job.status === "processing" || job.status === "queued") {
     return {
-      segmentation: { status: "active" as const, time: "" },
-      transcription: { status: "waiting" as const, time: "" }
+      transcription: { status: "active" as const, time: "" }
     };
   }
 
@@ -86,22 +68,10 @@ export function ProcessingStages(props: { job: Job | null }) {
   return (
     <div className="mb-3 flex flex-wrap items-center gap-4">
       <div className="text-xs font-semibold text-text-secondary">
-        Powered by <span className="text-primary">SenseVoice ONNX</span>
+        Powered by <span className="text-primary">Whisper.cpp</span>
       </div>
 
       <div className="ml-auto flex flex-wrap items-center justify-end gap-6">
-        <div className="inline-flex items-center gap-2" id="segmentationStage">
-          <div
-            className={cn(
-              "flex h-6 w-6 items-center justify-center rounded-full text-[12px]",
-              stageIconWrapClass(state.segmentation.status)
-            )}
-          >
-            {stageIcon(state.segmentation.status)}
-          </div>
-          <span className="whitespace-nowrap text-xs font-semibold text-text-primary">TEN-VAD Segmentation</span>
-        </div>
-
         <div className="inline-flex items-center gap-2" id="transcriptionStage">
           <div
             className={cn(

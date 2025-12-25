@@ -7,7 +7,7 @@ export type TranscriptState = {
 };
 
 const initialState: TranscriptState = {
-  exportLanguage: "simplified",
+  exportLanguage: "traditional",
   timestampOffsetSeconds: 0
 };
 

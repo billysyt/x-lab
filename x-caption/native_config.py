@@ -280,21 +280,6 @@ def setup_environment():
     os.environ.setdefault('HF_HUB_OFFLINE', '1')
     os.environ.setdefault('TRANSFORMERS_OFFLINE', '1')
 
-    models_dir = get_models_dir()
-    bundle_models_dir = get_bundle_dir() / 'data' / 'models'
-
-    sensevoice_dir = models_dir / 'sensevoice-onnx'
-    bundled_sensevoice_dir = bundle_models_dir / 'sensevoice-onnx'
-    if not sensevoice_dir.exists() and bundled_sensevoice_dir.exists():
-        logger.warning(
-            "SenseVoice ONNX models missing in data dir; using bundled copy at %s",
-            bundled_sensevoice_dir,
-        )
-        sensevoice_dir = bundled_sensevoice_dir
-
-    if sensevoice_dir.exists():
-        os.environ['SENSEVOICE_ONNX_DIR'] = str(sensevoice_dir)
-
     # Platform-specific settings
     if sys.platform == 'darwin':  # macOS
         os.environ['OBJC_DISABLE_INITIALIZE_FORK_SAFETY'] = 'YES'

@@ -18,7 +18,8 @@ import webbrowser
 import ctypes
 import tempfile
 import warnings
-import contextlib
+import base64
+import mimetypes
 from pathlib import Path
 
 IS_WINDOWS = sys.platform == "win32"
@@ -75,107 +76,17 @@ else:
 
 
 def warm_up_models():
-    """Load heavy ONNX runtimes during the splash/loading phase."""
-    from native_config import MODEL_WARMUP_EVENT, get_bundle_dir, get_data_dir
-    import traceback
-
-    def _warmup_sample_path() -> Path | None:
-        """Locate the bundled warm-up audio sample (MP3)."""
-        sample_rel = Path("sample") / "warm-up.mp3"
-
-        candidate_roots: list[Path] = []
-        launcher_dir = Path(__file__).parent
-        candidate_roots.append(launcher_dir)
-        candidate_roots.append(launcher_dir / "data")
-
-        try:
-            bundle_dir = get_bundle_dir()
-            candidate_roots.append(bundle_dir)
-            candidate_roots.append(bundle_dir / "data")
-        except Exception:
-            pass
-
-        try:
-            data_dir = get_data_dir()
-            candidate_roots.append(data_dir)
-        except Exception:
-            pass
-
-        seen = set()
-        for root in candidate_roots:
-            candidate = (root / sample_rel).resolve()
-            if candidate in seen:
-                continue
-            seen.add(candidate)
-            if candidate.exists():
-                return candidate
-        return None
-
-    def _run_sample_inference(transcriber):
-        """Run SenseVoice ONNX on the bundled warm-up audio."""
-        from native_job_handlers import _prepare_audio_for_processing
-
-        sample_path = _warmup_sample_path()
-        if not sample_path:
-            print("[WARN] Warm-up sample not found; skipping SenseVoice warm-up run.")
-            return False
-
-        print(f"[MODELS] Using warm-up sample: {sample_path}")
-
-        cleanup_path: Path | None = None
-        try:
-            prepared_path, was_transcoded = _prepare_audio_for_processing(
-                job_id="__warmup__",
-                file_path=str(sample_path),
-                progress_callback=None,
-            )
-            warm_audio_path = Path(prepared_path)
-            if was_transcoded and warm_audio_path != sample_path:
-                cleanup_path = warm_audio_path
-
-            def _progress(message: str, approx: int) -> None:
-                print(f"[MODELS] Warm-up progress: {approx}% - {message}")
-
-            transcriber.transcribe(
-                warm_audio_path,
-                language="auto",
-                use_itn=True,
-                enable_vad=True,
-                progress_callback=lambda percent, msg: _progress(msg, percent),
-            )
-            print("[MODELS] ✓ SenseVoice warm-up sample processed.")
-            return True
-        except Exception as exc:
-            logger.warning("SenseVoice warm-up sample failed: %s", exc)
-            print(f"[WARN] SenseVoice warm-up sample failed: {exc}")
-            return False
-        finally:
-            if cleanup_path:
-                with contextlib.suppress(Exception):
-                    cleanup_path.unlink()
+    """Signal readiness without pre-loading large models."""
+    from native_config import MODEL_WARMUP_EVENT
 
     print("\n" + "=" * 70)
     print("[MODELS] WARM-UP THREAD STARTED")
     print("=" * 70)
-
-    print("[MODELS] Pre-loading SenseVoice ONNX runtime...")
-    try:
-        from native_job_handlers import get_sensevoice_transcriber
-
-        print("[MODELS] Calling get_sensevoice_transcriber()...")
-        transcriber = get_sensevoice_transcriber(device="cpu")
-        print(f"[MODELS] ✓ SenseVoice ready (device={transcriber.device_label}).")
-        if not _run_sample_inference(transcriber):
-            print("[WARN] Warm-up sample execution failed; continuing without warm-up run.")
-    except Exception as exc:
-        logger.warning("SenseVoice warm-up failed: %s", exc)
-        print(f"[WARN] SenseVoice warm-up failed: {exc}")
-        print(f"[WARN] Traceback: {traceback.format_exc()}")
-    finally:
-        print("[MODELS] ✓ Setting MODEL_WARMUP_EVENT...")
-        MODEL_WARMUP_EVENT.set()
-        print("[MODELS] WARM-UP THREAD COMPLETED")
-        print("=" * 70 + "\n")
+    print("[MODELS] Whisper models load on demand.")
+    print("[MODELS] ✓ Setting MODEL_WARMUP_EVENT...")
+    MODEL_WARMUP_EVENT.set()
+    print("[MODELS] WARM-UP THREAD COMPLETED")
+    print("=" * 70 + "\n")
 
 
 _SINGLE_INSTANCE_HANDLE = None
@@ -560,6 +471,125 @@ def open_browser(port: int = 11220, width: int = 1480, height: int = 900) -> str
                 """Alias for camelCase access from JavaScript."""
                 return self.save_transcript(filename, content)
 
+            def _read_file_payload(self, target_path: str):
+                try:
+                    path = Path(target_path).expanduser()
+                except Exception:
+                    return {"success": False, "error": "invalid_path"}
+
+                if not path.exists() or not path.is_file():
+                    return {"success": False, "error": "file_not_found"}
+
+                try:
+                    data = path.read_bytes()
+                except Exception as exc:  # pragma: no cover - defensive
+                    return {"success": False, "error": str(exc)}
+
+                mime_type, _ = mimetypes.guess_type(str(path))
+                return {
+                    "success": True,
+                    "file": {
+                        "name": path.name,
+                        "data": base64.b64encode(data).decode("ascii"),
+                        "mime": mime_type or "application/octet-stream",
+                        "size": path.stat().st_size,
+                    },
+                }
+
+            def open_media_dialog(self):
+                if not self._window:
+                    return {"success": False, "error": "window_not_ready"}
+
+                media_extensions = {
+                    "mp4",
+                    "m4v",
+                    "mov",
+                    "mkv",
+                    "avi",
+                    "webm",
+                    "flv",
+                    "mpg",
+                    "mpeg",
+                    "mp3",
+                    "wav",
+                    "flac",
+                    "m4a",
+                    "aac",
+                    "ogg",
+                    "opus",
+                }
+                media_pattern = ";".join(f"*.{ext}" for ext in sorted(media_extensions))
+                file_types = ((f"Media files ({media_pattern})", media_pattern),)
+                try:
+                    dialog_result = self._window.create_file_dialog(
+                        self._webview.OPEN_DIALOG,
+                        allow_multiple=False,
+                        file_types=file_types,
+                    )
+                except TypeError:
+                    dialog_result = self._window.create_file_dialog(
+                        self._webview.OPEN_DIALOG,
+                        allow_multiple=False,
+                    )
+
+                if not dialog_result:
+                    return {"success": False, "cancelled": True}
+
+                if isinstance(dialog_result, (list, tuple)):
+                    target_path = dialog_result[0]
+                else:
+                    target_path = dialog_result
+
+                if not target_path:
+                    return {"success": False, "error": "invalid_path"}
+
+                suffix = Path(str(target_path)).suffix.lower().lstrip(".")
+                if suffix not in media_extensions:
+                    return {"success": False, "error": "unsupported_file"}
+
+                return self._read_file_payload(target_path)
+
+            def openMediaDialog(self):
+                """Alias for camelCase access from JavaScript."""
+                return self.open_media_dialog()
+
+            def open_srt_dialog(self):
+                if not self._window:
+                    return {"success": False, "error": "window_not_ready"}
+
+                file_types = (("SubRip files (*.srt)", "*.srt"),)
+                try:
+                    dialog_result = self._window.create_file_dialog(
+                        self._webview.OPEN_DIALOG,
+                        allow_multiple=False,
+                        file_types=file_types,
+                    )
+                except TypeError:
+                    dialog_result = self._window.create_file_dialog(
+                        self._webview.OPEN_DIALOG,
+                        allow_multiple=False,
+                    )
+
+                if not dialog_result:
+                    return {"success": False, "cancelled": True}
+
+                if isinstance(dialog_result, (list, tuple)):
+                    target_path = dialog_result[0]
+                else:
+                    target_path = dialog_result
+
+                if not target_path:
+                    return {"success": False, "error": "invalid_path"}
+
+                if not str(target_path).lower().endswith(".srt"):
+                    return {"success": False, "error": "unsupported_file"}
+
+                return self._read_file_payload(target_path)
+
+            def openSrtDialog(self):
+                """Alias for camelCase access from JavaScript."""
+                return self.open_srt_dialog()
+
             def window_minimize(self):
                 if not self._window:
                     return {"success": False, "error": "window_not_ready"}
@@ -656,6 +686,27 @@ def open_browser(port: int = 11220, width: int = 1480, height: int = 900) -> str
                     return {"success": False, "error": str(exc)}
                 return {"success": False, "error": "unsupported"}
 
+            def window_get_on_top(self):
+                if not self._window:
+                    return {"success": False, "error": "window_not_ready"}
+                try:
+                    if hasattr(self._window, "on_top"):
+                        return {"success": True, "onTop": bool(getattr(self._window, "on_top"))}
+                except Exception as exc:  # pragma: no cover - defensive
+                    return {"success": False, "error": str(exc)}
+                return {"success": False, "error": "unsupported"}
+
+            def window_set_on_top(self, value: bool):
+                if not self._window:
+                    return {"success": False, "error": "window_not_ready"}
+                try:
+                    if hasattr(self._window, "on_top"):
+                        setattr(self._window, "on_top", bool(value))
+                        return {"success": True}
+                except Exception as exc:  # pragma: no cover - defensive
+                    return {"success": False, "error": str(exc)}
+                return {"success": False, "error": "unsupported"}
+
             def open_external(self, url: str):
                 if not url:
                     return {"success": False, "error": "invalid_url"}
@@ -673,6 +724,8 @@ def open_browser(port: int = 11220, width: int = 1480, height: int = 900) -> str
             webview.settings["DRAG_REGION_SELECTOR"] = ".pywebview-drag-region"
             if "DRAG_REGION_DIRECT_TARGET_ONLY" in webview.settings:
                 webview.settings["DRAG_REGION_DIRECT_TARGET_ONLY"] = False
+            if "ALLOW_FULLSCREEN" in webview.settings:
+                webview.settings["ALLOW_FULLSCREEN"] = True
         except Exception:
             pass
 
@@ -879,8 +932,8 @@ def show_running_info(port: int = 11220):
         "Features:",
         "   - Upload audio/video files for transcription",
         "   - Support for multiple languages (Chinese, English, Japanese, Korean)",
-        "   - TEN-VAD segmentation + optional noise suppression",
-        "   - SenseVoice ONNX offline transcription",
+        "   - Whisper.cpp offline transcription",
+        "   - On-demand model download with progress",
         "   - Real-time progress updates",
         "   - Download transcription results",
         "",
@@ -1000,9 +1053,10 @@ def main():
         if "CUDA" in error_str or "GPU" in error_str:
             print("Hint: This appears to be a CUDA/GPU error.")
             print("   Try setting device='cpu' in transcription settings.")
-        elif "HF_HUB" in error_str or "HUGGINGFACE" in error_str or "MODELSCOPE" in error_str:
-            print("Hint: Model cache issue detected.")
-            print("   Run 'python model_manager.py --download' to download required models.")
+        elif "MODEL" in error_str or "WHISPER" in error_str:
+            print("Hint: Whisper model issue detected.")
+            print("   Run 'python model_manager.py --download' to download the model,")
+            print("   or use the in-app downloader from the AI Generate Caption button.")
         elif "MEMORY" in error_str:
             print("Hint: Memory error detected.")
             print("   Try with a smaller audio file or restart your computer.")
@@ -1012,7 +1066,7 @@ def main():
         else:
             print("Hint: For troubleshooting:")
             print("   1. Check crash_report.json for detailed stack traces")
-            print("   2. Confirm SenseVoice models exist in data/models/sensevoice-onnx/")
+            print("   2. Confirm Whisper model exists in data/models/whisper/model.bin")
             print("   3. Run 'python xsub_launcher.py --help' for diagnostics")
 
         print()

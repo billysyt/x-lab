@@ -36,6 +36,7 @@ export default defineConfig({
       "/job": "http://127.0.0.1:11220",
       "/preprocess_audio": "http://127.0.0.1:11220",
       "/transcribe": "http://127.0.0.1:11220",
+      "/models": "http://127.0.0.1:11220",
       "/download": "http://127.0.0.1:11220",
       "/audio": "http://127.0.0.1:11220",
       "/static/vendor": "http://127.0.0.1:11220"

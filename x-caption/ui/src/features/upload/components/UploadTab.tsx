@@ -1,4 +1,16 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type ForwardedRef,
+  type RefObject,
+  type SetStateAction
+} from "react";
 import { apiPreprocessAudio } from "../../../shared/api/sttApi";
 import { useAppDispatch, useAppSelector } from "../../../app/hooks";
 import { removeJob, startTranscription } from "../../jobs/jobsSlice";
@@ -7,6 +19,7 @@ import type { AudioFileInfo, PreprocessResponse } from "../../../shared/types";
 import type { ToastType } from "../../../shared/components/ToastHost";
 import { AppIcon } from "../../../shared/components/AppIcon";
 import { cn } from "../../../shared/lib/cn";
+import { fileFromBase64 } from "../../../shared/lib/file";
 
 export type UploadTabHandle = {
   submitTranscription: () => Promise<void>;
@@ -17,7 +30,7 @@ export type UploadTabHandle = {
 export type MediaItem = {
   id: string;
   name: string;
-  kind: "video" | "audio" | "other";
+  kind: "video" | "audio" | "caption" | "other";
   source: "job" | "local";
   jobId?: string;
   file?: File;
@@ -27,29 +40,38 @@ export type MediaItem = {
   durationSec?: number | null;
 };
 
+type UploadTabProps = {
+  audioRef: RefObject<HTMLAudioElement>;
+  notify: (message: string, type?: ToastType) => void;
+  onSelectionChange?: (hasFile: boolean, filename?: string | null, file?: File | null) => void;
+  onAddToTimeline?: (items: MediaItem[]) => void;
+  localMedia?: MediaItem[];
+  onLocalMediaChange?: Dispatch<SetStateAction<MediaItem[]>>;
+  onRequestFilePicker?: (open: () => void) => void;
+};
+
 type AudioTarget =
   | { kind: "job" | "preprocess"; id: string; audioFile: AudioFileInfo }
   | { kind: "none" };
 
 const VIDEO_EXTENSIONS = new Set(["mp4", "m4v", "mov", "mkv", "avi", "webm", "flv", "mpg", "mpeg"]);
 const AUDIO_EXTENSIONS = new Set(["mp3", "wav", "flac", "m4a", "aac", "ogg", "opus"]);
+const CAPTION_EXTENSIONS = new Set(["srt"]);
+const MEDIA_EXTENSIONS = new Set([...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS]);
+const ACCEPTED_MEDIA_TYPES = [...AUDIO_EXTENSIONS, ...VIDEO_EXTENSIONS].map((ext) => `.${ext}`).join(",");
 
 function getKind(filename?: string | null) {
   const ext = filename?.split(".").pop()?.toLowerCase() ?? "";
   if (VIDEO_EXTENSIONS.has(ext)) return "video";
   if (AUDIO_EXTENSIONS.has(ext)) return "audio";
+  if (CAPTION_EXTENSIONS.has(ext)) return "caption";
   return "other";
 }
 
-export const UploadTab = forwardRef<UploadTabHandle, {
-  audioRef: React.RefObject<HTMLAudioElement>;
-  notify: (message: string, type?: ToastType) => void;
-  onSelectionChange?: (hasFile: boolean, filename?: string | null, file?: File | null) => void;
-  onAddToTimeline?: (items: MediaItem[]) => void;
-  onDragPayloadChange?: (items: MediaItem[] | null) => void;
-  localMedia?: MediaItem[];
-  onLocalMediaChange?: Dispatch<SetStateAction<MediaItem[]>>;
-}>(function UploadTab(props, ref) {
+export const UploadTab = forwardRef(function UploadTab(
+  props: UploadTabProps,
+  ref: ForwardedRef<UploadTabHandle>
+) {
   const dispatch = useAppDispatch();
   const settings = useAppSelector((s) => s.settings);
   const exportLanguage = useAppSelector((s) => s.transcript.exportLanguage);
@@ -82,9 +104,12 @@ export const UploadTab = forwardRef<UploadTabHandle, {
     y: number;
     item: MediaItem;
   } | null>(null);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const lastSelectedIndexRef = useRef<number | null>(null);
-  const gridRef = useRef<HTMLDivElement | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const formatTimestamp = useCallback((value?: number | null) => {
+    if (!value || !Number.isFinite(value)) return "";
+    return new Date(value).toLocaleString();
+  }, []);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -112,12 +137,48 @@ export const UploadTab = forwardRef<UploadTabHandle, {
     return `/audio/${audioTarget.id}${cacheBuster}`;
   }, [audioTarget, audioVersion]);
 
+  const requestFilePicker = useCallback(() => {
+    const open = () => {
+      const api = (window as any)?.pywebview?.api;
+      const openNative = api?.openMediaDialog || api?.open_media_dialog;
+      if (typeof openNative === "function") {
+        void openNative
+          .call(api)
+          .then((result: any) => {
+            if (!result || result.cancelled) return;
+            if (!result.success || !result.file?.data) {
+              const message =
+                result?.error === "unsupported_file"
+                  ? "Unsupported file type. Please choose an audio or video file."
+                  : result?.error || "Failed to open media file.";
+              props.notify(message, "error");
+              return;
+            }
+            const file = fileFromBase64(result.file.data, result.file.name || "media", result.file.mime);
+            addLocalFiles([file]);
+          })
+          .catch((error: any) => {
+            const message = error instanceof Error ? error.message : String(error);
+            props.notify(message || "Failed to open media file.", "error");
+          });
+        return;
+      }
+      if (fileInputRef.current) {
+        fileInputRef.current.accept = ACCEPTED_MEDIA_TYPES;
+        fileInputRef.current.click();
+      }
+    };
+    if (props.onRequestFilePicker) {
+      props.onRequestFilePicker(open);
+      return;
+    }
+    open();
+  }, [props.onRequestFilePicker]);
+
   useImperativeHandle(ref, () => ({
     submitTranscription,
     hasSelection: () => Boolean(selectedFile),
-    openFilePicker: () => {
-      fileInputRef.current?.click();
-    }
+    openFilePicker: requestFilePicker
   }));
 
   useEffect(() => {
@@ -207,8 +268,16 @@ export const UploadTab = forwardRef<UploadTabHandle, {
 
   useEffect(() => {
     if (!selectedFile) return;
+    if (getKind(selectedFile.name) === "caption") {
+      setPreprocess(null);
+      if (audioTarget.kind === "preprocess") {
+        setAudioTarget({ kind: "none" });
+        setAudioVersion((v) => v + 1);
+      }
+      return;
+    }
     void preprocessSelectedFile(selectedFile);
-  }, [preprocessSelectedFile, selectedFile]);
+  }, [audioTarget.kind, preprocessSelectedFile, selectedFile]);
 
   function clearSelectedFile() {
     if (fileInputRef.current) {
@@ -239,7 +308,7 @@ export const UploadTab = forwardRef<UploadTabHandle, {
     };
   }
 
-  async function captureVideoSprite(file: File) {
+  async function captureVideoThumbnail(file: File) {
     const url = URL.createObjectURL(file);
     const video = document.createElement("video");
     video.preload = "auto";
@@ -284,13 +353,10 @@ export const UploadTab = forwardRef<UploadTabHandle, {
       return { duration, thumbnail: null as string | null };
     }
 
-    const frameCount = 6;
-    const targetHeight = 36;
-    const aspect = width / height;
-    let frameWidth = Math.max(40, Math.round(targetHeight * aspect));
-    frameWidth = Math.min(frameWidth, 120);
+    const targetHeight = 40;
+    const targetWidth = 64;
     const canvas = document.createElement("canvas");
-    canvas.width = frameWidth * frameCount;
+    canvas.width = targetWidth;
     canvas.height = targetHeight;
     const ctx = canvas.getContext("2d");
     if (!ctx) {
@@ -313,12 +379,14 @@ export const UploadTab = forwardRef<UploadTabHandle, {
         }
       });
 
-    for (let i = 0; i < frameCount; i += 1) {
-      const t = Math.min(duration - 0.1, (duration * (i + 0.5)) / frameCount);
-      if (t < 0) continue;
-      await seekTo(t);
-      ctx.drawImage(video, 0, 0, width, height, i * frameWidth, 0, frameWidth, targetHeight);
-    }
+    const midpoint = Math.max(0, Math.min(duration / 2, Math.max(0, duration - 0.1)));
+    await seekTo(midpoint);
+    const scale = Math.max(targetWidth / width, targetHeight / height);
+    const drawWidth = width * scale;
+    const drawHeight = height * scale;
+    const dx = (targetWidth - drawWidth) / 2;
+    const dy = (targetHeight - drawHeight) / 2;
+    ctx.drawImage(video, 0, 0, width, height, dx, dy, drawWidth, drawHeight);
 
     const thumbnail = canvas.toDataURL("image/jpeg", 0.6);
     URL.revokeObjectURL(url);
@@ -327,17 +395,51 @@ export const UploadTab = forwardRef<UploadTabHandle, {
 
   function addLocalFiles(files: File[]) {
     if (!files.length) return;
-    const items = files.map(buildLocalItem);
-    setLocalMedia((prev) => [...prev, ...items]);
-    const lastFile = files[files.length - 1];
-    setSelectedFile(lastFile);
-    setPreprocess(null);
+    const supported = files.filter((file) => {
+      const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+      return MEDIA_EXTENSIONS.has(ext);
+    });
+    const rejected = files.filter((file) => !supported.includes(file));
+    if (rejected.length) {
+      props.notify(
+        `Skipped ${rejected.length} unsupported file${rejected.length > 1 ? "s" : ""}. Supported: video and audio files.`,
+        "error"
+      );
+    }
+    if (!supported.length) return;
+
+    const preferred = supported.find((file) => getKind(file.name) !== "caption") ?? supported[0];
+    const picked = preferred ? [preferred] : [];
+    if (supported.length > 1) {
+      props.notify("Only one media file can be processed at a time. Using the first selection.", "info");
+    }
+    if (!picked.length) return;
+
+    const items = picked.map(buildLocalItem);
+    setLocalMedia((prev) => {
+      prev.forEach((item) => {
+        if (item.previewUrl) {
+          URL.revokeObjectURL(item.previewUrl);
+        }
+      });
+      return items;
+    });
+    setSelectedId(items[0]?.id ?? null);
+    props.onAddToTimeline?.(items);
+    const playable = picked.find((file) => getKind(file.name) !== "caption") ?? null;
+    if (playable) {
+      setSelectedFile(playable);
+      setPreprocess(null);
+    } else {
+      clearSelectedFile();
+    }
 
     items.forEach(async (item) => {
       if (!item.file) return;
+      if (item.kind === "caption") return;
       const meta =
         item.kind === "video"
-          ? await captureVideoSprite(item.file as File)
+          ? await captureVideoThumbnail(item.file as File)
           : await new Promise<{ duration: number; thumbnail: string | null }>((resolve) => {
               const url = URL.createObjectURL(item.file as File);
               const el = document.createElement("audio");
@@ -368,36 +470,10 @@ export const UploadTab = forwardRef<UploadTabHandle, {
       URL.revokeObjectURL(item.previewUrl);
     }
     setLocalMedia((prev) => prev.filter((m) => m.id !== item.id));
-    setSelectedIds((prev) => prev.filter((id) => id !== item.id));
+    setSelectedId((prev) => (prev === item.id ? null : prev));
     if (selectedFile && item.file === selectedFile) {
       clearSelectedFile();
     }
-  }
-
-  function getSelectionOrder(id: string) {
-    const index = selectedIds.indexOf(id);
-    return index >= 0 ? index + 1 : null;
-  }
-
-  function toggleSelection(item: MediaItem, index: number, event: React.MouseEvent) {
-    const isMeta = event.metaKey || event.ctrlKey;
-    const isShift = event.shiftKey;
-    if (isShift && lastSelectedIndexRef.current !== null) {
-      const start = Math.min(lastSelectedIndexRef.current, index);
-      const end = Math.max(lastSelectedIndexRef.current, index);
-      const rangeIds = filteredMediaItems.slice(start, end + 1).map((i) => i.id);
-      setSelectedIds(Array.from(new Set([...selectedIds, ...rangeIds])));
-      return;
-    }
-
-    if (isMeta) {
-      setSelectedIds((prev) =>
-        prev.includes(item.id) ? prev.filter((id) => id !== item.id) : [...prev, item.id]
-      );
-    } else {
-      setSelectedIds([item.id]);
-    }
-    lastSelectedIndexRef.current = index;
   }
 
   const mediaItems = useMemo(() => {
@@ -420,50 +496,13 @@ export const UploadTab = forwardRef<UploadTabHandle, {
     return items;
   }, [filterMode, mediaItems, sortMode]);
 
-  const selectedItems = filteredMediaItems.filter((item) => selectedIds.includes(item.id));
-  const orderedSelectedItems = useMemo(
-    () => selectedIds.map((id) => mediaItems.find((item) => item.id === id)).filter(Boolean) as MediaItem[],
-    [mediaItems, selectedIds]
-  );
-
-  function setCustomDragImage(event: React.DragEvent<HTMLDivElement>, label: string) {
-    const ghost = document.createElement("div");
-    ghost.style.position = "absolute";
-    ghost.style.top = "-1000px";
-    ghost.style.left = "-1000px";
-    ghost.style.padding = "6px 10px";
-    ghost.style.borderRadius = "999px";
-    ghost.style.background = "rgba(15, 23, 42, 0.92)";
-    ghost.style.color = "#e2e8f0";
-    ghost.style.fontSize = "12px";
-    ghost.style.fontWeight = "600";
-    ghost.style.border = "1px solid rgba(148, 163, 184, 0.35)";
-    ghost.style.boxShadow = "0 6px 18px rgba(0,0,0,0.3)";
-    ghost.innerText = label;
-    document.body.appendChild(ghost);
-    event.dataTransfer.setDragImage(ghost, 10, 10);
-    window.setTimeout(() => {
-      document.body.removeChild(ghost);
-    }, 0);
-  }
-
   const hasMediaItems = Boolean(filteredMediaItems.length);
 
   useEffect(() => {
-    setSelectedIds((prev) => prev.filter((id) => mediaItems.some((item) => item.id === id)));
-  }, [mediaItems]);
-
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (!gridRef.current) return;
-      if (event.key.toLowerCase() === "a" && (event.metaKey || event.ctrlKey)) {
-        event.preventDefault();
-        setSelectedIds(filteredMediaItems.map((item) => item.id));
-      }
+    if (selectedId && !mediaItems.some((item) => item.id === selectedId)) {
+      setSelectedId(null);
     }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [filteredMediaItems]);
+  }, [mediaItems, selectedId]);
 
   async function handleRemoveJob(e: React.MouseEvent, id: string) {
     e.preventDefault();
@@ -471,7 +510,7 @@ export const UploadTab = forwardRef<UploadTabHandle, {
     try {
       await dispatch(removeJob({ jobId: id, skipConfirm: true, silent: true })).unwrap();
       props.notify("Media removed.", "success");
-      setSelectedIds((prev) => prev.filter((itemId) => itemId !== id));
+      setSelectedId((prev) => (prev === id ? null : prev));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       props.notify(`Failed to remove media: ${message}`, "error");
@@ -487,14 +526,18 @@ export const UploadTab = forwardRef<UploadTabHandle, {
       (job.partialResult as any)?.audio_duration ||
       (job.partialResult as any)?.duration ||
       null;
+    const kind = getKind(job.filename);
+    if (kind === "caption") return null;
+    const localMatch = localMedia.find((item) => item.name === job.filename && item.kind === "video");
     return {
       id,
       name: job.filename || id,
-      kind: getKind(job.filename),
+      kind,
       source: "job",
       jobId: id,
       createdAt: job.startTime || Date.now(),
-      durationSec: typeof jobDuration === "number" ? jobDuration : null
+      durationSec: typeof jobDuration === "number" ? jobDuration : localMatch?.durationSec ?? null,
+      thumbnailUrl: localMatch?.thumbnailUrl ?? null
     };
   }
 
@@ -519,7 +562,6 @@ export const UploadTab = forwardRef<UploadTabHandle, {
 
       setPreprocess(null);
       dispatch(setActiveTab("captions"));
-      props.notify("Job submitted successfully", "success");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       props.notify(`Upload failed: ${message}`, "error");
@@ -529,17 +571,10 @@ export const UploadTab = forwardRef<UploadTabHandle, {
   return (
     <>
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <button
-            className="inline-flex h-7 items-center justify-center gap-1.5 rounded-md border border-slate-800/70 bg-[#151515] px-2 text-[10px] font-semibold text-slate-300 hover:border-slate-600"
-            onClick={() => fileInputRef.current?.click()}
-            type="button"
-            title="Import"
-            aria-label="Import"
-          >
-            <AppIcon name="upload" />
-            <span className="hidden sm:inline">Import</span>
-          </button>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] font-semibold text-slate-400">
+            {filteredMediaItems.length} Job{filteredMediaItems.length === 1 ? "" : "s"}
+          </span>
           <div className="flex items-center gap-2">
             <div className="relative" ref={sortMenuRef}>
               <button
@@ -632,9 +667,8 @@ export const UploadTab = forwardRef<UploadTabHandle, {
           )}
           onClick={(event) => {
             const target = event.target as HTMLElement;
-            if (target.closest("[data-media-card]")) return;
-            setSelectedIds([]);
-            lastSelectedIndexRef.current = null;
+            if (target.closest("[data-media-row]")) return;
+            setSelectedId(null);
             setContextMenu(null);
           }}
           onDragOver={(e) => {
@@ -652,131 +686,73 @@ export const UploadTab = forwardRef<UploadTabHandle, {
             if (files.length) addLocalFiles(files);
           }}
         >
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" ref={gridRef}>
-            {filteredMediaItems.map((item, index) => {
-              const order = getSelectionOrder(item.id);
-              const isSelected = order !== null;
+          <div className="space-y-2">
+            {filteredMediaItems.map((item) => {
+              const job = item.source === "job" && item.jobId ? jobsById[item.jobId] : null;
+              const updatedAt = job?.completedAt ?? job?.startTime ?? item.createdAt ?? null;
+              const isSelected = selectedId === item.id;
               return (
-                <div
+                <button
                   key={item.id}
-                  data-media-card
+                  data-media-row
                   className={cn(
-                    "group relative rounded-lg border border-slate-800/70 bg-[#18181c] p-2 text-left transition hover:border-slate-600",
-                    isSelected && "border-primary/80 ring-1 ring-primary/40"
+                    "flex w-full items-center gap-3 rounded-lg border border-slate-800/70 bg-[#141417] px-3 py-2 text-left transition hover:border-slate-600",
+                    isSelected && "border-primary/70 ring-1 ring-primary/30"
                   )}
-                draggable
-                onDragStart={(e) => {
-                  const dragItems = selectedIds.includes(item.id) ? orderedSelectedItems : [item];
-                  if (!selectedIds.includes(item.id)) {
-                    setSelectedIds([item.id]);
-                  }
-                  e.dataTransfer.setData("application/x-media-id", dragItems.map((i) => i.id).join(","));
-                  setCustomDragImage(e, dragItems.length > 1 ? `${dragItems.length} items` : item.name);
-                  props.onDragPayloadChange?.(dragItems);
-                }}
-                  onDragEnd={() => props.onDragPayloadChange?.(null)}
-                  onClick={(e) => toggleSelection(item, index, e)}
+                  onClick={() => {
+                    setSelectedId(item.id);
+                    props.onAddToTimeline?.([item]);
+                  }}
                   onContextMenu={(e) => {
                     e.preventDefault();
+                    setSelectedId(item.id);
                     setContextMenu({
                       x: e.clientX,
                       y: e.clientY,
                       item
                     });
                   }}
+                  type="button"
                 >
-                {isSelected ? (
-                  <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
-                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-white shadow">
-                      {order}
+                  {item.kind === "video" && item.thumbnailUrl ? (
+                    <div className="h-10 w-16 overflow-hidden rounded-md bg-[#0f0f10]">
+                      <img src={item.thumbnailUrl} alt="" className="h-full w-full object-cover" />
                     </div>
-                  </div>
-                ) : null}
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition group-hover:opacity-100">
-                  <button
-                    className="pointer-events-auto flex items-center gap-2 rounded-full border border-slate-700/70 bg-black/70 px-3 py-1 text-[11px] font-semibold text-slate-200 backdrop-blur"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      const itemsToAdd = orderedSelectedItems.length ? orderedSelectedItems : [item];
-                      props.onAddToTimeline?.(itemsToAdd);
-                    }}
-                    type="button"
-                  >
-                    <AppIcon name="plus" />
-                    Add to track
-                  </button>
-                </div>
-                <div className="relative aspect-[4/3] w-full overflow-hidden rounded-md border border-slate-700/60 bg-gradient-to-br from-[#1f2937] via-[#111827] to-[#0f172a]">
-                  {item.kind === "video" && item.previewUrl ? (
-                    <video
-                      src={item.previewUrl}
-                      muted
-                      playsInline
-                      preload="auto"
-                      onLoadedMetadata={(event) => {
-                        const video = event.currentTarget;
-                        const half = Number.isFinite(video.duration) ? Math.max(0, video.duration / 2) : 0;
-                        try {
-                          window.setTimeout(() => {
-                            video.currentTime = Math.min(half, Math.max(0, video.duration - 0.1));
-                          }, 50);
-                        } catch {
-                          // Ignore.
-                        }
-                      }}
-                      onSeeked={(event) => {
-                        const video = event.currentTarget;
-                        try {
-                          video.pause();
-                        } catch {
-                          // Ignore.
-                        }
-                      }}
-                      className="h-full w-full object-cover"
-                    />
                   ) : (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-[11px] text-slate-300">
-                      <AppIcon name={item.kind === "video" ? "video" : "volume"} className="text-lg" />
-                      <span className="uppercase tracking-[0.2em] text-slate-400">
-                        {item.kind === "video" ? "Video" : item.kind === "audio" ? "Audio" : "Media"}
-                      </span>
-                      <span className="rounded-full border border-slate-700/60 px-2 py-0.5 text-[9px] text-slate-500">
-                        {(item.name.split(".").pop() || "").toUpperCase()}
-                      </span>
+                    <div className="flex h-10 w-16 items-center justify-center rounded-md bg-[#0f0f10] text-slate-300">
+                      <AppIcon
+                        name={item.kind === "video" ? "video" : "volume"}
+                        className="text-[14px]"
+                      />
                     </div>
                   )}
-                </div>
-                <div className="mt-2 truncate text-[11px] text-slate-200">{item.name}</div>
-              </div>
+                  <div className="min-w-0 flex-1">
+                    <span
+                      className="block text-[12px] font-semibold leading-snug text-slate-100"
+                      style={{
+                        display: "-webkit-box",
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: "vertical",
+                        overflow: "hidden"
+                      }}
+                    >
+                      {item.name}
+                    </span>
+                    {updatedAt ? (
+                      <span className="mt-1 block truncate text-[10px] text-slate-500" style={{ whiteSpace: "nowrap" }}>
+                        {formatTimestamp(updatedAt)}
+                      </span>
+                    ) : null}
+                  </div>
+                </button>
               );
             })}
           </div>
           {!hasMediaItems ? (
             <div className="py-6 text-center text-[11px] text-slate-500">
-              No media yet. Click Import to add files.
+              No media yet. Use Open in the header to add a file.
             </div>
           ) : null}
-          <div className="sticky bottom-0 mt-3 flex items-center bg-[#0f0f10] py-2">
-            <button
-              className={cn(
-                "inline-flex w-full items-center justify-center rounded-md bg-[#151515] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition",
-                orderedSelectedItems.length
-                  ? "hover:border-slate-500"
-                  : "cursor-not-allowed opacity-50"
-              )}
-              disabled={!orderedSelectedItems.length}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                if (!orderedSelectedItems.length) return;
-                props.onAddToTimeline?.(orderedSelectedItems);
-              }}
-              type="button"
-            >
-              Add Selected {orderedSelectedItems.length} item(s)
-            </button>
-          </div>
         </div>
 
         {contextMenu ? (
@@ -790,9 +766,7 @@ export const UploadTab = forwardRef<UploadTabHandle, {
                 e.preventDefault();
                 const target = contextMenu.item;
                 setContextMenu(null);
-                const toRemove = selectedIds.includes(target.id)
-                  ? selectedItems
-                  : [target];
+                const toRemove = [target];
                 toRemove.forEach((item) => {
                   if (item.source === "local") {
                     removeLocalItem(item);
@@ -812,8 +786,7 @@ export const UploadTab = forwardRef<UploadTabHandle, {
         <input
           ref={fileInputRef}
           type="file"
-          multiple
-          accept=".mp3,.wav,.flac,.m4a,.aac,.ogg,.opus,.mp4,.m4v,.mov,.mkv,.avi,.webm,.flv,.mpg,.mpeg"
+          accept={ACCEPTED_MEDIA_TYPES}
           className="hidden"
           onChange={() => {
             const files = Array.from(fileInputRef.current?.files ?? []);

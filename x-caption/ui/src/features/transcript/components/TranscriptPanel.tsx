@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { apiConvertChinese, apiEditSegment } from "../../../shared/api/sttApi";
 import { fetchJobDetails, selectJobById, updateSegmentText } from "../../jobs/jobsSlice";
 import { useAppDispatch, useAppSelector } from "../../../app/hooks";
@@ -15,6 +15,11 @@ function formatTimestamp(start: number, end: number): string {
   const endMin = Math.floor(Math.round(end) / 60);
   const endSec = Math.round(end) % 60;
   return `${startMin}:${startSec.toString().padStart(2, "0")} - ${endMin}:${endSec.toString().padStart(2, "0")}`;
+}
+
+function isBlankAudioText(value: string) {
+  const cleaned = value.trim().toUpperCase();
+  return !cleaned || cleaned === "[BLANK_AUDIO]";
 }
 
 function deriveStatusView(job: Job) {
@@ -74,6 +79,7 @@ function TranscriptSegments(props: {
   timestampOffsetSeconds: number;
   mediaRef: RefObject<HTMLMediaElement>;
   notify: (message: string, type?: ToastType) => void;
+  editEnabled: boolean;
   jobIdForEdits: string | null;
   onSavedEdit: (segmentId: number, newText: string) => void;
   isUserScrolling: boolean;
@@ -172,6 +178,15 @@ function TranscriptSegments(props: {
       window.clearTimeout(timeout);
     };
   }, [apiConvertedById, openCcConverter, props.exportLanguage, props.segments]);
+  const visibleSegments = useMemo(
+    () =>
+      props.segments.filter((segment) => {
+        const rawText = String(segment.originalText ?? segment.text ?? "");
+        return !isBlankAudioText(rawText);
+      }),
+    [props.segments]
+  );
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const segmentRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
@@ -186,7 +201,7 @@ function TranscriptSegments(props: {
       const currentTime = mediaEl.currentTime;
 
       let next: number | null = null;
-      for (const segment of props.segments) {
+      for (const segment of visibleSegments) {
         const segmentStart = Number(segment.start);
         const segmentEnd = Number(segment.end);
         if (!Number.isFinite(segmentStart) || !Number.isFinite(segmentEnd)) {
@@ -204,7 +219,7 @@ function TranscriptSegments(props: {
 
     mediaEl.addEventListener("timeupdate", onTimeUpdate);
     return () => mediaEl.removeEventListener("timeupdate", onTimeUpdate);
-  }, [props.mediaRef, props.segments, props.timestampOffsetSeconds]);
+  }, [props.mediaRef, props.timestampOffsetSeconds, visibleSegments]);
 
   useEffect(() => {
     const mediaEl = props.mediaRef.current;
@@ -256,7 +271,7 @@ function TranscriptSegments(props: {
     }
   }
 
-  const transcriptContainerClass = cn("min-h-0 flex-1 overflow-y-auto px-2 py-1", "stt-scrollbar");
+  const transcriptContainerClass = cn("min-h-0 flex-1 overflow-y-auto pl-0 pr-2 py-1", "stt-scrollbar");
 
   return (
     <div
@@ -265,7 +280,7 @@ function TranscriptSegments(props: {
       ref={containerRef}
       onScroll={props.onUserScroll}
     >
-      {props.segments.map((segment) => {
+      {visibleSegments.map((segment, index) => {
         const baseText = segment.originalText ?? segment.text ?? "";
         const displayText = openCcConverter
           ? convertTextForDisplay({ text: baseText, converter: openCcConverter })
@@ -276,11 +291,13 @@ function TranscriptSegments(props: {
         const timeStr = formatTimestamp(segment.start, segment.end);
 
         const isCurrentPlaying = playingSegmentId === segment.id;
+        const isBeforeActive = visibleSegments[index + 1]?.id === playingSegmentId;
         const segmentClass = cn(
-          "group relative flex cursor-pointer items-start border-b border-slate-800/70 px-2 py-2 transition",
-          "hover:bg-[#151515]",
+          "group relative flex cursor-pointer items-start border-b border-slate-800/20 py-2 pr-2 transition last:border-b-0",
+          "hover:bg-[#1b1b22] hover:rounded-md",
           props.isStreaming && !isCurrentPlaying && "border-l-[3px] border-warning pl-2 -ml-2",
-          isCurrentPlaying && "bg-[#1b1b22] border-l-2 border-primary"
+          isBeforeActive && "border-b-0",
+          isCurrentPlaying && "bg-[#1b1b22] border-l-2 border-white/40 rounded-lg border-b-0 border-t-0"
         );
 
         return (
@@ -294,6 +311,7 @@ function TranscriptSegments(props: {
             onSeek={() => seekToSegment(segment.start)}
             mediaRef={props.mediaRef}
             notify={props.notify}
+            editEnabled={props.editEnabled}
             jobIdForEdits={props.jobIdForEdits}
             onSavedEdit={props.onSavedEdit}
             rowRef={(el) => {
@@ -316,6 +334,7 @@ const TranscriptSegmentRow = (function () {
     onSeek: () => void;
     mediaRef: RefObject<HTMLMediaElement>;
     notify: (message: string, type?: ToastType) => void;
+    editEnabled: boolean;
     jobIdForEdits: string | null;
     onSavedEdit: (segmentId: number, newText: string) => void;
     rowRef?: React.Ref<HTMLDivElement>;
@@ -325,91 +344,110 @@ const TranscriptSegmentRow = (function () {
     const [isEditing, setIsEditing] = useState(false);
     const [draft, setDraft] = useState(props.segment.originalText ?? props.segment.text);
     const [isSaving, setIsSaving] = useState(false);
+    const autosaveRef = useRef<number | null>(null);
+    const lastSavedRef = useRef(props.segment.originalText ?? props.segment.text);
 
     useEffect(() => {
       if (!isEditing) {
         setDraft(props.segment.originalText ?? props.segment.text);
+        lastSavedRef.current = props.segment.originalText ?? props.segment.text;
       }
     }, [props.segment.originalText, props.segment.text, isEditing]);
 
-    async function saveEdit() {
-      const jobId = props.jobIdForEdits;
-      if (!jobId) {
-        props.notify("No active job found", "error");
-        return;
-      }
-      const newText = draft.trim();
-      if (!newText) {
-        props.notify("Segment text cannot be empty", "info");
-        return;
-      }
-
-      setIsSaving(true);
-      try {
-        await apiEditSegment({ jobId, segmentId: props.segment.id, newText });
-        props.onSavedEdit(props.segment.id, newText);
+    useEffect(() => {
+      if (!props.editEnabled && isEditing) {
         setIsEditing(false);
-        props.notify("Segment updated", "success");
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        props.notify(`Failed to save changes: ${message}`, "error");
-      } finally {
-        setIsSaving(false);
       }
-    }
+    }, [props.editEnabled, isEditing]);
 
-    function cancelEdit() {
-      setDraft(props.segment.originalText ?? props.segment.text);
-      setIsEditing(false);
-    }
+    const saveEdit = useCallback(
+      async (nextValue: string) => {
+        const jobId = props.jobIdForEdits;
+        if (!jobId) {
+          props.notify("No active job found", "error");
+          return;
+        }
+        const newText = nextValue.trim();
+        if (!newText || newText === lastSavedRef.current.trim()) {
+          return;
+        }
+        setIsSaving(true);
+        try {
+          await apiEditSegment({ jobId, segmentId: props.segment.id, newText });
+          props.onSavedEdit(props.segment.id, newText);
+          lastSavedRef.current = newText;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          props.notify(`Failed to save changes: ${message}`, "error");
+        } finally {
+          setIsSaving(false);
+        }
+      },
+      [props.jobIdForEdits, props.notify, props.onSavedEdit, props.segment.id]
+    );
 
-    function startEdit(e: React.MouseEvent) {
-      e.stopPropagation();
-      const mediaEl = props.mediaRef.current;
-      if (mediaEl && !mediaEl.paused) {
-        mediaEl.pause();
+    useEffect(() => {
+      if (!props.editEnabled || !isEditing) return;
+      if (autosaveRef.current) {
+        window.clearTimeout(autosaveRef.current);
       }
-      setIsEditing(true);
-    }
+      const nextValue = draft;
+      autosaveRef.current = window.setTimeout(() => {
+        void saveEdit(nextValue);
+      }, 650);
+      return () => {
+        if (autosaveRef.current) {
+          window.clearTimeout(autosaveRef.current);
+        }
+      };
+    }, [draft, isEditing, props.editEnabled, saveEdit]);
 
     return (
       <div
         className={cn(
           props.segmentClass,
-          isEditing && "cursor-default bg-[rgba(var(--primary-rgb),0.06)] border border-primary"
+          isEditing && "cursor-default bg-[#14161b] border border-white/20 rounded-lg"
         )}
         data-start={props.segment.start}
         data-end={props.segment.end}
         data-segment-id={props.segment.id}
         onClick={(e) => {
           if (isEditing) return;
-          if ((e.target as HTMLElement).closest("[data-segment-action]")) return;
+          if (props.editEnabled) {
+            const mediaEl = props.mediaRef.current;
+            if (mediaEl && !mediaEl.paused) {
+              mediaEl.pause();
+            }
+            setIsEditing(true);
+            return;
+          }
           props.onSeek();
         }}
         ref={props.rowRef}
       >
-        <div className="w-24 flex-shrink-0 whitespace-nowrap pt-[1px] text-xs font-medium tabular-nums text-text-secondary">
+        <div
+          className="w-24 flex-shrink-0 whitespace-nowrap pt-[1px] pl-1.5 font-medium tabular-nums text-text-secondary"
+          style={{ fontSize: "11px" }}
+        >
           [{props.timeStr}]
         </div>
 
         <div className="min-w-0 flex-1">
           {isEditing ? (
             <textarea
-              data-segment-action
               className={cn(
-                "w-full min-h-[4.25rem] max-h-[15rem] resize-y rounded-md border border-border bg-white px-2 py-1.5 text-[13px] leading-[1.45] text-text-primary shadow-sm",
-                "focus:border-primary focus:outline-none focus:ring-2 focus:ring-[rgba(var(--primary-rgb),0.18)]"
+                "w-full min-h-[4rem] max-h-[14rem] resize-y rounded-lg border border-slate-600/60 bg-[#0f1115] px-2.5 py-2 text-[13px] leading-[1.5] text-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]",
+                "focus:border-white/60 focus:outline-none focus:ring-2 focus:ring-white/20"
               )}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                  e.preventDefault();
-                  void saveEdit();
-                } else if (e.key === "Escape") {
-                  e.preventDefault();
-                  cancelEdit();
+              onBlur={() => {
+                if (autosaveRef.current) {
+                  window.clearTimeout(autosaveRef.current);
+                  autosaveRef.current = null;
                 }
+                void saveEdit(draft);
+                setIsEditing(false);
               }}
               autoFocus
             />
@@ -424,62 +462,8 @@ const TranscriptSegmentRow = (function () {
             </div>
           )}
         </div>
-
-        {isEditing ? (
-          <div className="ml-2 flex flex-shrink-0 items-start gap-1 pt-[1px]" data-segment-action>
-            <button
-              data-segment-action
-              className={cn(
-                "inline-flex h-6 w-6 items-center justify-center rounded-md border border-border bg-white text-success shadow-sm transition",
-                "hover:border-success hover:bg-[rgba(16,185,129,0.10)] hover:text-success active:scale-95",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(16,185,129,0.25)]",
-                "disabled:opacity-60 disabled:hover:border-border disabled:hover:bg-white disabled:hover:scale-100"
-              )}
-              title="Save (Ctrl+Enter)"
-              onClick={(e) => {
-                e.stopPropagation();
-                void saveEdit();
-              }}
-              disabled={isSaving}
-              type="button"
-            >
-              <AppIcon name={isSaving ? "spinner" : "check"} spin={isSaving} className="text-[13px]" />
-            </button>
-            <button
-              data-segment-action
-              className={cn(
-                "inline-flex h-6 w-6 items-center justify-center rounded-md border border-border bg-white text-error shadow-sm transition",
-                "hover:border-error hover:bg-[rgba(239,68,68,0.10)] hover:text-error active:scale-95",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(239,68,68,0.25)]",
-                "disabled:opacity-60 disabled:hover:border-border disabled:hover:bg-white disabled:hover:scale-100"
-              )}
-              title="Cancel (Esc)"
-              onClick={(e) => {
-                e.stopPropagation();
-                cancelEdit();
-              }}
-              disabled={isSaving}
-              type="button"
-            >
-              <AppIcon name="times" className="text-[13px]" />
-            </button>
-          </div>
-        ) : null}
-
-        {!isEditing ? (
-          <button
-            data-segment-action
-            className={cn(
-              "absolute right-1.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md border border-border bg-white text-text-secondary shadow-sm opacity-0 invisible transition",
-              "group-hover:opacity-100 group-hover:visible hover:border-primary hover:bg-[rgba(var(--primary-rgb),0.06)] hover:text-text-primary active:scale-95",
-              "focus-visible:opacity-100 focus-visible:visible focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--primary-rgb),0.18)]"
-            )}
-            title="Edit segment"
-            onClick={startEdit}
-            type="button"
-          >
-            <AppIcon name="edit" className="text-[12px]" />
-          </button>
+        {isSaving ? (
+          <div className="ml-2 flex items-start pt-[2px] text-[10px] text-slate-500">Saving...</div>
         ) : null}
       </div>
     );
@@ -489,6 +473,7 @@ const TranscriptSegmentRow = (function () {
 export function TranscriptPanel(props: {
   mediaRef: RefObject<HTMLMediaElement>;
   notify: (message: string, type?: ToastType) => void;
+  editEnabled: boolean;
 }) {
   const dispatch = useAppDispatch();
   const selectedJobId = useAppSelector((s) => s.jobs.selectedJobId);
@@ -535,17 +520,17 @@ export function TranscriptPanel(props: {
     if (scrollTimeoutRef.current) {
       window.clearTimeout(scrollTimeoutRef.current);
     }
-    scrollTimeoutRef.current = window.setTimeout(() => setIsUserScrolling(false), 3000);
+    scrollTimeoutRef.current = window.setTimeout(() => setIsUserScrolling(false), 5000);
   }
 
-  const transcriptContainerClass = cn("min-h-0 flex-1 overflow-y-auto px-2 py-1", "stt-scrollbar");
-  const emptyStateClass = "flex h-full items-center justify-center text-sm text-text-secondary";
+  const transcriptContainerClass = cn("min-h-0 flex-1 h-full overflow-y-auto pl-0 pr-2 py-1", "stt-scrollbar");
+  const emptyStateClass = "py-6 text-center text-[11px] text-slate-500";
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col" id="contentLayout">
+    <div className="flex min-h-0 h-full flex-col" id="contentLayout">
       {!job ? (
         <div className={transcriptContainerClass} id="transcriptContent">
-          <div className={emptyStateClass}>No transcript yet</div>
+          <div className={emptyStateClass}>No transcript yet. Use Open in the header to add a file.</div>
         </div>
       ) : job.status === "completed" && jobNeedsServerResult(job) ? (
         <div className={transcriptContainerClass} id="transcriptContent">
@@ -559,6 +544,7 @@ export function TranscriptPanel(props: {
           timestampOffsetSeconds={timestampOffsetSeconds}
           mediaRef={props.mediaRef}
           notify={props.notify}
+          editEnabled={props.editEnabled}
           jobIdForEdits={transcript.jobIdForEdits}
           onSavedEdit={(segmentId, newText) => {
             if (!selectedJobId) return;

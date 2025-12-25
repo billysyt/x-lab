@@ -15,8 +15,9 @@ import shutil
 import mimetypes
 import contextlib
 from urllib.parse import urlparse
+import urllib.error
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from collections import defaultdict
 import threading
 
@@ -36,6 +37,7 @@ from native_config import (
     get_transcriptions_dir,
     get_uploads_dir,
     get_config,
+    get_models_dir,
     VERSION
 )
 setup_environment()
@@ -49,6 +51,8 @@ from native_job_handlers import (
     _noise_suppression_backend,
     _normalized_audio_filename,
 )
+from model_manager import get_whisper_model_info, whisper_model_status, download_whisper_model
+from whisper_cpp_runtime import resolve_whisper_model
 
 # Import model warmup event for readiness check
 from native_config import MODEL_WARMUP_EVENT
@@ -62,7 +66,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Allowed file extensions
-ALLOWED_EXTENSIONS = {'wav', 'mp3', 'mp4', 'avi', 'mov', 'flac', 'm4a', 'ogg'}
+ALLOWED_EXTENSIONS = {
+    'wav',
+    'mp3',
+    'mp4',
+    'avi',
+    'mov',
+    'mkv',
+    'webm',
+    'flv',
+    'mpg',
+    'mpeg',
+    'flac',
+    'm4a',
+    'ogg'
+}
 
 # WebSocket emulation - store pending updates for each job
 job_update_queues = defaultdict(list)
@@ -71,6 +89,11 @@ job_update_lock = threading.Lock()
 # Chinese conversion cache
 opencc_converters: Dict[str, "OpenCC"] = {}
 opencc_lock = threading.Lock()
+
+# Whisper model download tracking
+model_downloads: Dict[str, Dict[str, Any]] = {}
+model_download_lock = threading.Lock()
+active_model_download_id: Optional[str] = None
 
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
@@ -125,6 +148,100 @@ def publish_job_update(job_id: str, status: str, data: Dict[str, Any]):
         logger.info(f"Published update for job {job_id}: {status}")
     except Exception as e:
         logger.error(f"Failed to publish job update: {e}")
+
+
+def _serialize_model_download(state: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "download_id": state.get("id"),
+        "status": state.get("status"),
+        "progress": state.get("progress"),
+        "downloaded_bytes": state.get("downloaded_bytes"),
+        "total_bytes": state.get("total_bytes"),
+        "message": state.get("message"),
+        "error": state.get("error"),
+        "error_type": state.get("error_type"),
+        "expected_path": state.get("expected_path"),
+        "download_url": state.get("download_url"),
+        "started_at": state.get("started_at"),
+        "updated_at": state.get("updated_at"),
+    }
+
+
+def _get_download_state(download_id: str) -> Optional[Dict[str, Any]]:
+    with model_download_lock:
+        return model_downloads.get(download_id)
+
+
+def _start_whisper_model_download() -> Dict[str, Any]:
+    global active_model_download_id
+    with model_download_lock:
+        if active_model_download_id:
+            existing = model_downloads.get(active_model_download_id)
+            if existing and existing.get("status") in {"queued", "downloading"}:
+                return existing
+
+        info = get_whisper_model_info(get_models_dir())
+        download_id = uuid.uuid4().hex
+        state = {
+            "id": download_id,
+            "status": "queued",
+            "progress": None,
+            "downloaded_bytes": 0,
+            "total_bytes": None,
+            "message": "Starting Whisper model download...",
+            "error": None,
+            "error_type": None,
+            "expected_path": str(info.path),
+            "download_url": info.url,
+            "started_at": time.time(),
+            "updated_at": time.time(),
+        }
+        model_downloads[download_id] = state
+        active_model_download_id = download_id
+
+    def _run_download() -> None:
+        nonlocal state
+
+        def progress_cb(downloaded: int, total: Optional[int], message: str) -> None:
+            with model_download_lock:
+                state["downloaded_bytes"] = downloaded
+                state["total_bytes"] = total
+                state["message"] = message
+                if total and total > 0:
+                    state["progress"] = int(min(100, (downloaded / total) * 100))
+                else:
+                    state["progress"] = None
+                state["status"] = "downloading"
+                state["updated_at"] = time.time()
+
+        try:
+            download_whisper_model(get_models_dir(), progress_callback=progress_cb)
+            with model_download_lock:
+                state["status"] = "completed"
+                state["progress"] = 100
+                state["message"] = "Whisper model downloaded."
+                state["updated_at"] = time.time()
+        except urllib.error.URLError as exc:
+            with model_download_lock:
+                state["status"] = "failed"
+                state["error"] = f"Unable to reach the download server: {exc}"
+                state["error_type"] = "network"
+                state["updated_at"] = time.time()
+        except Exception as exc:  # pragma: no cover - unexpected failure
+            with model_download_lock:
+                state["status"] = "failed"
+                state["error"] = str(exc)
+                state["error_type"] = "unknown"
+                state["updated_at"] = time.time()
+        finally:
+            global active_model_download_id
+            with model_download_lock:
+                if active_model_download_id == state.get("id"):
+                    active_model_download_id = None
+
+    thread = threading.Thread(target=_run_download, name=f"WhisperModelDownload-{download_id}", daemon=True)
+    thread.start()
+    return state
 
 
 def convert_chinese_text(text: str, target: str) -> str:
@@ -202,7 +319,8 @@ def create_app():
                 "low": len(low_queue)
             }
 
-            models_ready = MODEL_WARMUP_EVENT.is_set()
+            whisper_status = whisper_model_status(get_models_dir())
+            models_ready = bool(whisper_status.get("ready"))
             print(f"[HEALTH] Returning response: models_ready={models_ready}")
 
             return jsonify({
@@ -211,7 +329,8 @@ def create_app():
                 "redis_connected": True,  # Fake for compatibility
                 "queues": queue_lengths,
                 "ffmpeg_available": test_ffmpeg(),
-                "models_ready": models_ready
+                "models_ready": models_ready,
+                "whisper_model": whisper_status
             }), 200
 
         except Exception as e:
@@ -231,15 +350,53 @@ def create_app():
                 logger.debug("Readiness check: waiting for model warmup to complete...")
                 MODEL_WARMUP_EVENT.wait(timeout=60)  # Wait up to 60 seconds
 
+            whisper_status = whisper_model_status(get_models_dir())
             return jsonify({
                 "status": "ready",
-                "available_models": ["whisper", "sensevoice-small"],
+                "available_models": ["whisper"],
                 "redis_connected": True,  # Fake for compatibility
-                "models_ready": MODEL_WARMUP_EVENT.is_set()
+                "models_ready": bool(whisper_status.get("ready")),
+                "whisper_model": whisper_status,
             }), 200
 
         except Exception as e:
             return jsonify({"status": "not ready", "error": str(e)}), 503
+
+    @app.route('/models/whisper/status', methods=['GET'])
+    def whisper_model_status_endpoint():
+        """Return current Whisper model availability."""
+        try:
+            return jsonify(whisper_model_status(get_models_dir())), 200
+        except Exception as exc:
+            logger.error("Failed to read Whisper model status: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    @app.route('/models/whisper/download', methods=['POST'])
+    def whisper_model_download():
+        """Kick off Whisper model download (runs in background)."""
+        try:
+            status_payload = whisper_model_status(get_models_dir())
+            if status_payload.get("ready"):
+                return jsonify({
+                    **status_payload,
+                    "status": "ready",
+                }), 200
+
+            state = _start_whisper_model_download()
+            response = _serialize_model_download(state)
+            response["status"] = state.get("status")
+            return jsonify(response), 202
+        except Exception as exc:
+            logger.error("Failed to start Whisper model download: %s", exc, exc_info=True)
+            return jsonify({"error": str(exc)}), 500
+
+    @app.route('/models/whisper/download/<download_id>', methods=['GET'])
+    def whisper_model_download_status(download_id: str):
+        """Check Whisper model download progress."""
+        state = _get_download_state(download_id)
+        if not state:
+            return jsonify({"error": "Download not found"}), 404
+        return jsonify(_serialize_model_download(state)), 200
 
     @app.route('/history', methods=['GET'])
     def history():
@@ -984,6 +1141,16 @@ def create_app():
             vad_filter = request.form.get('vad_filter', 'True').lower() == 'true'
             noise_suppression = request.form.get("noise_suppression")
             requested_noise_backend = _noise_suppression_backend(noise_suppression)
+
+            if not resolve_whisper_model(model):
+                info = get_whisper_model_info(get_models_dir())
+                return jsonify({
+                    "error": (
+                        "Whisper model not found. "
+                        f"Download it from {info.url} and place it at {info.path}, "
+                        "or use the in-app downloader."
+                    )
+                }), 400
 
             preprocess_id = request.form.get('preprocess_id')
 

@@ -2,8 +2,7 @@
 """
 PyInstaller specification for building the Windows desktop release.
 
-This spec gathers the web UI, bundled ONNX models, and helper binaries so the
-resulting executable can run completely offline.
+This spec gathers the web UI, helper binaries, and the Whisper engine assets.
 
 Usage (from project root on Windows):
     pyinstaller xsub_native.spec --clean --noconfirm
@@ -13,7 +12,6 @@ import os
 from pathlib import Path
 from PyInstaller.building.datastruct import TOC
 import sys
-from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 block_cipher = None
 
@@ -30,15 +28,10 @@ def _add_if_exists(entries, source, target=None):
 datas = []
 _add_if_exists(datas, "templates", "templates")
 _add_if_exists(datas, "static", "static")
-_add_if_exists(datas, "data/models", "data/models")
 _add_if_exists(datas, "data/sample", "data/sample")
 _add_if_exists(datas, "sample", "sample")
 _add_if_exists(datas, "ffmpeg", "ffmpeg")
-
-# Bundle ONNX Runtime package so the pybind DLLs are always available.
-datas += collect_data_files("onnxruntime", include_py_files=True)
-# Bundle ten-vad package data so the native library is available offline.
-datas += collect_data_files("ten_vad", include_py_files=True)
+_add_if_exists(datas, "whisper", "whisper")
 
 icon_path = None
 if sys.platform == "win32":
@@ -62,13 +55,6 @@ if sys.platform == "win32":
     if ffprobe_exe.exists():
         binaries.append((str(ffprobe_exe), "ffmpeg"))
 
-# Bundle ONNX Runtime DLLs.
-binaries += collect_dynamic_libs("onnxruntime")
-# Bundle ten-vad native libraries (loaded via ctypes, so not auto-detected).
-binaries += collect_dynamic_libs("ten_vad")
-# Bundle kaldi-native-fbank native libraries.
-binaries += collect_dynamic_libs("kaldi_native_fbank")
-
 if sys.platform == "win32":
     system_dir = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
     for dll_name in ("msvcp140.dll", "msvcp140_1.dll", "vcruntime140.dll", "vcruntime140_1.dll"):
@@ -79,15 +65,9 @@ if sys.platform == "win32":
 # Hidden imports that PyInstaller cannot detect automatically.
 hiddenimports = [
     "engineio.async_drivers.threading",
-    "librosa.display",
     "numpy",
-    "onnxruntime",
     "scipy",
     "soundfile",
-    "ten_vad",
-    "kaldi_native_fbank",
-    "sensevoice.onnx.sense_voice_ort_session",
-    "sensevoice.utils.fsmn_vad",
 ]
 
 a = Analysis(
@@ -98,7 +78,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[str(PROJECT_ROOT / "hook_sensevoice.py")],
+    runtime_hooks=[],
     excludes=[
         "tests",
         "pytest",

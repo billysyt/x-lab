@@ -3,7 +3,7 @@ import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 export type SettingsState = {
   language: "auto" | "yue" | "zh" | "en";
   noiseSuppression: boolean;
-  model: "whisper" | "sensevoice-small";
+  model: "whisper";
   chineseStyle: "spoken" | "written";
 };
 

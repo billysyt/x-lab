@@ -9,7 +9,6 @@ import contextlib
 import json
 import logging
 import os
-import sys
 import shutil
 import subprocess
 import tempfile
@@ -21,7 +20,6 @@ from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
 import soundfile as sf
 
-from sensevoice_onnx_runtime import SenseVoiceOnnxTranscriber
 from whisper_cpp_runtime import transcribe_whisper_cpp, resolve_whisper_model
 
 from native_config import get_models_dir, get_transcriptions_dir, get_uploads_dir, setup_environment
@@ -31,9 +29,6 @@ import native_history
 setup_environment()
 
 logger = logging.getLogger(__name__)
-
-_sensevoice_instances: Dict[str, SenseVoiceOnnxTranscriber] = {}
-_sensevoice_lock = threading.Lock()
 
 _VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mov", ".mkv", ".avi", ".flv", ".mpg", ".mpeg", ".webm"}
 _ALWAYS_TRANSCODE_AUDIO = {".m4a", ".aac", ".opus", ".weba"}
@@ -294,52 +289,6 @@ def _prepare_audio_for_processing(
     return normalized_path, True
 
 
-def _canonical_device(device: Optional[str]) -> str:
-    if not device:
-        return "cpu"
-
-    normalized = device.strip().lower()
-    if normalized in {"auto", "default", "none"}:
-        return "cpu"
-
-    return normalized
-
-
-def _is_whisper_model(model_path: str) -> bool:
-    if not model_path:
-        return False
-    lowered = model_path.strip().lower()
-    if lowered.startswith("sensevoice"):
-        return False
-    if lowered in {"whisper", "whisper.cpp", "whispercpp"}:
-        return True
-    if lowered.endswith(".bin"):
-        return True
-    return "whisper" in lowered
-
-
-def _get_sensevoice_model_dir() -> Path:
-    env_path = os.environ.get("SENSEVOICE_ONNX_DIR")
-    if env_path:
-        return Path(env_path)
-    return Path(get_models_dir()) / "sensevoice-onnx"
-
-
-def get_sensevoice_transcriber(device: Optional[str] = None) -> SenseVoiceOnnxTranscriber:
-    device_key = _canonical_device(device)
-    with _sensevoice_lock:
-        if device_key not in _sensevoice_instances:
-            model_dir = _get_sensevoice_model_dir()
-            use_int8 = device_key in {"cpu", "auto", "none"}
-            transcriber = SenseVoiceOnnxTranscriber(
-                model_dir=model_dir,
-                device=None if device_key in {"auto", "cpu", "none"} else device_key,
-                use_int8=use_int8,
-            )
-            _sensevoice_instances[device_key] = transcriber
-        return _sensevoice_instances[device_key]
-
-
 def update_job_progress(job_id: str, progress: int, message: str, extra_data: Optional[Dict[str, Any]] = None):
     """Update job progress for real-time monitoring."""
     try:
@@ -362,17 +311,6 @@ def update_job_progress(job_id: str, progress: int, message: str, extra_data: Op
         logger.error("Failed to update job progress: %s", e)
 
 
-def detect_best_device() -> str:
-    return "cpu"
-
-
-def _resolve_device(device: Optional[str]) -> str:
-    normalized = _canonical_device(device)
-    if normalized == "auto":
-        return detect_best_device()
-    return normalized
-
-
 def _format_timestamp(seconds: float) -> str:
     total = max(0, int(round(seconds)))
     minutes, secs = divmod(total, 60)
@@ -382,7 +320,7 @@ def _format_timestamp(seconds: float) -> str:
 def process_transcription_job(
     job_id: str,
     file_path: str,
-    model_path: str = "sensevoice-small",
+    model_path: str = "whisper",
     language: str = "auto",
     device: Optional[str] = None,
     compute_type: Optional[str] = None,
@@ -406,12 +344,7 @@ def process_transcription_job(
             output_dir_path = Path(output_dir)
         output_dir_path.mkdir(parents=True, exist_ok=True)
 
-        chosen_device = _resolve_device(device)
-        backend_is_whisper = _is_whisper_model(model_path)
-        if backend_is_whisper:
-            update_job_progress(job_id, 5, "Preparing Whisper.cpp pipeline...", {"stage": "transcription"})
-        else:
-            update_job_progress(job_id, 5, "Preparing SenseVoice ONNX pipeline...", {"stage": "transcription"})
+        update_job_progress(job_id, 5, "Preparing Whisper.cpp pipeline...", {"stage": "transcription"})
 
         if prepared_audio_path:
             prepared_audio_path_obj = Path(prepared_audio_path)
@@ -434,58 +367,24 @@ def process_transcription_job(
             if candidate.exists():
                 inference_path_obj = candidate
 
-        if backend_is_whisper:
-            model_label = "Whisper.cpp"
-            model_candidate = resolve_whisper_model(model_path)
-            if model_candidate:
-                model_label = f"Whisper.cpp ({model_candidate.name})"
+        model_label = "Whisper.cpp"
+        model_candidate = resolve_whisper_model(model_path)
+        if model_candidate:
+            model_label = f"Whisper.cpp ({model_candidate.name})"
 
-            def whisper_progress(percent: int, message: str) -> None:
-                capped = max(0, min(int(percent), 95))
-                update_job_progress(job_id, capped, message, {"stage": "transcription"})
+        def whisper_progress(percent: int, message: str) -> None:
+            capped = max(0, min(int(percent), 95))
+            update_job_progress(job_id, capped, message, {"stage": "transcription"})
 
-            update_job_progress(job_id, 10, "Running Whisper transcription...", {"stage": "transcription"})
-            transcription = transcribe_whisper_cpp(
-                Path(inference_path_obj),
-                model_path=model_path,
-                language=language,
-                output_dir=output_dir_path,
-                progress_callback=whisper_progress,
-            )
-            device_label = "cpu"
-        else:
-            try:
-                transcriber = get_sensevoice_transcriber(chosen_device)
-            except Exception as exc:
-                logger.error("Failed to initialize SenseVoice ONNX transcriber: %s", exc)
-                raise RuntimeError(
-                    "SenseVoice ONNX pipeline initialization failed. "
-                    "Verify that the ONNX models are available in data/models/sensevoice-onnx."
-                ) from exc
-
-            progress_state = {"value": 10}
-
-            def transcriber_progress(percent: int, message: str) -> None:
-                capped = max(0, min(int(percent), 95))
-                if capped <= progress_state["value"]:
-                    return
-                progress_state["value"] = capped
-                stage = "transcription"
-                if "vad" in message.lower() or "segmentation" in message.lower():
-                    stage = "segmentation"
-                update_job_progress(job_id, capped, message, {"stage": stage})
-
-            update_job_progress(job_id, 10, "Running SenseVoice transcription...", {"stage": "transcription"})
-
-            transcription = transcriber.transcribe(
-                Path(inference_path_obj),
-                language=language,
-                use_itn=True,
-                enable_vad=vad_filter,
-                progress_callback=transcriber_progress,
-            )
-            model_label = "SenseVoice-ONNX"
-            device_label = transcriber.device_label
+        update_job_progress(job_id, 10, "Running Whisper transcription...", {"stage": "transcription"})
+        transcription = transcribe_whisper_cpp(
+            Path(inference_path_obj),
+            model_path=model_path,
+            language=language,
+            output_dir=output_dir_path,
+            progress_callback=whisper_progress,
+        )
+        device_label = "cpu"
 
         raw_segments = transcription.get("segments") or []
         media_duration: Optional[float] = None
@@ -619,7 +518,7 @@ def process_transcription_job(
 def process_full_pipeline_job(
     job_id: str,
     file_path: str,
-    model_path: str = "sensevoice-small",
+    model_path: str = "whisper",
     language: str = "auto",
     device: Optional[str] = None,
     compute_type: Optional[str] = None,

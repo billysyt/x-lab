@@ -3,21 +3,94 @@ import { setActiveTab, setVersion } from "../features/ui/uiSlice";
 import { setChineseStyle, setLanguage } from "../features/settings/settingsSlice";
 import { setExportLanguage } from "../features/transcript/transcriptSlice";
 import { useAppDispatch, useAppSelector } from "./hooks";
-import { bootstrapJobs, pollJobUpdates, selectJob } from "../features/jobs/jobsSlice";
+import { addJob, bootstrapJobs, pollJobUpdates, selectJob, setJobSegments } from "../features/jobs/jobsSlice";
 import { UploadTab, type UploadTabHandle, type MediaItem } from "../features/upload/components/UploadTab";
 import { TranscriptPanel } from "../features/transcript/components/TranscriptPanel";
-import { ToastHost, type Toast, type ToastType } from "../shared/components/ToastHost";
+import type { ToastType } from "../shared/components/ToastHost";
 import { AppIcon } from "../shared/components/AppIcon";
 import { Select } from "../shared/components/Select";
 import { cn } from "../shared/lib/cn";
-import { apiConvertChinese } from "../shared/api/sttApi";
-import type { ExportLanguage, Job, TranscriptSegment } from "../shared/types";
+import { fileFromBase64 } from "../shared/lib/file";
+import { apiConvertChinese, apiGetWhisperModelDownload, apiGetWhisperModelStatus, apiStartWhisperModelDownload } from "../shared/api/sttApi";
+import type { ExportLanguage, Job, TranscriptSegment, WhisperModelDownload, WhisperModelStatus } from "../shared/types";
 
 function formatTime(seconds: number) {
   const total = Math.max(0, Math.floor(seconds));
   const mins = Math.floor(total / 60);
   const secs = total % 60;
   return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
+function isBlankAudioText(value: string) {
+  const cleaned = value.trim().toUpperCase();
+  return !cleaned || cleaned === "[BLANK_AUDIO]";
+}
+
+function formatBytes(value?: number | null) {
+  if (!value || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let idx = 0;
+  let size = value;
+  while (size >= 1024 && idx < units.length - 1) {
+    size /= 1024;
+    idx += 1;
+  }
+  return `${size.toFixed(size >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
+function parseSrtTimestamp(raw: string) {
+  const match = raw.trim().match(/(\d{2}):(\d{2}):(\d{2})[,.](\d{1,3})/);
+  if (!match) return 0;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3]);
+  const millis = Number(match[4].padEnd(3, "0"));
+  return hours * 3600 + minutes * 60 + seconds + millis / 1000;
+}
+
+function formatSrtTimestamp(seconds: number) {
+  const totalMs = Math.max(0, Math.round(seconds * 1000));
+  const hours = Math.floor(totalMs / 3600000);
+  const minutes = Math.floor((totalMs % 3600000) / 60000);
+  const secs = Math.floor((totalMs % 60000) / 1000);
+  const ms = totalMs % 1000;
+  return `${hours.toString().padStart(2, "0")}:${minutes
+    .toString()
+    .padStart(2, "0")}:${secs.toString().padStart(2, "0")},${ms
+    .toString()
+    .padStart(3, "0")}`;
+}
+
+function parseSrt(text: string): TranscriptSegment[] {
+  const blocks = text.replace(/\r\n/g, "\n").split(/\n{2,}/);
+  const segments: TranscriptSegment[] = [];
+  let id = 1;
+  for (const block of blocks) {
+    const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+    if (!lines.length) continue;
+    let timeLineIndex = lines.findIndex((line) => line.includes("-->"));
+    if (timeLineIndex < 0) continue;
+    if (timeLineIndex === 0 && /^\d+$/.test(lines[0])) {
+      timeLineIndex = 1;
+    }
+    const timeLine = lines[timeLineIndex] ?? "";
+    const [startRaw, endRaw] = timeLine.split("-->").map((part) => part.trim());
+    if (!startRaw || !endRaw) continue;
+    const start = parseSrtTimestamp(startRaw);
+    const end = parseSrtTimestamp(endRaw);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+    const textLines = lines.slice(timeLineIndex + 1);
+    const captionText = textLines.join("\n").trim();
+    segments.push({
+      id,
+      start,
+      end,
+      text: captionText,
+      originalText: captionText
+    });
+    id += 1;
+  }
+  return segments;
 }
 
 function safeOpenCcConverter(target: ExportLanguage): ((input: string) => string) | null {
@@ -33,6 +106,18 @@ function safeOpenCcConverter(target: ExportLanguage): ((input: string) => string
     return null;
   }
 }
+
+type ModelDownloadState = {
+  status: "idle" | "checking" | "downloading" | "error";
+  progress: number | null;
+  message: string;
+  detail?: string | null;
+  expectedPath?: string | null;
+  downloadUrl?: string | null;
+  downloadId?: string | null;
+  downloadedBytes?: number | null;
+  totalBytes?: number | null;
+};
 
 function deriveJobSegments(job: Job | null): TranscriptSegment[] {
   if (!job) return [];
@@ -71,12 +156,22 @@ export function App() {
   const dispatch = useAppDispatch();
 
   const audioRef = useRef<HTMLAudioElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRefA = useRef<HTMLVideoElement>(null);
+  const videoRefB = useRef<HTMLVideoElement>(null);
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const uploadRef = useRef<UploadTabHandle>(null);
+  const srtInputRef = useRef<HTMLInputElement | null>(null);
 
   const jobsById = useAppSelector((s) => s.jobs.jobsById);
   const jobOrder = useAppSelector((s) => s.jobs.order);
+  const isTranscribing = useMemo(
+    () =>
+      jobOrder.some((id) => {
+        const status = jobsById[id]?.status;
+        return status === "queued" || status === "processing";
+      }),
+    [jobOrder, jobsById]
+  );
   const selectedJobId = useAppSelector((s) => s.jobs.selectedJobId);
   const selectedJob = useMemo(() => (selectedJobId ? jobsById[selectedJobId] : null), [jobsById, selectedJobId]);
 
@@ -242,16 +337,20 @@ export function App() {
 
 
 
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [alertModal, setAlertModal] = useState<{
+    title: string;
+    message: string;
+    tone: ToastType;
+  } | null>(null);
   const notify = useCallback((message: string, type: ToastType = "info") => {
-    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    setToasts((prev) => [...prev, { id, message, type, createdAt: Date.now() }]);
+    const title =
+      type === "error" ? "Something went wrong" : type === "success" ? "Done" : "Notice";
+    setAlertModal({ title, message, tone: type });
   }, []);
-  const dismissToast = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((toast) => toast.id !== id));
-  }, []);
+  const [showExportModal, setShowExportModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isAltPressed, setIsAltPressed] = useState(false);
+  const [isPinned, setIsPinned] = useState(false);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const headerMenuRef = useRef<HTMLDivElement | null>(null);
   const headerMenuButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -261,9 +360,31 @@ export function App() {
     duration: 0,
     isPlaying: false
   });
+  const [playbackRate, setPlaybackRate] = useState(1);
   const playbackRef = useRef(playback);
   const [previewPoster, setPreviewPoster] = useState<string | null>(null);
+  const [activeVideoSlot, setActiveVideoSlot] = useState<0 | 1>(0);
   const previewPosterRef = useRef<string | null>(null);
+  const [subtitleScale, setSubtitleScale] = useState(1);
+  const [subtitleEditor, setSubtitleEditor] = useState<{ segmentId: number; text: string } | null>(null);
+  const [subtitleDraft, setSubtitleDraft] = useState("");
+  const [subtitlePosition, setSubtitlePosition] = useState({ x: 0.5, y: 0.85 });
+  const [subtitleMaxWidth, setSubtitleMaxWidth] = useState(520);
+  const [subtitleBoxSize, setSubtitleBoxSize] = useState({ width: 0, height: 0 });
+  const subtitleBoxRef = useRef<HTMLDivElement | null>(null);
+  const subtitleMeasureRef = useRef<HTMLSpanElement | null>(null);
+  const subtitleDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+    moved: boolean;
+    container: DOMRect;
+    box: DOMRect;
+  } | null>(null);
+
+  const [isTranscriptEdit, setIsTranscriptEdit] = useState(false);
 
   useEffect(() => {
     playbackRef.current = playback;
@@ -297,6 +418,19 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const win = typeof window !== "undefined" ? (window as any) : null;
+    const api = win?.pywebview?.api;
+    const getter = api?.window_get_on_top || api?.windowGetOnTop || api?.window_getOnTop;
+    if (typeof getter !== "function") return;
+    Promise.resolve(getter())
+      .then((result: any) => {
+        if (!result || result.success === false) return;
+        setIsPinned(Boolean(result.onTop));
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
     if (!isHeaderMenuOpen) return;
     const close = (event: MouseEvent) => {
       const target = event.target as Node | null;
@@ -310,9 +444,17 @@ export function App() {
   }, [isHeaderMenuOpen]);
 
   const [showImportModal, setShowImportModal] = useState(false);
+  const [modelDownload, setModelDownload] = useState<ModelDownloadState>({
+    status: "idle",
+    progress: null,
+    message: "",
+    downloadedBytes: null,
+    totalBytes: null
+  });
   const [localMedia, setLocalMedia] = useState<MediaItem[]>([]);
   const [timelineZoom, setTimelineZoom] = useState(DEFAULT_TIMELINE_ZOOM);
   const [isCompact, setIsCompact] = useState(false);
+  const [isHeaderCompact, setIsHeaderCompact] = useState(false);
   const [isLeftDrawerOpen, setIsLeftDrawerOpen] = useState(false);
   const [compactTab, setCompactTab] = useState<"player" | "captions">("player");
   const [timelineClips, setTimelineClips] = useState<
@@ -326,8 +468,6 @@ export function App() {
       trimEndSec: number;
     }>
   >([]);
-  const [isTimelineDragOver, setIsTimelineDragOver] = useState(false);
-  const dragPayloadRef = useRef<MediaItem[] | null>(null);
   const [activeMedia, setActiveMedia] = useState<MediaItem | null>(null);
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
   const [activeClipId, setActiveClipId] = useState<string | null>(null);
@@ -335,44 +475,20 @@ export function App() {
   const pendingSeekRef = useRef<number | null>(null);
   const scrubStateRef = useRef<{ pointerId: number } | null>(null);
   const playerScrubRef = useRef<{ wasPlaying: boolean } | null>(null);
+  const mediaRafActiveRef = useRef(false);
+  const pendingSwapRef = useRef<string | null>(null);
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);
   const timelineTrackRef = useRef<HTMLDivElement | null>(null);
   const isGapPlaybackRef = useRef(false);
-  const timelineDragRef = useRef<{
-    clipId: string;
-    type: "move" | "resize-left" | "resize-right";
-    startX: number;
-    startSec: number;
-    durationSec: number;
-    trimStartSec: number;
-    trimEndSec: number;
-    baseDurationSec: number;
-    pxPerSec: number;
-    prevEndSec: number;
-    nextStartSec: number;
-  } | null>(null);
-  const lastAddedClipRef = useRef<string | null>(null);
-  const [timelineMenu, setTimelineMenu] = useState<{
-    x: number;
-    y: number;
-    clipId: string;
-  } | null>(null);
   const [timelineScrollLeft, setTimelineScrollLeft] = useState(0);
   const [timelineViewportWidth, setTimelineViewportWidth] = useState(0);
   const dragRegionClass = useCustomDrag ? "stt-drag-region" : "pywebview-drag-region";
 
   useEffect(() => {
-    if (!isCompact) {
+    if (!isHeaderCompact) {
       setIsHeaderMenuOpen(false);
     }
-  }, [isCompact]);
-
-  useEffect(() => {
-    if (!timelineMenu) return;
-    const close = () => setTimelineMenu(null);
-    window.addEventListener("click", close);
-    return () => window.removeEventListener("click", close);
-  }, [timelineMenu]);
+  }, [isHeaderCompact]);
 
   useEffect(() => {
     if (!showImportModal) return;
@@ -401,7 +517,9 @@ export function App() {
   useEffect(() => {
     const update = () => {
       const compact = window.innerWidth < 1100;
+      const headerCompact = window.innerWidth < 500;
       setIsCompact(compact);
+      setIsHeaderCompact(headerCompact);
       if (!compact) {
         setIsLeftDrawerOpen(false);
         setCompactTab("player");
@@ -440,42 +558,120 @@ export function App() {
     return () => window.clearInterval(interval);
   }, [dispatch, jobOrder, jobsById]);
 
-  const getActiveMediaEl = useCallback(() => {
-    return activeMedia?.kind === "video" && activeMedia.source === "local" ? videoRef.current : audioRef.current;
-  }, [activeMedia]);
-  const transcriptMediaRef =
-    activeMedia?.kind === "video" && activeMedia.source === "local"
-      ? (videoRef as RefObject<HTMLMediaElement>)
-      : (audioRef as RefObject<HTMLMediaElement>);
-
   const segments =
     selectedJob?.result?.segments ||
     selectedJob?.partialResult?.segments ||
     selectedJob?.streamingSegments ||
     [];
-  const currentSubtitle = useMemo(() => {
-    if (!segments.length) return "";
+  const displaySegments = useMemo(
+    () =>
+      segments.filter((segment: any) => {
+        const rawText = String(segment?.originalText ?? segment?.text ?? "");
+        return !isBlankAudioText(rawText);
+      }),
+    [segments]
+  );
+  const exportSegments = useMemo(
+    () =>
+      deriveJobSegments(selectedJob).filter((segment) => {
+        const rawText = String(segment?.originalText ?? segment?.text ?? "");
+        return !isBlankAudioText(rawText);
+      }),
+    [selectedJob]
+  );
+  const openCcConverter = useMemo(() => safeOpenCcConverter(exportLanguage), [exportLanguage]);
+  const currentSubtitleMatch = useMemo(() => {
+    if (!displaySegments.length) return null;
     const time = playback.currentTime;
-    const match = segments.find((segment: any) => {
+    const match = displaySegments.find((segment: any) => {
       const start = Number(segment.start ?? 0);
       const end = Number(segment.end ?? 0);
       if (!Number.isFinite(start) || !Number.isFinite(end)) return false;
       return time >= start && time <= end;
     });
-    if (!match) return "";
-    const text = match.originalText ?? match.text ?? "";
-    const start = Number(match.start ?? 0);
-    const end = Number(match.end ?? 0);
-    const range = `[${formatTime(start)}-${formatTime(end)}]`;
-    return `${range} ${text}`.trim();
-  }, [playback.currentTime, segments]);
+    if (!match) return null;
+    const rawText = match.originalText ?? match.text ?? "";
+    let text = rawText;
+    if (openCcConverter) {
+      try {
+        text = openCcConverter(rawText);
+      } catch {
+        text = rawText;
+      }
+    }
+    return { segment: match, text: text.trim() };
+  }, [displaySegments, openCcConverter, playback.currentTime]);
+  const currentSubtitle = currentSubtitleMatch?.text ?? "";
 
-  const exportSegments = useMemo(() => deriveJobSegments(selectedJob), [selectedJob]);
-  const openCcConverter = useMemo(() => safeOpenCcConverter(exportLanguage), [exportLanguage]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const updateMaxWidth = () => {
+      const rect = previewContainerRef.current?.getBoundingClientRect();
+      if (rect) {
+        setSubtitleMaxWidth(Math.max(200, rect.width * 0.9));
+      }
+    };
+    updateMaxWidth();
+    window.addEventListener("resize", updateMaxWidth);
+    return () => window.removeEventListener("resize", updateMaxWidth);
+  }, []);
+
+  useEffect(() => {
+    const measureEl = subtitleMeasureRef.current;
+    if (!measureEl) return;
+    const text = (subtitleEditor ? subtitleDraft : currentSubtitle) || " ";
+    measureEl.textContent = text;
+    const rect = measureEl.getBoundingClientRect();
+    const paddingX = 12;
+    const paddingY = 4;
+    const width = Math.min(subtitleMaxWidth, rect.width + paddingX * 2);
+    const height = rect.height + paddingY * 2;
+    setSubtitleBoxSize({ width, height });
+  }, [currentSubtitle, subtitleDraft, subtitleEditor, subtitleMaxWidth, subtitleScale]);
+
+  useEffect(() => {
+    const container = previewContainerRef.current?.getBoundingClientRect();
+    const box = subtitleBoxRef.current?.getBoundingClientRect();
+    if (!container || !box) return;
+    const halfW = box.width / 2;
+    const halfH = box.height / 2;
+    const minX = halfW / container.width;
+    const minY = halfH / container.height;
+    const nextX = clamp(subtitlePosition.x, minX, 1 - minX);
+    const nextY = clamp(subtitlePosition.y, minY, 1 - minY);
+    if (nextX !== subtitlePosition.x || nextY !== subtitlePosition.y) {
+      setSubtitlePosition({ x: nextX, y: nextY });
+    }
+  }, [subtitleBoxSize.width, subtitleBoxSize.height, subtitlePosition.x, subtitlePosition.y]);
+
   const waitlistUrl =
     typeof window !== "undefined" && typeof (window as any).__WAITLIST_URL__ === "string"
       ? String((window as any).__WAITLIST_URL__)
       : "";
+  const saveTextFile = useCallback(async (filename: string, content: string) => {
+    const win = typeof window !== "undefined" ? (window as any) : null;
+    const api = win?.pywebview?.api;
+
+    if (api && (typeof api.saveTranscript === "function" || typeof api.save_transcript === "function")) {
+      const saveFn = (api.saveTranscript || api.save_transcript).bind(api);
+      try {
+        return await saveFn(filename, content);
+      } catch {
+        // fall through to browser download
+      }
+    }
+
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+    return { success: true };
+  }, []);
   const handleExportTranscript = useCallback(async () => {
     if (!exportSegments.length) {
       notify("No transcript to export.", "info");
@@ -516,40 +712,89 @@ export function App() {
       }
 
       const filename = `${baseFilename(selectedJob?.filename)}_transcript${converted.suffix}.txt`;
-      const win = typeof window !== "undefined" ? (window as any) : null;
-      const api = win?.pywebview?.api;
-
-      if (api && (typeof api.saveTranscript === "function" || typeof api.save_transcript === "function")) {
-        const saveFn = (api.saveTranscript || api.save_transcript).bind(api);
-        try {
-          const response = await saveFn(filename, converted.text);
-          if (response && response.success) {
-            notify("Transcript exported successfully.", "success");
-            return;
-          }
-          if (response && response.cancelled) {
-            notify("Export cancelled.", "info");
-            return;
-          }
-        } catch {
-          // fall through to browser download
-        }
+      const response = await saveTextFile(filename, converted.text);
+      if (response && response.success) {
+        notify("Transcript exported successfully.", "success");
+        return;
       }
-
-      const blob = new Blob([converted.text], { type: "text/plain;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = filename;
-      document.body.appendChild(anchor);
-      anchor.click();
-      document.body.removeChild(anchor);
-      URL.revokeObjectURL(url);
+      if (response && response.cancelled) {
+        notify("Export cancelled.", "info");
+        return;
+      }
       notify("Transcript exported successfully.", "success");
     } finally {
       setIsExporting(false);
     }
-  }, [exportLanguage, exportSegments, notify, openCcConverter, selectedJob?.filename]);
+  }, [exportLanguage, exportSegments, notify, openCcConverter, saveTextFile, selectedJob?.filename]);
+
+  const handleExportSrt = useCallback(async () => {
+    if (!exportSegments.length) {
+      notify("No captions to export.", "info");
+      return;
+    }
+    const content = exportSegments
+      .map((segment, index) => {
+        const rawText = String(segment.originalText ?? segment.text ?? "").trim();
+        if (!rawText) return null;
+        let text = rawText;
+        if (openCcConverter) {
+          try {
+            text = openCcConverter(rawText);
+          } catch {
+            text = rawText;
+          }
+        }
+        const start = formatSrtTimestamp(Number(segment.start ?? 0));
+        const end = formatSrtTimestamp(Number(segment.end ?? 0));
+        return `${index + 1}\n${start} --> ${end}\n${text}\n`;
+      })
+      .filter(Boolean)
+      .join("\n");
+
+    if (!content.trim()) {
+      notify("No captions to export.", "info");
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const filename = `${baseFilename(selectedJob?.filename)}_captions.srt`;
+      const response = await saveTextFile(filename, content);
+      if (response && response.success) {
+        notify("Captions exported successfully.", "success");
+        return;
+      }
+      if (response && response.cancelled) {
+        notify("Export cancelled.", "info");
+        return;
+      }
+      notify("Captions exported successfully.", "success");
+    } finally {
+      setIsExporting(false);
+    }
+  }, [exportSegments, notify, openCcConverter, saveTextFile, selectedJob?.filename]);
+
+  const handleExportVideo = useCallback(async () => {
+    if (!activeMedia || activeMedia.kind !== "video" || !activeMedia.file) {
+      notify("No local video available to export.", "info");
+      return;
+    }
+    setIsExporting(true);
+    try {
+      const file = activeMedia.file;
+      const url = URL.createObjectURL(file);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = file.name || `${baseFilename(selectedJob?.filename)}.mp4`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+      notify("Video export started.", "success");
+    } finally {
+      setIsExporting(false);
+    }
+  }, [activeMedia, notify, selectedJob?.filename]);
 
   const handleJoinWaitlist = useCallback(() => {
     const url = waitlistUrl.trim();
@@ -574,36 +819,52 @@ export function App() {
     uploadRef.current?.openFilePicker?.();
   }, [dispatch, isCompact]);
 
-  const handleGenerateCaptions = useCallback(() => {
-    if (!timelineClips.length) {
-      setShowImportModal(true);
-      return;
-    }
-    uploadRef.current?.submitTranscription?.();
-  }, [timelineClips.length]);
-
-  const handleWindowAction = useCallback((action: "close" | "minimize" | "zoom" | "fullscreen") => {
+  const setWindowOnTop = useCallback((next: boolean) => {
     const win = typeof window !== "undefined" ? (window as any) : null;
     const api = win?.pywebview?.api;
-    if (!api) return;
-    const map: Record<typeof action, string[]> = {
-      close: ["window_close", "windowClose", "closeWindow"],
-      minimize: ["window_minimize", "windowMinimize", "minimizeWindow"],
-      zoom: ["window_toggle_maximize", "windowToggleMaximize", "window_zoom", "windowZoom"],
-      fullscreen: ["window_toggle_fullscreen", "windowToggleFullscreen", "toggleFullscreen"]
-    };
-    for (const method of map[action]) {
-      if (typeof api[method] === "function") {
-        void api[method]();
-        break;
-      }
+    const setter = api?.window_set_on_top || api?.windowSetOnTop || api?.window_setOnTop;
+    if (typeof setter === "function") {
+      return Promise.resolve(setter(next))
+        .then((result: any) => {
+          if (result && result.success === false) return;
+          setIsPinned(next);
+        })
+        .catch(() => setIsPinned(next));
     }
+    setIsPinned(next);
+    return Promise.resolve();
   }, []);
+
+  const handleTogglePinned = useCallback(() => {
+    const next = !isPinned;
+    void setWindowOnTop(next);
+  }, [isPinned, setWindowOnTop]);
+
+  const handleRequestFilePicker = useCallback(
+    (open: () => void) => {
+      if (!isPinned) {
+        open();
+        return;
+      }
+      void setWindowOnTop(false);
+      const restorePin = () => {
+        window.removeEventListener("focus", restorePin);
+        void setWindowOnTop(true);
+      };
+      window.addEventListener("focus", restorePin, { once: true });
+      open();
+    },
+    [isPinned, setWindowOnTop]
+  );
+
+
+
 
   const orderedClips = useMemo(
     () => [...timelineClips].sort((a, b) => a.startSec - b.startSec),
     [timelineClips]
   );
+
   const clipTimeline = useMemo(
     () =>
       orderedClips.map((clip) => {
@@ -632,6 +893,19 @@ export function App() {
     clipTimeline.forEach((clip) => map.set(clip.id, clip));
     return map;
   }, [clipTimeline]);
+  const modelDownloadActive = modelDownload.status !== "idle";
+  const modelDownloadTitle =
+    modelDownload.status === "checking"
+      ? "Checking Whisper model"
+      : modelDownload.status === "downloading"
+        ? "Downloading Whisper model"
+        : "Whisper model download failed";
+  const modelProgressText =
+    modelDownload.totalBytes && modelDownload.downloadedBytes
+      ? `${formatBytes(modelDownload.downloadedBytes)} / ${formatBytes(modelDownload.totalBytes)}`
+      : modelDownload.downloadedBytes
+        ? `${formatBytes(modelDownload.downloadedBytes)} downloaded`
+        : null;
   const nextClip = useMemo(() => {
     if (!activeClipId) return null;
     const index = clipTimeline.findIndex((clip) => clip.id === activeClipId);
@@ -659,6 +933,281 @@ export function App() {
     return ranges;
   }, [clipTimeline]);
 
+  const applyPlaybackRate = useCallback(
+    (mediaEl: HTMLMediaElement | null, rate: number = playbackRate) => {
+      if (!mediaEl) return;
+      try {
+        mediaEl.playbackRate = rate;
+      } catch {
+        // Ignore.
+      }
+      const el = mediaEl as HTMLMediaElement & {
+        preservesPitch?: boolean;
+        webkitPreservesPitch?: boolean;
+      };
+      if ("preservesPitch" in el) {
+        el.preservesPitch = rate <= 2;
+      }
+      if ("webkitPreservesPitch" in el) {
+        el.webkitPreservesPitch = rate <= 2;
+      }
+    },
+    [playbackRate]
+  );
+
+  const getActiveVideoEl = useCallback(() => {
+    return activeVideoSlot === 0 ? videoRefA.current : videoRefB.current;
+  }, [activeVideoSlot]);
+
+  const getInactiveVideoEl = useCallback(() => {
+    return activeVideoSlot === 0 ? videoRefB.current : videoRefA.current;
+  }, [activeVideoSlot]);
+
+  const getActiveMediaEl = useCallback(() => {
+    return activeMedia?.kind === "video" && activeMedia.source === "local" ? getActiveVideoEl() : audioRef.current;
+  }, [activeMedia, getActiveVideoEl]);
+
+  const cyclePlaybackRate = useCallback(() => {
+    setPlaybackRate((prev) => {
+      const next = prev < 1.25 ? 1.5 : prev < 1.75 ? 2 : 1;
+      applyPlaybackRate(getActiveMediaEl(), next);
+      if (activeMedia?.kind === "video") {
+        applyPlaybackRate(getInactiveVideoEl(), next);
+      }
+      return next;
+    });
+  }, [activeMedia?.kind, applyPlaybackRate, getActiveMediaEl, getInactiveVideoEl]);
+
+  const handleToggleChineseVariant = useCallback(() => {
+    dispatch(setExportLanguage(exportLanguage === "traditional" ? "simplified" : "traditional"));
+  }, [dispatch, exportLanguage]);
+
+  const handleSrtSelected = useCallback(
+    async (file: File) => {
+      try {
+        if (!file.name.toLowerCase().endsWith(".srt")) {
+          notify("Please select a .srt file.", "error");
+          return;
+        }
+        const raw = await file.text();
+        const parsed = parseSrt(raw);
+        if (!parsed.length) {
+          notify("No captions found in the SRT file.", "error");
+          return;
+        }
+        let jobId = selectedJob?.id ?? null;
+        if (!jobId) {
+          jobId = `srt-${Date.now()}`;
+          const filename = activeMedia?.name || file.name;
+          const audioFile = activeMedia?.file
+            ? {
+                name: activeMedia.file.name,
+                size: activeMedia.file.size,
+                path: null
+              }
+            : { name: filename, size: null, path: null };
+          const newJob: Job = {
+            id: jobId,
+            filename,
+            status: "completed",
+            message: "Captions loaded",
+            progress: 100,
+            startTime: Date.now(),
+            completedAt: Date.now(),
+            audioFile,
+            result: null,
+            partialResult: null,
+            error: null,
+            currentStage: null
+          };
+          dispatch(addJob(newJob));
+        }
+        dispatch(setJobSegments({ jobId, segments: parsed }));
+        dispatch(selectJob(jobId));
+        dispatch(setActiveTab("captions"));
+        notify("SRT loaded into captions.", "success");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        notify(message || "Failed to load SRT.", "error");
+      }
+    },
+    [activeMedia?.file, activeMedia?.name, dispatch, notify, selectedJob?.id]
+  );
+
+  const handleLoadSrt = useCallback(() => {
+    if (!activeMedia) {
+      notify("Open a media file first.", "info");
+      return;
+    }
+    handleRequestFilePicker(() => {
+      const api = (window as any)?.pywebview?.api;
+      const openNative = api?.openSrtDialog || api?.open_srt_dialog;
+      if (typeof openNative === "function") {
+        void openNative
+          .call(api)
+          .then((result: any) => {
+            if (!result || result.cancelled) return;
+            if (!result.success || !result.file?.data) {
+              const message =
+                result?.error === "unsupported_file"
+                  ? "Please select a .srt file."
+                  : result?.error || "Failed to open SRT file.";
+              notify(message, "error");
+              return;
+            }
+            const file = fileFromBase64(result.file.data, result.file.name || "captions.srt", result.file.mime);
+            void handleSrtSelected(file);
+          })
+          .catch((error: any) => {
+            const message = error instanceof Error ? error.message : String(error);
+            notify(message || "Failed to open SRT file.", "error");
+          });
+        return;
+      }
+      if (srtInputRef.current) {
+        srtInputRef.current.accept = ".srt,application/x-subrip,text/plain";
+        srtInputRef.current.click();
+      }
+    });
+  }, [activeMedia, handleRequestFilePicker, handleSrtSelected, notify]);
+
+  const ensureWhisperModelReady = useCallback(async () => {
+    if (modelDownload.status === "checking" || modelDownload.status === "downloading") {
+      return false;
+    }
+
+    let statusPayload: WhisperModelStatus | null = null;
+    let expectedPath: string | null = null;
+    let downloadUrl: string | null = null;
+    try {
+      setModelDownload({
+        status: "checking",
+        progress: null,
+        message: "Checking Whisper model...",
+        downloadedBytes: null,
+        totalBytes: null
+      });
+
+      statusPayload = await apiGetWhisperModelStatus();
+      if (statusPayload.ready) {
+        setModelDownload({ status: "idle", progress: null, message: "", downloadedBytes: null, totalBytes: null });
+        return true;
+      }
+
+      const startPayload = await apiStartWhisperModelDownload();
+      if (startPayload.status === "ready") {
+        setModelDownload({ status: "idle", progress: null, message: "", downloadedBytes: null, totalBytes: null });
+        return true;
+      }
+      const downloadId = startPayload.download_id;
+      if (!downloadId) {
+        throw new Error("Failed to start Whisper model download.");
+      }
+      expectedPath = startPayload.expected_path ?? statusPayload.expected_path ?? null;
+      downloadUrl = startPayload.download_url ?? statusPayload.download_url ?? null;
+
+      const initialProgress =
+        typeof startPayload.progress === "number" ? Math.round(startPayload.progress) : null;
+
+      setModelDownload({
+        status: "downloading",
+        progress: initialProgress,
+        message: startPayload.message ?? "Downloading Whisper model...",
+        expectedPath,
+        downloadUrl,
+        downloadId,
+        downloadedBytes: startPayload.downloaded_bytes ?? null,
+        totalBytes: startPayload.total_bytes ?? null
+      });
+
+      let current: WhisperModelDownload = startPayload;
+      while (current.status !== "completed") {
+        if (current.status === "failed") {
+          throw new Error(current.error || "Whisper model download failed.");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        current = await apiGetWhisperModelDownload(downloadId);
+        const nextProgress = typeof current.progress === "number" ? Math.round(current.progress) : null;
+        setModelDownload((prev) => ({
+          status: "downloading",
+          progress: nextProgress,
+          message: current.message ?? prev.message,
+          expectedPath: current.expected_path ?? prev.expectedPath ?? null,
+          downloadUrl: current.download_url ?? prev.downloadUrl ?? null,
+          downloadId,
+          downloadedBytes: current.downloaded_bytes ?? prev.downloadedBytes ?? null,
+          totalBytes: current.total_bytes ?? prev.totalBytes ?? null
+        }));
+      }
+
+      setModelDownload({ status: "idle", progress: null, message: "", downloadedBytes: null, totalBytes: null });
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setModelDownload((prev) => ({
+        status: "error",
+        progress: prev.progress ?? null,
+        message: "Whisper model download failed.",
+        detail: message,
+        expectedPath: prev.expectedPath ?? expectedPath ?? null,
+        downloadUrl: prev.downloadUrl ?? downloadUrl ?? null,
+        downloadId: prev.downloadId ?? null,
+        downloadedBytes: prev.downloadedBytes ?? null,
+        totalBytes: prev.totalBytes ?? null
+      }));
+      notify("Whisper model download failed. Please download it manually.", "error");
+      return false;
+    }
+  }, [modelDownload.status, notify]);
+
+  const clearModelDownload = useCallback(() => {
+    setModelDownload({ status: "idle", progress: null, message: "", downloadedBytes: null, totalBytes: null });
+  }, []);
+
+  const handleRetryModelDownload = useCallback(() => {
+    void ensureWhisperModelReady();
+  }, [ensureWhisperModelReady]);
+
+  const handleGenerateCaptions = useCallback(async () => {
+    if (!timelineClips.length) {
+      setShowImportModal(true);
+      return;
+    }
+    const ready = await ensureWhisperModelReady();
+    if (!ready) return;
+    uploadRef.current?.submitTranscription?.();
+  }, [ensureWhisperModelReady, timelineClips.length]);
+
+  const canExportCaptions = exportSegments.length > 0;
+  const canExportVideo = Boolean(activeMedia?.kind === "video" && activeMedia.file);
+
+  const handleWindowAction = useCallback((action: "close" | "minimize" | "zoom" | "fullscreen") => {
+    const win = typeof window !== "undefined" ? (window as any) : null;
+    const api = win?.pywebview?.api;
+    if (!api) return;
+    const map: Record<typeof action, string[]> = {
+      close: ["window_close", "windowClose", "closeWindow"],
+      minimize: ["window_minimize", "windowMinimize", "minimizeWindow"],
+      zoom: ["window_toggle_maximize", "windowToggleMaximize", "window_zoom", "windowZoom"],
+      fullscreen: ["window_toggle_fullscreen", "windowToggleFullscreen", "toggleFullscreen"]
+    };
+    for (const method of map[action]) {
+      if (typeof api[method] === "function") {
+        void api[method]();
+        break;
+      }
+    }
+  }, []);
+
+
+
+  const transcriptMediaRef =
+    activeMedia?.kind === "video" && activeMedia.source === "local"
+      ? (activeVideoSlot === 0
+        ? (videoRefA as RefObject<HTMLMediaElement>)
+        : (videoRefB as RefObject<HTMLMediaElement>))
+      : (audioRef as RefObject<HTMLMediaElement>);
+
   const advanceFromClip = useCallback(
     (clipEntry: (typeof clipTimeline)[number] | null, endTime: number) => {
       if (!clipEntry) {
@@ -669,33 +1218,108 @@ export function App() {
         (clip) => clip.startSec >= endTime - 0.01 && clip.startSec <= endTime + 0.05
       );
       if (nextClip) {
-        const clipEntry = clipById.get(nextClip.id);
-        if (clipEntry) {
-          if (activeMedia?.kind === "video" && videoRef.current) {
-            try {
-              const video = videoRef.current;
-              const width = video.videoWidth;
-              const height = video.videoHeight;
-              if (width > 0 && height > 0) {
-                const canvas = document.createElement("canvas");
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext("2d");
-                if (ctx) {
-                  ctx.drawImage(video, 0, 0, width, height);
-                  setPreviewPoster(canvas.toDataURL("image/jpeg", 0.7));
+        const nextEntry = clipById.get(nextClip.id);
+        if (nextEntry) {
+          if (pendingSwapRef.current === nextEntry.id) {
+            return;
+          }
+          const switchToNext = () => {
+            setPreviewPoster(null);
+            isGapPlaybackRef.current = false;
+            setActiveClipId(nextEntry.id);
+            setActiveMedia(nextEntry.media);
+            pendingSeekRef.current = nextEntry.trimStartSec;
+            pendingPlayRef.current = true;
+            pendingSwapRef.current = null;
+            setPlayback((prev) => ({ ...prev, isPlaying: true }));
+          };
+          const sameMedia = clipEntry.media.id === nextEntry.media.id;
+          const canSwapVideo =
+            !sameMedia &&
+            nextEntry.media.kind === "video" &&
+            nextEntry.media.source === "local" &&
+            Boolean(getInactiveVideoEl());
+          if (canSwapVideo) {
+            const nextVideo = getInactiveVideoEl();
+            if (nextVideo && nextEntry.media.previewUrl && nextVideo.src === nextEntry.media.previewUrl) {
+              pendingSwapRef.current = nextEntry.id;
+              applyPlaybackRate(nextVideo);
+              const desiredTime = Math.max(0, nextEntry.trimStartSec);
+              if (!Number.isFinite(nextVideo.currentTime) || Math.abs(nextVideo.currentTime - desiredTime) > 0.05) {
+                try {
+                  nextVideo.currentTime = desiredTime;
+                } catch {
+                  // Ignore.
                 }
               }
-            } catch {
-              // Ignore.
+              nextVideo.muted = true;
+              const swap = () => {
+                nextVideo.muted = false;
+                const currentVideo = getActiveVideoEl();
+                if (currentVideo) {
+                  currentVideo.muted = true;
+                  try {
+                    currentVideo.pause();
+                  } catch {
+                    // Ignore.
+                  }
+                }
+                setPreviewPoster(null);
+                setActiveVideoSlot((prev) => (prev === 0 ? 1 : 0));
+                setActiveClipId(nextEntry.id);
+                setActiveMedia(nextEntry.media);
+                pendingSeekRef.current = null;
+                pendingPlayRef.current = false;
+                pendingSwapRef.current = null;
+                setPlayback((prev) => ({ ...prev, isPlaying: true }));
+              };
+              const playAndSwap = () => {
+                void nextVideo.play().catch(() => undefined);
+                const anyVideo = nextVideo as HTMLVideoElement & {
+                  requestVideoFrameCallback?: (cb: () => void) => void;
+                };
+                if (typeof anyVideo.requestVideoFrameCallback === "function") {
+                  anyVideo.requestVideoFrameCallback(() => swap());
+                } else {
+                  // Fallback: swap on first canplay tick.
+                  window.setTimeout(swap, 0);
+                }
+              };
+              if (nextVideo.readyState >= 2) {
+                playAndSwap();
+                return;
+              }
+              const fallbackId = window.setTimeout(() => {
+                nextVideo.removeEventListener("loadeddata", onReady);
+                switchToNext();
+              }, 300);
+              const onReady = () => {
+                nextVideo.removeEventListener("loadeddata", onReady);
+                window.clearTimeout(fallbackId);
+                playAndSwap();
+              };
+              nextVideo.addEventListener("loadeddata", onReady);
+              return;
+            }
+            pendingSwapRef.current = null;
+          }
+          setPreviewPoster(null);
+          const mediaEl = getActiveMediaEl();
+          if (sameMedia && mediaEl) {
+            const currentTime = Number.isFinite(mediaEl.currentTime) ? mediaEl.currentTime : 0;
+            if (currentTime >= nextEntry.trimStartSec - 0.03) {
+              setActiveClipId(nextEntry.id);
+              if (activeMedia?.id !== nextEntry.media.id) {
+                setActiveMedia(nextEntry.media);
+              }
+              pendingSeekRef.current = null;
+              pendingPlayRef.current = false;
+              pendingSwapRef.current = null;
+              setPlayback((prev) => ({ ...prev, isPlaying: true }));
+              return;
             }
           }
-          isGapPlaybackRef.current = false;
-          setActiveClipId(clipEntry.id);
-          setActiveMedia(clipEntry.media);
-          pendingSeekRef.current = clipEntry.trimStartSec;
-          pendingPlayRef.current = true;
-          setPlayback((prev) => ({ ...prev, isPlaying: true }));
+          switchToNext();
           return;
         }
       }
@@ -714,7 +1338,7 @@ export function App() {
       pendingPlayRef.current = false;
       setPlayback((prev) => ({ ...prev, isPlaying: true }));
     },
-    [activeMedia?.kind, clipById, clipTimeline, getActiveMediaEl]
+    [activeMedia?.id, activeMedia?.kind, applyPlaybackRate, clipById, clipTimeline, getActiveMediaEl, getActiveVideoEl, getInactiveVideoEl]
   );
 
   useEffect(() => {
@@ -738,6 +1362,7 @@ export function App() {
       if (!activeMedia) {
         return;
       }
+      applyPlaybackRate(mediaEl);
       const mediaDuration = Number.isFinite(mediaEl.duration) ? mediaEl.duration : 0;
       if (mediaDuration > 0) {
         setPlayback((prev) => ({ ...prev, duration: mediaDuration }));
@@ -757,6 +1382,10 @@ export function App() {
       clearPosterIfReady();
     };
     const onTime = () => {
+      if (mediaRafActiveRef.current) {
+        clearPosterIfReady();
+        return;
+      }
       const mediaTime = Number.isFinite(mediaEl.currentTime) ? mediaEl.currentTime : 0;
       if (!clipTimeline.length) {
         setPlayback((prev) => ({ ...prev, currentTime: mediaTime }));
@@ -811,7 +1440,57 @@ export function App() {
       mediaEl.removeEventListener("pause", onPause);
       mediaEl.removeEventListener("ended", onEnded);
     };
-  }, [activeClipId, advanceFromClip, clipById, clipTimeline, getActiveMediaEl]);
+  }, [activeClipId, advanceFromClip, clipById, clipTimeline, getActiveMediaEl, applyPlaybackRate]);
+
+  useEffect(() => {
+    const mediaEl = getActiveMediaEl();
+    if (!mediaEl) return;
+    applyPlaybackRate(mediaEl);
+  }, [getActiveMediaEl, applyPlaybackRate, activeMedia?.id, activeMedia?.kind]);
+
+  useEffect(() => {
+    if (!playback.isPlaying) return;
+    const mediaEl = getActiveMediaEl();
+    if (!mediaEl) return;
+    if (!activeClipId) return;
+    const clipEntry = clipById.get(activeClipId);
+    if (!clipEntry) return;
+    mediaRafActiveRef.current = true;
+    let rafId: number | null = null;
+    let lastUiUpdate = 0;
+    const step = (now: number) => {
+      if (!playbackRef.current.isPlaying) {
+        mediaRafActiveRef.current = false;
+        return;
+      }
+      const currentClip = clipById.get(activeClipId);
+      if (!currentClip) {
+        mediaRafActiveRef.current = false;
+        return;
+      }
+      const mediaTime = Number.isFinite(mediaEl.currentTime) ? mediaEl.currentTime : 0;
+      if (mediaTime >= currentClip.trimEndSec - 0.005) {
+        const endTime = currentClip.startSec + currentClip.durationSec;
+        setPlayback((prev) => ({ ...prev, currentTime: endTime }));
+        mediaRafActiveRef.current = false;
+        advanceFromClip(currentClip, endTime);
+        return;
+      }
+      if (now - lastUiUpdate >= 33) {
+        lastUiUpdate = now;
+        const localTime = Math.max(0, mediaTime - currentClip.trimStartSec);
+        setPlayback((prev) => ({ ...prev, currentTime: currentClip.startSec + localTime }));
+      }
+      rafId = requestAnimationFrame(step);
+    };
+    rafId = requestAnimationFrame(step);
+    return () => {
+      mediaRafActiveRef.current = false;
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+    };
+  }, [activeClipId, advanceFromClip, clipById, getActiveMediaEl, playback.isPlaying]);
 
   useEffect(() => {
     if (!activeMedia) {
@@ -834,6 +1513,44 @@ export function App() {
   }, [activeMedia]);
 
   const resolvedPreviewUrl = activeMedia?.previewUrl ?? activePreviewUrl;
+  const activeVideoSrc =
+    resolvedPreviewUrl && activeMedia?.kind === "video" && activeMedia.source === "local"
+      ? resolvedPreviewUrl
+      : null;
+  const shouldShowPreviewPoster = Boolean(previewPoster);
+  const nextVideoTarget = useMemo(() => {
+    if (!nextClip) return null;
+    if (nextClip.media.kind !== "video" || nextClip.media.source !== "local") return null;
+    if (activeMedia?.id === nextClip.media.id) return null;
+    return {
+      url: nextClip.media.previewUrl ?? null,
+      trimStartSec: nextClip.trimStartSec
+    };
+  }, [activeMedia?.id, nextClip]);
+
+  useEffect(() => {
+    if (!nextVideoTarget?.url) return;
+    const nextEl = getInactiveVideoEl();
+    if (!nextEl) return;
+    nextEl.preload = "auto";
+    nextEl.muted = true;
+    nextEl.playsInline = true;
+    const onLoaded = () => {
+      try {
+        const desired = Math.max(0, nextVideoTarget.trimStartSec);
+        if (!Number.isFinite(nextEl.currentTime) || Math.abs(nextEl.currentTime - desired) > 0.05) {
+          nextEl.currentTime = desired;
+        }
+      } catch {
+        // Ignore.
+      }
+    };
+    nextEl.addEventListener("loadedmetadata", onLoaded);
+    nextEl.load();
+    return () => {
+      nextEl.removeEventListener("loadedmetadata", onLoaded);
+    };
+  }, [getInactiveVideoEl, nextVideoTarget?.trimStartSec, nextVideoTarget?.url]);
 
   useEffect(() => {
     const target = pendingSeekRef.current;
@@ -903,6 +1620,18 @@ export function App() {
     if (!target) return;
     const offset = Math.max(0, playback.currentTime - target.startSec);
     const newTime = Math.min(target.trimEndSec, target.trimStartSec + offset);
+    const mediaEl = getActiveMediaEl();
+    const sameMedia = activeMedia?.id === target.media.id;
+    if (sameMedia && mediaEl) {
+      const currentTime = Number.isFinite(mediaEl.currentTime) ? mediaEl.currentTime : 0;
+      if (Math.abs(currentTime - newTime) <= 0.05) {
+        isGapPlaybackRef.current = false;
+        setActiveClipId(target.id);
+        pendingSeekRef.current = null;
+        pendingPlayRef.current = false;
+        return;
+      }
+    }
     isGapPlaybackRef.current = false;
     setActiveClipId(target.id);
     setActiveMedia(target.media);
@@ -988,12 +1717,15 @@ export function App() {
         // Ignore.
       }
     }
-    if (activeMedia?.kind === "audio" && videoRef.current) {
-      try {
-        videoRef.current.pause();
-      } catch {
-        // Ignore.
-      }
+    if (activeMedia?.kind === "audio") {
+      [videoRefA.current, videoRefB.current].forEach((video) => {
+        if (!video) return;
+        try {
+          video.pause();
+        } catch {
+          // Ignore.
+        }
+      });
     }
   }, [activeMedia?.id, activeMedia?.kind]);
 
@@ -1042,7 +1774,96 @@ export function App() {
 
   const duration = clipTimeline.length ? timelineDuration : (playback.duration || 0);
   const previewDisabled = !Number.isFinite(duration) || duration <= 0;
-  const hasTimelineMedia = timelineClips.length > 0;
+  const activeMediaEl = getActiveMediaEl();
+  const isMediaPlaying = activeMediaEl ? !activeMediaEl.paused : playback.isPlaying;
+  const handleOpenSubtitleEditor = useCallback(() => {
+    if (!currentSubtitleMatch || !currentSubtitleMatch.segment) return;
+    const mediaEl = getActiveMediaEl();
+    if (mediaEl && !mediaEl.paused) {
+      try {
+        mediaEl.pause();
+      } catch {
+        // Ignore.
+      }
+    }
+    const baseText = currentSubtitleMatch.segment.originalText ?? currentSubtitleMatch.segment.text ?? "";
+    setSubtitleDraft(baseText);
+    setSubtitleEditor({ segmentId: currentSubtitleMatch.segment.id, text: baseText });
+  }, [currentSubtitleMatch, getActiveMediaEl]);
+
+  const handleSaveSubtitleEdit = useCallback(async () => {
+    if (!subtitleEditor || !selectedJobId) {
+      setSubtitleEditor(null);
+      return;
+    }
+    const newText = subtitleDraft.trim();
+    if (!newText || newText === subtitleEditor.text.trim()) {
+      setSubtitleEditor(null);
+      return;
+    }
+    try {
+      await apiEditSegment({ jobId: selectedJobId, segmentId: subtitleEditor.segmentId, newText });
+      dispatch(updateSegmentText({ jobId: selectedJobId, segmentId: subtitleEditor.segmentId, newText }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      notify(`Failed to save changes: ${message}`, "error");
+    } finally {
+      setSubtitleEditor(null);
+    }
+  }, [dispatch, notify, selectedJobId, subtitleDraft, subtitleEditor]);
+
+  const handleSubtitlePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!subtitleEditor) return;
+      if (event.button !== 0) return;
+      if (event.target !== event.currentTarget) return;
+      const container = previewContainerRef.current?.getBoundingClientRect();
+      const box = subtitleBoxRef.current?.getBoundingClientRect();
+      if (!container || !box) return;
+      subtitleDragRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        originX: subtitlePosition.x,
+        originY: subtitlePosition.y,
+        moved: false,
+        container,
+        box
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    },
+    [subtitleEditor, subtitlePosition.x, subtitlePosition.y]
+  );
+
+  const handleSubtitlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = subtitleDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+      drag.moved = true;
+    }
+    const nextX = drag.originX + dx / drag.container.width;
+    const nextY = drag.originY + dy / drag.container.height;
+    const halfW = drag.box.width / 2 / drag.container.width;
+    const halfH = drag.box.height / 2 / drag.container.height;
+    const clampedX = clamp(nextX, halfW, 1 - halfW);
+    const clampedY = clamp(nextY, halfH, 1 - halfH);
+    setSubtitlePosition({ x: clampedX, y: clampedY });
+  }, []);
+
+  const handleSubtitlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = subtitleDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    subtitleDragRef.current = null;
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // Ignore.
+    }
+  }, []);
+
 
   const togglePlayback = () => {
     if (!clipTimeline.length && !activeMedia) {
@@ -1230,8 +2051,12 @@ export function App() {
   };
 
   const tickCount = 7;
-  const baseSegmentSec = 300;
-  const segmentSec = baseSegmentSec / Math.max(0.5, timelineZoom);
+  const minZoom = 0.5;
+  const maxZoom = 3;
+  const minSegmentSec = 10;
+  const maxSegmentSec = 600;
+  const zoomT = clamp((timelineZoom - minZoom) / Math.max(0.001, maxZoom - minZoom), 0, 1);
+  const segmentSec = maxSegmentSec - zoomT * (maxSegmentSec - minSegmentSec);
   const visibleDuration = segmentSec * (tickCount - 1);
   const pxPerSec = timelineViewportWidth > 0
     ? timelineViewportWidth / Math.max(visibleDuration, MIN_CLIP_DURATION_SEC)
@@ -1244,10 +2069,6 @@ export function App() {
   const firstTickSec = Math.floor(viewStartSec / segmentSec) * segmentSec;
   const ticks = Array.from({ length: tickCount }, (_, idx) => firstTickSec + idx * segmentSec);
   const segmentPx = segmentSec * pxPerSec;
-  const gridStyle = {
-    backgroundImage: "linear-gradient(to right, rgba(15,23,42,0.45) 1px, transparent 1px)",
-    backgroundSize: `${segmentPx}px 100%`
-  };
   const faintGridStyle = {
     backgroundImage: "linear-gradient(to right, rgba(15,23,42,0.3) 1px, transparent 1px)",
     backgroundSize: `${segmentPx}px 100%`
@@ -1268,11 +2089,11 @@ export function App() {
 
   const onTrackPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
-    if (timelineDragRef.current) return;
     const target = event.target as HTMLElement;
     if (target.closest("[data-clip-id]")) return;
     scrubStateRef.current = { pointerId: event.pointerId };
     event.currentTarget.setPointerCapture(event.pointerId);
+    startPlayerScrub();
     seekFromPointer(event);
   };
 
@@ -1285,198 +2106,64 @@ export function App() {
     if (!scrubStateRef.current) return;
     scrubStateRef.current = null;
     event.currentTarget.releasePointerCapture(event.pointerId);
+    endPlayerScrub();
   };
 
   const toggleFullscreen = () => {
-    const el = previewContainerRef.current;
-    if (!el) return;
     const doc = document as Document & { exitFullscreen?: () => Promise<void> };
     if (document.fullscreenElement) {
       void doc.exitFullscreen?.();
-    } else if (el.requestFullscreen) {
-      void el.requestFullscreen();
+      return;
     }
-  };
-
-  const splitClipAtPlayhead = useCallback(
-    (clipId: string) => {
-      const clipEntry = clipById.get(clipId);
-      if (!clipEntry) return;
-      const splitTime = playback.currentTime;
-      const offset = splitTime - clipEntry.startSec;
-      if (offset <= 0.5 || offset >= clipEntry.durationSec - 0.5) {
-        return;
-      }
-      const leftId = `${clipId}-a-${Date.now()}`;
-      const rightId = `${clipId}-b-${Date.now()}`;
-      setTimelineClips((prev) =>
-        normalizeClips(
-          prev.flatMap((clip) => {
-          if (clip.id !== clipId) return [clip];
-          const dur1 = offset;
-          const dur2 = clip.durationSec - offset;
-          const trimStart1 = clip.trimStartSec;
-          const trimEnd1 = trimStart1 + dur1;
-          const trimStart2 = trimEnd1;
-          const trimEnd2 = clip.trimEndSec;
-          const left = {
-            ...clip,
-            id: leftId,
-            startSec: clip.startSec,
-            durationSec: dur1,
-            trimStartSec: trimStart1,
-            trimEndSec: trimEnd1
-          };
-          const right = {
-            ...clip,
-            id: rightId,
-            startSec: clip.startSec + dur1,
-            durationSec: dur2,
-            trimStartSec: trimStart2,
-            trimEndSec: trimEnd2
-          };
-          return [left, right];
-        })
-        )
-      );
-      setActiveClipId(leftId);
-      setActiveMedia(clipEntry.media);
-    },
-    [clipById, playback.currentTime]
-  );
-
-  const deleteClip = useCallback((clipId: string) => {
-    setTimelineClips((prev) => normalizeClips(prev.filter((clip) => clip.id !== clipId)));
-    if (activeClipId === clipId) {
-      setActiveClipId(null);
-      setActiveMedia(null);
-      setPlayback((prev) => ({ ...prev, isPlaying: false }));
-    }
-  }, [activeClipId]);
-
-  const startClipDrag = (
-    event: React.PointerEvent<HTMLDivElement>,
-    clipId: string,
-    type: "move" | "resize-left" | "resize-right"
-  ) => {
-    const track = timelineTrackRef.current;
-    if (!track) return;
-    const rect = track.getBoundingClientRect();
-    const clip = timelineClips.find((c) => c.id === clipId);
-    if (!clip) return;
-    const ordered = [...timelineClips].sort((a, b) => a.startSec - b.startSec);
-    const index = ordered.findIndex((c) => c.id === clipId);
-    const prevClip = index > 0 ? ordered[index - 1] : null;
-    const nextClip = index >= 0 && index < ordered.length - 1 ? ordered[index + 1] : null;
-    const pxPerSec = duration > 0 ? rect.width / duration : BASE_PX_PER_SEC * timelineZoom;
-    timelineDragRef.current = {
-      clipId,
-      type,
-      startX: event.clientX,
-      startSec: clip.startSec,
-      durationSec: clip.durationSec,
-      trimStartSec: clip.trimStartSec,
-      trimEndSec: clip.trimEndSec,
-      baseDurationSec: clip.baseDurationSec,
-      pxPerSec,
-      prevEndSec: prevClip ? prevClip.startSec + prevClip.durationSec : 0,
-      nextStartSec: nextClip ? nextClip.startSec : Number.POSITIVE_INFINITY
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-
-  const onClipPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    const state = timelineDragRef.current;
-    if (!state) return;
-    const dx = event.clientX - state.startX;
-    const deltaSec = state.pxPerSec > 0 ? dx / state.pxPerSec : 0;
-
-    setTimelineClips((prev) =>
-      prev.map((clip) => {
-        if (clip.id !== state.clipId) return clip;
-        if (state.type === "move") {
-          const rawStart = Math.max(0, state.startSec + deltaSec);
-          const startSec = clamp(rawStart, state.prevEndSec, state.nextStartSec - state.durationSec);
-          return { ...clip, startSec };
-        }
-        if (state.type === "resize-left") {
-          const minDelta = -Math.min(state.trimStartSec, state.startSec);
-          const maxDelta = state.durationSec - MIN_CLIP_DURATION_SEC;
-          const clampedDelta = clamp(deltaSec, minDelta, maxDelta);
-          const rawStart = state.startSec + clampedDelta;
-          const startSec = clamp(rawStart, state.prevEndSec, state.startSec + state.durationSec - MIN_CLIP_DURATION_SEC);
-          const appliedDelta = startSec - state.startSec;
-          const trimStartSec = state.trimStartSec + appliedDelta;
-          const durationSec = state.durationSec - appliedDelta;
-          return { ...clip, startSec, durationSec, trimStartSec, trimEndSec: trimStartSec + durationSec };
-        }
-        const minDelta = -(state.durationSec - MIN_CLIP_DURATION_SEC);
-        const maxDelta = Math.max(
-          0,
-          Math.min(state.baseDurationSec - state.trimEndSec, state.nextStartSec - state.startSec - state.durationSec)
-        );
-        const clampedDelta = clamp(deltaSec, minDelta, maxDelta);
-        const durationSec = state.durationSec + clampedDelta;
-        const trimEndSec = state.trimEndSec + clampedDelta;
-        return { ...clip, durationSec, trimEndSec };
-      })
-    );
-  };
-
-  const onClipPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (timelineDragRef.current) {
-      timelineDragRef.current = null;
-      event.currentTarget.releasePointerCapture(event.pointerId);
-      setTimelineClips((prev) => normalizeClips(prev));
+    const videoEl = activeMedia?.kind === "video" ? getActiveVideoEl() : null;
+    const target = videoEl ?? previewContainerRef.current;
+    if (!target || !target.requestFullscreen) return;
+    try {
+      void target.requestFullscreen();
+    } catch {
+      // Ignore.
     }
   };
 
   const handleAddToTimeline = useCallback(
     (items: MediaItem[]) => {
       if (!items.length) return;
-      setTimelineClips((prev) => {
-        const endOfTimeline = prev.reduce((max, clip) => Math.max(max, clip.startSec + clip.durationSec), 0);
-        let cursor = endOfTimeline;
-        const newClips = items.map((item) => {
-          const base = Number.isFinite(item.durationSec) && item.durationSec ? item.durationSec : 60;
-          const clip = {
-            id: `${item.id}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      const supportedItems = items.filter((item) => item.kind !== "caption");
+      if (!supportedItems.length) {
+        notify("Caption files cannot be added to the timeline yet.", "info");
+        return;
+      }
+      if (supportedItems.length !== items.length) {
+        notify("Skipped caption files. Only audio/video clips can be added to the timeline.", "info");
+      }
+      const item = supportedItems[0];
+      const base = Number.isFinite(item.durationSec) && item.durationSec ? item.durationSec : 60;
+      const clipId = `${item.id}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      setTimelineClips(
+        normalizeClips([
+          {
+            id: clipId,
             media: item,
-            startSec: cursor,
+            startSec: 0,
             baseDurationSec: base,
             durationSec: base,
             trimStartSec: 0,
             trimEndSec: base
-          };
-          cursor += base;
-          return clip;
-        });
-        lastAddedClipRef.current = newClips[newClips.length - 1]?.id ?? null;
-        return normalizeClips([...prev, ...newClips]);
-      });
-      const last = items[items.length - 1];
-      setActiveMedia(last);
-      if (lastAddedClipRef.current) {
-        setActiveClipId(lastAddedClipRef.current);
-      }
-      if (last.source === "job" && last.jobId) {
-        dispatch(selectJob(last.jobId));
+          }
+        ])
+      );
+      setActiveMedia(item);
+      setActiveClipId(clipId);
+      pendingSeekRef.current = 0;
+      pendingPlayRef.current = false;
+      setPlayback((prev) => ({ ...prev, currentTime: 0, isPlaying: false }));
+      if (item.source === "job" && item.jobId) {
+        dispatch(selectJob(item.jobId));
+      } else {
+        dispatch(selectJob(null));
       }
     },
-    [dispatch]
-  );
-
-  const handleTimelineDrop = useCallback(
-    (event: React.DragEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      setIsTimelineDragOver(false);
-      const payload = dragPayloadRef.current;
-      if (payload && payload.length) {
-        handleAddToTimeline(payload);
-      }
-      dragPayloadRef.current = null;
-    },
-    [handleAddToTimeline]
+    [dispatch, notify]
   );
 
   const handleTimelineScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
@@ -1548,9 +2235,7 @@ export function App() {
             localMedia={localMedia}
             onLocalMediaChange={setLocalMedia}
             onAddToTimeline={handleAddToTimeline}
-            onDragPayloadChange={(payload) => {
-              dragPayloadRef.current = payload;
-            }}
+            onRequestFilePicker={handleRequestFilePicker}
           />
         </div>
         <div className={cn(activeTab === "captions" ? "block" : "hidden")}>
@@ -1590,30 +2275,26 @@ export function App() {
                   onChange={(value) => dispatch(setChineseStyle(value as any))}
                 />
               </div>
-              <div>
-                <label className="text-[11px] font-semibold text-slate-400" htmlFor="chineseScriptSelect">
-                  Chinese Encode
-                </label>
-                <Select
-                  className="stt-select-dark"
-                  id="chineseScript"
-                  buttonId="chineseScriptSelect"
-                  value={String(exportLanguage)}
-                  options={[
-                    { value: "traditional", label: "Traditional" },
-                    { value: "simplified", label: "Simplified" }
-                  ]}
-                  onChange={(value) => dispatch(setExportLanguage(value as any))}
-                />
-              </div>
             </div>
             <div className="pt-2">
               <button
-                className="inline-flex w-full items-center justify-center rounded-md bg-gradient-to-r from-[#2563eb] via-[#4338ca] to-[#6d28d9] px-3 py-2 text-[12px] font-semibold text-white shadow-[0_10px_24px_rgba(76,29,149,0.35)] transition hover:-translate-y-[1px] hover:brightness-110"
+                className={cn(
+                  "inline-flex w-full items-center justify-center rounded-md bg-gradient-to-r from-[#2563eb] via-[#4338ca] to-[#6d28d9] px-3 py-2 text-[12px] font-semibold text-white shadow-[0_10px_24px_rgba(76,29,149,0.35)] transition hover:-translate-y-[1px] hover:brightness-110",
+                  modelDownload.status === "checking" ||
+                    modelDownload.status === "downloading" ||
+                    isTranscribing
+                    ? "cursor-not-allowed opacity-70 hover:translate-y-0 hover:brightness-100"
+                    : ""
+                )}
                 onClick={handleGenerateCaptions}
+                disabled={
+                  modelDownload.status === "checking" ||
+                  modelDownload.status === "downloading" ||
+                  isTranscribing
+                }
                 type="button"
               >
-                AI Generate Caption
+                {isTranscribing ? "Processing..." : "AI Generate Caption"}
               </button>
             </div>
           </div>
@@ -1695,10 +2376,7 @@ export function App() {
                 </button>
               </div>
             ) : null}
-          </div>
-          <div className="flex items-center justify-center gap-2">
-            <span className="text-[11px] font-semibold text-slate-200">X-Caption</span>
-            {!isCompact ? (
+            {!isHeaderCompact ? (
               <button
                 className="pywebview-no-drag inline-flex h-7 items-center gap-1.5 rounded-md border border-slate-700 bg-[#151515] px-2 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500"
                 onClick={handleOpenFiles}
@@ -1711,11 +2389,14 @@ export function App() {
               </button>
             ) : null}
           </div>
+          <div className="flex items-center justify-center gap-2">
+            <span className="text-[11px] font-semibold text-slate-200">X-Caption</span>
+          </div>
           <div className="flex items-center justify-end gap-2">
-            {isCompact ? (
+            {isHeaderCompact ? (
               <button
                 ref={headerMenuButtonRef}
-                className="pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-700 bg-[#151515] text-[11px] text-slate-200 transition hover:border-slate-500"
+                className="pywebview-no-drag inline-flex h-7 items-center gap-1.5 rounded-md border border-slate-700 bg-[#151515] px-2 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500"
                 onClick={(event) => {
                   event.stopPropagation();
                   setIsHeaderMenuOpen((prev) => !prev);
@@ -1724,19 +2405,30 @@ export function App() {
                 aria-label="Menu"
                 title="Menu"
               >
-                <AppIcon name="ellipsisV" className="text-[11px]" />
+                <AppIcon name="bars" className="text-[11px]" />
+                Menu
               </button>
             ) : (
               <>
                 <button
+                  className="pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md text-[11px] text-slate-200/80 transition hover:bg-white/5 hover:text-white"
+                  onClick={handleTogglePinned}
+                  type="button"
+                  aria-label={isPinned ? "Unpin window" : "Pin window"}
+                  title={isPinned ? "Unpin window" : "Pin window"}
+                >
+                  <AppIcon
+                    name={isPinned ? "pin" : "pinOff"}
+                    className={cn("text-[11px]", !isPinned && "rotate-45 opacity-70")}
+                  />
+                </button>
+                <button
                   className={cn(
                     "pywebview-no-drag inline-flex h-7 items-center justify-center gap-1.5 rounded-md border border-slate-700 bg-[#151515] px-2 text-[11px] font-semibold text-slate-200 transition",
-                    exportSegments.length && !isExporting
-                      ? "hover:border-slate-500"
-                      : "cursor-not-allowed opacity-50"
+                    isExporting ? "cursor-not-allowed opacity-50" : "hover:border-slate-500"
                   )}
-                  onClick={handleExportTranscript}
-                  disabled={!exportSegments.length || isExporting}
+                  onClick={() => setShowExportModal(true)}
+                  disabled={isExporting}
                   type="button"
                 >
                   <AppIcon name="download" className="text-[10px]" />
@@ -1783,7 +2475,7 @@ export function App() {
               </>
             )}
           </div>
-          {isCompact && isHeaderMenuOpen ? (
+          {isHeaderCompact && isHeaderMenuOpen ? (
             <div
               ref={headerMenuRef}
               className="pywebview-no-drag absolute right-3 top-10 z-[130] min-w-[190px] overflow-hidden rounded-lg border border-slate-800/40 bg-[#151515] text-[11px] text-slate-200 shadow-xl"
@@ -1802,14 +2494,14 @@ export function App() {
               <button
                 className={cn(
                   "flex w-full items-center gap-2 px-3 py-2 text-left",
-                  exportSegments.length && !isExporting ? "hover:bg-[#1b1b22]" : "cursor-not-allowed opacity-50"
+                  isExporting ? "cursor-not-allowed opacity-50" : "hover:bg-[#1b1b22]"
                 )}
                 onClick={() => {
-                  if (!exportSegments.length || isExporting) return;
+                  if (isExporting) return;
                   setIsHeaderMenuOpen(false);
-                  void handleExportTranscript();
+                  setShowExportModal(true);
                 }}
-                disabled={!exportSegments.length || isExporting}
+                disabled={isExporting}
                 type="button"
               >
                 <AppIcon name="download" />
@@ -1825,6 +2517,17 @@ export function App() {
               >
                 <AppIcon name="users" />
                 Join the Waitlist
+              </button>
+              <button
+                className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#1b1b22]"
+                onClick={() => {
+                  setIsHeaderMenuOpen(false);
+                  handleTogglePinned();
+                }}
+                type="button"
+              >
+                <AppIcon name={isPinned ? "pin" : "pinOff"} className={cn(!isPinned && "rotate-45 opacity-70")} />
+                {isPinned ? "Unpin Window" : "Pin Window"}
               </button>
               {showCustomWindowControls && !isMac ? (
                 <>
@@ -1923,7 +2626,9 @@ export function App() {
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-2">
               {isCompact && compactTab === "captions" ? (
                 <div className="flex min-h-0 w-full flex-1">
-                  <TranscriptPanel mediaRef={transcriptMediaRef} notify={notify} />
+                  <div className="min-h-0 h-[calc(100vh-320px)] max-h-[calc(100vh-320px)] w-full overflow-hidden">
+                    <TranscriptPanel mediaRef={transcriptMediaRef} notify={notify} editEnabled={isTranscriptEdit} />
+                  </div>
                 </div>
               ) : (
                 <>
@@ -1931,18 +2636,40 @@ export function App() {
                     className="relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden"
                     ref={previewContainerRef}
                   >
-                    <div className="relative h-full w-full overflow-hidden bg-black">
-                      {activeMedia?.kind === "video" && resolvedPreviewUrl && activeMedia.source === "local" ? (
+                    <div className="relative h-full w-full overflow-hidden rounded-xl bg-black">
+                      {activeVideoSrc ? (
                         <>
                           <video
-                            src={resolvedPreviewUrl}
-                            ref={videoRef}
+                            src={activeVideoSlot === 0 ? activeVideoSrc : nextVideoTarget?.url ?? undefined}
+                            ref={videoRefA}
                             playsInline
                             preload="auto"
-                            poster={previewPoster ?? undefined}
-                            className="absolute inset-0 h-full w-full object-contain"
+                            muted={activeVideoSlot !== 0}
+                            poster={activeVideoSlot === 0 ? previewPoster ?? undefined : undefined}
+                            onLoadedData={() => {
+                              setPreviewPoster(null);
+                            }}
+                            className={cn(
+                              "absolute inset-0 h-full w-full object-contain transition-opacity",
+                              activeVideoSlot === 0 ? "opacity-100" : "opacity-0"
+                            )}
                           />
-                          {previewPoster ? (
+                          <video
+                            src={activeVideoSlot === 1 ? activeVideoSrc : nextVideoTarget?.url ?? undefined}
+                            ref={videoRefB}
+                            playsInline
+                            preload="auto"
+                            muted={activeVideoSlot !== 1}
+                            poster={activeVideoSlot === 1 ? previewPoster ?? undefined : undefined}
+                            onLoadedData={() => {
+                              setPreviewPoster(null);
+                            }}
+                            className={cn(
+                              "absolute inset-0 h-full w-full object-contain transition-opacity",
+                              activeVideoSlot === 1 ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                          {shouldShowPreviewPoster ? (
                             <img
                               src={previewPoster}
                               alt=""
@@ -1968,34 +2695,96 @@ export function App() {
                       ) : (
                         <div className="h-full w-full bg-black" />
                       )}
-                      {currentSubtitle ? (
-                        <div className="pointer-events-none absolute bottom-6 left-1/2 w-[92%] -translate-x-1/2 text-center">
-                          <span className="inline-block rounded-md bg-black/70 px-3 py-1 text-[13px] font-medium text-white shadow">
-                            {currentSubtitle}
-                          </span>
+                      {subtitleEditor || currentSubtitle ? (
+                        <div
+                          ref={subtitleBoxRef}
+                          className={cn("absolute z-10", subtitleEditor ? "cursor-move" : "cursor-pointer")}
+                          style={{
+                            left: `${subtitlePosition.x * 100}%`,
+                            top: `${subtitlePosition.y * 100}%`,
+                            transform: "translate(-50%, -50%)"
+                          }}
+                        >
+                          {subtitleEditor ? (
+                            <div
+                              className="rounded-md border border-white/35 bg-black/70 px-3 py-1 shadow cursor-move"
+                              style={{
+                                width: subtitleBoxSize.width ? `${subtitleBoxSize.width}px` : undefined,
+                                height: subtitleBoxSize.height ? `${subtitleBoxSize.height}px` : undefined,
+                                maxWidth: `${subtitleMaxWidth}px`
+                              }}
+                              onPointerDown={handleSubtitlePointerDown}
+                              onPointerMove={handleSubtitlePointerMove}
+                              onPointerUp={handleSubtitlePointerUp}
+                              onPointerCancel={handleSubtitlePointerUp}
+                            >
+                              <textarea
+                                className="h-full w-full resize-none bg-transparent text-center text-[13px] font-medium text-white outline-none cursor-text"
+                                style={{ fontSize: `${13 * subtitleScale}px`, lineHeight: "1.2" }}
+                                value={subtitleDraft}
+                                onChange={(e) => setSubtitleDraft(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Escape") {
+                                    e.preventDefault();
+                                    setSubtitleEditor(null);
+                                  } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                                    e.preventDefault();
+                                    void handleSaveSubtitleEdit();
+                                  }
+                                }}
+                                onBlur={() => void handleSaveSubtitleEdit()}
+                                autoFocus
+                                aria-label="Edit subtitle"
+                              />
+                            </div>
+                          ) : (
+                            <button
+                              className="inline-block whitespace-pre-wrap break-words rounded-md bg-black/70 px-3 py-1 text-[13px] font-medium text-white shadow transition hover:bg-black/80"
+                              style={{ fontSize: `${13 * subtitleScale}px`, maxWidth: `${subtitleMaxWidth}px` }}
+                              onClick={handleOpenSubtitleEditor}
+                              type="button"
+                            >
+                              {currentSubtitle}
+                            </button>
+                          )}
                         </div>
                       ) : null}
-                      {nextClip?.media?.previewUrl && nextClip.media.kind === "video" && nextClip.media.source === "local" ? (
-                        <video
-                          src={nextClip.media.previewUrl}
-                          preload="auto"
-                          className="hidden"
-                          aria-hidden
-                        />
-                      ) : null}
+                      <span
+                        ref={subtitleMeasureRef}
+                        className="pointer-events-none absolute -z-10 opacity-0 whitespace-pre-wrap break-words"
+                        style={{
+                          fontSize: `${13 * subtitleScale}px`,
+                          fontWeight: 500,
+                          lineHeight: "1.2",
+                          maxWidth: `${subtitleMaxWidth}px`
+                        }}
+                      />
                     </div>
                   </div>
                   <div className="flex w-full shrink-0 items-center gap-3 px-2 py-1">
                     <button
                       className={cn(
-                        "flex h-8 w-8 items-center justify-center rounded-md border border-slate-700 bg-black/50 text-slate-200 transition",
-                        previewDisabled ? "cursor-not-allowed opacity-50" : "hover:border-slate-500"
+                        "flex h-8 w-8 items-center justify-center rounded-md text-slate-200 transition",
+                        previewDisabled ? "cursor-not-allowed opacity-50" : "hover:bg-white/10"
                       )}
                       onClick={togglePlayback}
                       disabled={previewDisabled}
                       type="button"
                     >
-                      <AppIcon name={playback.isPlaying ? "pause" : "play"} className="text-[12px]" />
+                      <AppIcon name={isMediaPlaying ? "pause" : "play"} className="text-[12px]" />
+                    </button>
+                    <button
+                      className={cn(
+                        "flex h-8 w-12 items-center justify-center rounded-md px-2 text-[11px] font-semibold tabular-nums text-slate-200 transition",
+                        previewDisabled ? "cursor-not-allowed opacity-50" : "hover:bg-white/10"
+                      )}
+                      onClick={cyclePlaybackRate}
+                      disabled={previewDisabled}
+                      type="button"
+                      aria-label="Playback speed"
+                      title="Playback speed"
+                    >
+                      {`${playbackRate}X`}
                     </button>
                     <div className="flex min-w-0 flex-1 items-center gap-2">
                       <span className="text-[11px] text-slate-400 tabular-nums">{formatTime(playback.currentTime)}</span>
@@ -2020,7 +2809,7 @@ export function App() {
                       <span className="text-[11px] text-slate-400 tabular-nums">{formatTime(duration)}</span>
                     </div>
                     <button
-                      className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-700 bg-black/50 text-slate-200 transition hover:border-slate-500"
+                      className="flex h-8 w-8 items-center justify-center rounded-md text-slate-200 transition hover:bg-white/10"
                       onClick={toggleFullscreen}
                       type="button"
                       aria-label="Fullscreen"
@@ -2035,13 +2824,38 @@ export function App() {
 
           {/* Right */}
           {!isCompact ? (
-            <aside className="row-start-1 row-end-2 flex min-h-0 flex-col bg-[#0b0b0b]">
+            <aside className="row-start-1 row-end-2 flex min-h-0 flex-col overflow-hidden bg-[#0b0b0b]">
               <div className={cn(dragRegionClass, "flex items-center justify-between px-4 py-3 text-xs font-semibold text-slate-200")}>
                 <span>Transcription</span>
-                <span className="text-[10px] font-medium text-slate-500">Live sync</span>
+                <button
+                  className={cn(
+                    "pywebview-no-drag inline-flex items-center gap-2 text-[10px] font-medium transition",
+                    isTranscriptEdit ? "text-slate-200" : "text-slate-500"
+                  )}
+                  onClick={() => setIsTranscriptEdit((prev) => !prev)}
+                  type="button"
+                >
+                  <AppIcon name="edit" className="text-[11px]" />
+                  Edit
+                  <span
+                    className={cn(
+                      "relative inline-flex h-4 w-7 items-center rounded-full border transition",
+                      isTranscriptEdit ? "border-slate-500 bg-[#1b1b22]" : "border-slate-700 bg-[#151515]"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "absolute h-3 w-3 rounded-full bg-white transition",
+                        isTranscriptEdit ? "translate-x-3" : "translate-x-1"
+                      )}
+                    />
+                  </span>
+                </button>
               </div>
               <div className="min-h-0 flex-1 px-3 py-3">
-                <TranscriptPanel mediaRef={transcriptMediaRef} notify={notify} />
+                <div className="min-h-0 h-[calc(100vh-340px)] max-h-[calc(100vh-340px)] overflow-hidden">
+                  <TranscriptPanel mediaRef={transcriptMediaRef} notify={notify} editEnabled={isTranscriptEdit} />
+                </div>
               </div>
             </aside>
           ) : null}
@@ -2053,8 +2867,49 @@ export function App() {
               isCompact ? "col-span-1" : "col-span-3"
             )}
           >
-            <div className="flex items-center justify-end px-4 py-2 text-xs text-slate-400">
+            <div className="flex items-center justify-between px-4 py-2 text-xs text-slate-400">
               <div className="flex items-center gap-2">
+                <button
+                  className="inline-flex h-7 items-center gap-1.5 rounded-md border border-slate-700/70 bg-[#151515] px-2 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500"
+                  onClick={handleLoadSrt}
+                  type="button"
+                  aria-label="Load SRT"
+                  title="Load SRT"
+                >
+                  <AppIcon name="fileImport" className="text-[10px]" />
+                  Load SRT
+                </button>
+                <button
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[14px] font-bold text-slate-200 transition hover:bg-white/10"
+                  onClick={handleToggleChineseVariant}
+                  type="button"
+                  aria-label="Chinese variant"
+                  title="Chinese variant"
+                >
+                  {exportLanguage === "traditional" ? "繁" : "簡"}
+                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[12px] font-bold text-slate-200 transition hover:bg-white/10"
+                    onClick={() => setSubtitleScale((v) => Math.max(0.8, Number((v - 0.1).toFixed(2))))}
+                    type="button"
+                    aria-label="Decrease subtitle size"
+                    title="Decrease subtitle size"
+                  >
+                    T-
+                  </button>
+                  <button
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[12px] font-bold text-slate-200 transition hover:bg-white/10"
+                    onClick={() => setSubtitleScale((v) => Math.min(1.6, Number((v + 0.1).toFixed(2))))}
+                    type="button"
+                    aria-label="Increase subtitle size"
+                    title="Increase subtitle size"
+                  >
+                    T+
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
                 <span className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Zoom</span>
                 <input
                   type="range"
@@ -2074,17 +2929,8 @@ export function App() {
                   <div className="flex h-10 items-center justify-center text-[10px] uppercase tracking-[0.2em] text-slate-500">
                     ▦
                   </div>
-                  <div className="mt-2 flex flex-col space-y-2">
-                    <div className="flex h-12 items-center justify-center">
-                      <div className="flex flex-col items-center justify-center py-3">
-                        <AppIcon name="video" className="text-[12px] text-slate-200" />
-                        <span className="my-3 block h-px w-4 bg-slate-300/30" />
-                        <AppIcon name="volume" className="text-[12px] text-slate-200" />
-                      </div>
-                    </div>
-                    <div className="flex h-10 items-center justify-center">
-                      <AppIcon name="captions" className="text-[12px] text-slate-200" />
-                    </div>
+                  <div className="mt-2 flex h-10 items-center justify-center">
+                    <AppIcon name="captions" className="text-[12px] text-slate-200" />
                   </div>
                 </div>
                 <div
@@ -2098,18 +2944,8 @@ export function App() {
                   onWheel={handleTimelineWheel}
                 >
                   <div
-                    className={cn(
-                      "min-w-full pb-3 transition",
-                      isTimelineDragOver && "bg-[rgba(37,99,235,0.05)]"
-                    )}
+                    className="min-w-full pb-3"
                     style={{ width: `${timelineScrollWidth}px` }}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = "copy";
-                      setIsTimelineDragOver(true);
-                    }}
-                    onDragLeave={() => setIsTimelineDragOver(false)}
-                    onDrop={handleTimelineDrop}
                   >
                     <div className="relative">
                       <div
@@ -2140,121 +2976,32 @@ export function App() {
                         />
 
                         <div
-                          className="relative h-12 overflow-hidden rounded-md border border-slate-800/20 bg-[#151515]"
+                          className="relative h-10 overflow-hidden rounded-md border border-slate-800/20 bg-[#151515]"
                           style={{ width: `${timelineWidth}px` }}
                           ref={timelineTrackRef}
                           onPointerDown={onTrackPointerDown}
                           onPointerMove={onTrackPointerMove}
                           onPointerUp={onTrackPointerUp}
                         >
-                          <div className="absolute inset-0 bg-[#2a2a2f]" style={gridStyle} />
-                          {hasTimelineMedia ? (
-                            timelineClips.map((clip) => (
-                              <div
-                                key={clip.id}
-                                data-clip-id={clip.id}
-                                className={cn(
-                                  "absolute top-1/2 h-8 -translate-y-1/2 cursor-grab rounded-md border border-primary/60 px-2 text-[11px] font-semibold text-white shadow transition active:cursor-grabbing hover:border-primary",
-                                  clip.media.kind === "video" && clip.media.thumbnailUrl
-                                    ? "bg-black/40"
-                                    : "bg-primary/30"
-                                )}
-                                style={{
-                                  left: `${clip.startSec * pxPerSec}px`,
-                                  width: `${Math.max(8, clip.durationSec * pxPerSec)}px`,
-                                  backgroundImage:
-                                    clip.media.kind === "video" && clip.media.thumbnailUrl
-                                      ? `url(${clip.media.thumbnailUrl})`
-                                      : undefined,
-                                  backgroundSize:
-                                    clip.media.kind === "video" && clip.media.thumbnailUrl
-                                      ? `${Math.max(8, clip.baseDurationSec * pxPerSec)}px 100%`
-                                      : undefined,
-                                  backgroundRepeat:
-                                    clip.media.kind === "video" && clip.media.thumbnailUrl ? "no-repeat" : undefined,
-                                  backgroundPosition:
-                                    clip.media.kind === "video" && clip.media.thumbnailUrl
-                                      ? `${-Math.max(0, clip.trimStartSec) * pxPerSec}px center`
-                                      : undefined
-                                }}
-                                title={clip.media.name}
-                                onPointerDown={(event) => startClipDrag(event, clip.id, "move")}
-                                onPointerMove={onClipPointerMove}
-                                onPointerUp={onClipPointerUp}
-                                onClick={() => {
-                                  const sameMedia = activeMedia?.id === clip.media.id;
-                                  const mediaEl = sameMedia ? getActiveMediaEl() : null;
-                                  setActiveMedia(clip.media);
-                                  setActiveClipId(clip.id);
-                                  isGapPlaybackRef.current = false;
-                                  setPlayback((prev) => ({ ...prev, currentTime: clip.startSec, isPlaying: false }));
-                                  if (mediaEl) {
-                                    try {
-                                      mediaEl.currentTime = clip.trimStartSec;
-                                    } catch {
-                                      // Ignore.
-                                    }
-                                  } else {
-                                    pendingSeekRef.current = clip.trimStartSec;
-                                  }
-                                  if (clip.media.source === "job" && clip.media.jobId) {
-                                    dispatch(selectJob(clip.media.jobId));
-                                  }
-                                }}
-                                onContextMenu={(event) => {
-                                  event.preventDefault();
-                                  setTimelineMenu({ x: event.clientX, y: event.clientY, clipId: clip.id });
-                                }}
-                              >
-                                <div
-                                  className="absolute left-0 top-0 h-full w-1 cursor-ew-resize bg-white/30"
-                                  onPointerDown={(event) => {
-                                    event.stopPropagation();
-                                    startClipDrag(event, clip.id, "resize-left");
-                                  }}
-                                  onPointerMove={onClipPointerMove}
-                                  onPointerUp={onClipPointerUp}
-                                />
-                                <div
-                                  className="absolute right-0 top-0 h-full w-1 cursor-ew-resize bg-white/30"
-                                  onPointerDown={(event) => {
-                                    event.stopPropagation();
-                                    startClipDrag(event, clip.id, "resize-right");
-                                  }}
-                                  onPointerMove={onClipPointerMove}
-                                  onPointerUp={onClipPointerUp}
-                                />
-                                {clip.media.kind !== "video" || !clip.media.thumbnailUrl ? (
-                                  <div className="flex h-full items-center gap-1 text-[10px] font-semibold text-white/80">
-                                    <AppIcon
-                                      name={clip.media.kind === "audio" ? "volume" : "video"}
-                                      className="text-[10px]"
-                                    />
-                                    <span className="uppercase tracking-[0.2em]">
-                                      {clip.media.kind === "audio" ? "Audio" : "Media"}
-                                    </span>
-                                  </div>
-                                ) : null}
-                              </div>
-                            ))
-                          ) : null}
-                        </div>
-
-                        <div
-                          className="relative h-10 overflow-hidden rounded-md border border-slate-800/20 bg-[#151515]"
-                          style={{ width: `${timelineWidth}px` }}
-                        >
                           <div className="absolute inset-0 bg-[#222228]" style={faintGridStyle} />
-                          {segments.map((segment: any) => {
+                          {displaySegments.map((segment: any) => {
                             const start = Number(segment.start ?? 0);
                             const end = Number(segment.end ?? 0);
                             const width = Math.max(2, (end - start) * pxPerSec);
                             const left = Math.max(0, start * pxPerSec);
-                            const text = segment.originalText ?? segment.text ?? "";
+                            const rawText = segment.originalText ?? segment.text ?? "";
+                            let text = rawText;
+                            if (openCcConverter) {
+                              try {
+                                text = openCcConverter(rawText);
+                              } catch {
+                                text = rawText;
+                              }
+                            }
                             return (
                               <div
                                 key={`timeline-${segment.id}`}
-                                className="absolute top-1 h-6 cursor-grab rounded-md bg-[#3b82f6] px-2 text-[10px] text-white shadow transition active:cursor-grabbing"
+                                className="absolute top-1 h-6 cursor-grab rounded-md bg-[#151515] px-2 text-[10px] text-slate-200 transition active:cursor-grabbing"
                                 style={{ left: `${left}px`, width: `${width}px` }}
                               >
                                 <span className="block truncate leading-6">{text}</span>
@@ -2293,6 +3040,213 @@ export function App() {
         </>
       ) : null}
 
+      {alertModal ? (
+        <div
+          className="fixed inset-0 z-[140] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          onClick={() => setAlertModal(null)}
+        >
+          <div
+            className="w-full max-w-[420px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
+            role="dialog"
+            aria-modal="true"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="p-5">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#111827] text-[#60a5fa]">
+                  <AppIcon
+                    name={
+                      alertModal.tone === "success"
+                        ? "checkCircle"
+                        : alertModal.tone === "error"
+                          ? "exclamationTriangle"
+                          : "exclamationCircle"
+                    }
+                    className="text-[16px]"
+                  />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-slate-100">{alertModal.title}</div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">{alertModal.message}</p>
+                </div>
+              </div>
+              <div className="mt-5 flex items-center justify-end gap-2">
+                <button
+                  className="rounded-md border border-slate-700 bg-[#151515] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500"
+                  onClick={() => setAlertModal(null)}
+                  type="button"
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showExportModal ? (
+        <div
+          className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          onClick={() => setShowExportModal(false)}
+        >
+          <div
+            className="w-full max-w-[420px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
+            role="dialog"
+            aria-modal="true"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="p-5">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#111827] text-[#60a5fa]">
+                  <AppIcon name="download" className="text-[16px]" />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-slate-100">Export</div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                    Choose a format to export.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 space-y-2">
+                <button
+                  className={cn(
+                    "w-full rounded-md border border-slate-700 bg-[#151515] px-3 py-2 text-left text-[11px] font-semibold text-slate-200 transition",
+                    canExportCaptions ? "hover:border-slate-500" : "cursor-not-allowed opacity-50"
+                  )}
+                  onClick={() => {
+                    if (!canExportCaptions) return;
+                    setShowExportModal(false);
+                    void handleExportSrt();
+                  }}
+                  disabled={!canExportCaptions}
+                  type="button"
+                >
+                  Export SRT
+                </button>
+                <button
+                  className={cn(
+                    "w-full rounded-md border border-slate-700 bg-[#151515] px-3 py-2 text-left text-[11px] font-semibold text-slate-200 transition",
+                    canExportCaptions ? "hover:border-slate-500" : "cursor-not-allowed opacity-50"
+                  )}
+                  onClick={() => {
+                    if (!canExportCaptions) return;
+                    setShowExportModal(false);
+                    void handleExportTranscript();
+                  }}
+                  disabled={!canExportCaptions}
+                  type="button"
+                >
+                  Export Text
+                </button>
+                <button
+                  className={cn(
+                    "w-full rounded-md border border-slate-700 bg-[#151515] px-3 py-2 text-left text-[11px] font-semibold text-slate-200 transition",
+                    canExportVideo ? "hover:border-slate-500" : "cursor-not-allowed opacity-50"
+                  )}
+                  onClick={() => {
+                    if (!canExportVideo) return;
+                    setShowExportModal(false);
+                    void handleExportVideo();
+                  }}
+                  disabled={!canExportVideo}
+                  type="button"
+                >
+                  Export Video
+                </button>
+              </div>
+              <div className="mt-5 flex items-center justify-end gap-2">
+                <button
+                  className="rounded-md border border-slate-700 bg-[#151515] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500"
+                  onClick={() => setShowExportModal(false)}
+                  type="button"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {modelDownloadActive ? (
+        <div className="fixed inset-0 z-[135] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div
+            className="w-full max-w-[460px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="p-5">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#111827] text-[#60a5fa]">
+                  <AppIcon
+                    name={modelDownload.status === "error" ? "exclamationTriangle" : "download"}
+                    className="text-[16px]"
+                  />
+                </div>
+                <div className="flex-1">
+                  <div className="text-sm font-semibold text-slate-100">{modelDownloadTitle}</div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">{modelDownload.message}</p>
+                </div>
+              </div>
+
+              {modelDownload.status !== "error" ? (
+                <div className="mt-4 space-y-2">
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-[#1f2937]">
+                    {modelDownload.progress !== null ? (
+                      <div
+                        className="h-full rounded-full bg-primary transition-all"
+                        style={{ width: `${Math.max(2, Math.min(100, modelDownload.progress))}%` }}
+                      />
+                    ) : (
+                      <div className="h-full w-full animate-pulse rounded-full bg-primary/60" />
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] text-slate-400">
+                    <span>{modelDownload.progress !== null ? `${modelDownload.progress}%` : "Preparing..."}</span>
+                    <span>{modelProgressText ?? ""}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-4 space-y-2 text-[11px] text-slate-400">
+                  {modelDownload.detail ? <p>{modelDownload.detail}</p> : null}
+                  {modelDownload.downloadUrl ? (
+                    <p>
+                      Download URL:
+                      <span className="ml-1 break-all text-slate-200">{modelDownload.downloadUrl}</span>
+                    </p>
+                  ) : null}
+                  {modelDownload.expectedPath ? (
+                    <p>
+                      Save the model to:
+                      <span className="ml-1 break-all text-slate-200">{modelDownload.expectedPath}</span>
+                    </p>
+                  ) : null}
+                </div>
+              )}
+
+              {modelDownload.status === "error" ? (
+                <div className="mt-5 flex items-center justify-end gap-2">
+                  <button
+                    className="rounded-md border border-slate-700 bg-[#151515] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500"
+                    onClick={clearModelDownload}
+                    type="button"
+                  >
+                    Close
+                  </button>
+                  <button
+                    className="rounded-md bg-white px-3 py-1.5 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95"
+                    onClick={handleRetryModelDownload}
+                    type="button"
+                  >
+                    Retry Download
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {showImportModal ? (
         <div
           className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
@@ -2304,16 +3258,15 @@ export function App() {
             aria-modal="true"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="h-1 w-full bg-gradient-to-r from-[#2563eb] via-[#4338ca] to-[#6d28d9]" />
             <div className="p-5">
               <div className="flex items-start gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#111827] text-[#60a5fa]">
                   <AppIcon name="exclamationTriangle" className="text-[16px]" />
                 </div>
                 <div>
-                  <div className="text-sm font-semibold text-slate-100">Import media to generate captions</div>
+                  <div className="text-sm font-semibold text-slate-100">Open media to generate captions</div>
                   <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-                    Add at least one audio or video clip to the timeline before running AI captions.
+                    Open a video or audio file first, then run AI captions.
                   </p>
                 </div>
               </div>
@@ -2326,14 +3279,14 @@ export function App() {
                   Cancel
                 </button>
                 <button
-                  className="inline-flex items-center justify-center rounded-md bg-gradient-to-r from-[#2563eb] via-[#4338ca] to-[#6d28d9] px-3 py-1.5 text-[11px] font-semibold text-white shadow-[0_10px_24px_rgba(76,29,149,0.35)] transition hover:-translate-y-[1px] hover:brightness-110"
+                  className="rounded-md bg-white px-3 py-1.5 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95"
                   onClick={() => {
                     setShowImportModal(false);
                     handleOpenFiles();
                   }}
                   type="button"
                 >
-                  Import Media
+                  Open Media
                 </button>
               </div>
             </div>
@@ -2341,37 +3294,22 @@ export function App() {
         </div>
       ) : null}
 
-      {timelineMenu ? (
-        <div
-          className="fixed z-[120] min-w-[160px] overflow-hidden rounded-lg border border-slate-800/20 bg-[#151515] text-[11px] text-slate-200 shadow-xl"
-          style={{ left: timelineMenu.x, top: timelineMenu.y }}
-        >
-          <button
-            className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#1b1b22]"
-            onClick={() => {
-              splitClipAtPlayhead(timelineMenu.clipId);
-              setTimelineMenu(null);
-            }}
-            type="button"
-          >
-            <AppIcon name="cut" />
-            Split at playhead
-          </button>
-          <button
-            className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#1b1b22]"
-            onClick={() => {
-              deleteClip(timelineMenu.clipId);
-              setTimelineMenu(null);
-            }}
-            type="button"
-          >
-            <AppIcon name="trashAlt" />
-            Delete
-          </button>
-        </div>
-      ) : null}
+      <input
+        ref={srtInputRef}
+        type="file"
+        accept=".srt,application/x-subrip,text/plain"
+        className="hidden"
+        onChange={() => {
+          const file = srtInputRef.current?.files?.[0];
+          if (file) {
+            void handleSrtSelected(file);
+          }
+          if (srtInputRef.current) {
+            srtInputRef.current.value = "";
+          }
+        }}
+      />
 
-      <ToastHost toasts={toasts} onDismiss={dismissToast} autoHideMs={2000} />
     </>
   );
 }

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from native_config import get_models_dir, get_bundle_dir
+from model_manager import get_whisper_model_info
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +52,12 @@ def resolve_whisper_model(model_path: Optional[str] = None) -> Optional[Path]:
             if local_candidate.exists() and local_candidate.is_file():
                 return local_candidate
 
-    default_model = get_models_dir() / "whisper" / "model.bin"
+    info = get_whisper_model_info(get_models_dir())
+    default_model = info.path
     if default_model.exists() and default_model.is_file():
         return default_model
 
-    bundle_candidate = get_bundle_dir() / "whisper" / "model.bin"
+    bundle_candidate = get_bundle_dir() / "whisper" / info.filename
     if bundle_candidate.exists() and bundle_candidate.is_file():
         return bundle_candidate
 
@@ -156,8 +158,11 @@ def transcribe_whisper_cpp(
 
     model_file = resolve_whisper_model(model_path)
     if not model_file:
+        info = get_whisper_model_info(get_models_dir())
         raise RuntimeError(
-            "Whisper model not found. Place model.bin in data/models/whisper/ or pass a model path."
+            "Whisper model not found. "
+            f"Download it from {info.url} and place it at {info.path}, "
+            "or use the in-app downloader."
         )
 
     audio_path = Path(audio_path)
