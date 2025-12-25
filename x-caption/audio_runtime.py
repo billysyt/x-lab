@@ -1,4 +1,4 @@
-"""Shared audio utilities and TEN-VAD segmentation for XSub."""
+"""Shared audio utilities and TEN-VAD segmentation for X-Caption."""
 from __future__ import annotations
 
 import os
@@ -31,7 +31,7 @@ ProgressCallback = Callable[[int, str], None]
 
 
 def _env_int(name: str, default: int) -> int:
-    value = os.environ.get(name)
+    value = _env_value(name)
     if value is None or value == "":
         return default
     try:
@@ -41,7 +41,7 @@ def _env_int(name: str, default: int) -> int:
 
 
 def _env_float(name: str, default: float) -> float:
-    value = os.environ.get(name)
+    value = _env_value(name)
     if value is None or value == "":
         return default
     try:
@@ -51,7 +51,7 @@ def _env_float(name: str, default: float) -> float:
 
 
 def _env_bool(name: str, default: bool) -> bool:
-    value = os.environ.get(name)
+    value = _env_value(name)
     if value is None or value == "":
         return default
     value = value.strip().lower()
@@ -70,6 +70,15 @@ TENVAD_DEFAULTS: Dict[str, float] = {
     "PAD_MS": 30,
     "MAX_SEGMENT_MS": 30000,
 }
+
+
+def _env_value(name: str) -> Optional[str]:
+    value = os.environ.get(name)
+    if value is None and name.startswith("XSUB_"):
+        value = os.environ.get(f"XCAPTION_{name[len('XSUB_'):]}")
+    elif value is None and name.startswith("XCAPTION_"):
+        value = os.environ.get(f"XSUB_{name[len('XCAPTION_'):]}")
+    return value
 
 LONG_AUDIO_TENVAD_DEFAULTS: Dict[str, float] = {
     "HOP_SIZE": 512,
@@ -123,7 +132,7 @@ class TenVadSegmenter:
         cls,
         *,
         defaults: Optional[Dict[str, float]] = None,
-        prefix: str = "XSUB_TENVAD_",
+        prefix: str = "XCAPTION_TENVAD_",
     ) -> "TenVadSegmenter":
         merged = dict(TENVAD_DEFAULTS)
         if defaults:
@@ -236,7 +245,7 @@ def _load_audio(path: Path) -> Tuple[np.ndarray, int]:
     if sr != DEFAULT_SAMPLE_RATE:
         if librosa is None:
             raise RuntimeError(
-                "XSub requires 16 kHz audio. Install 'librosa' to enable resampling."
+                "X-Caption requires 16 kHz audio. Install 'librosa' to enable resampling."
             )
         audio = librosa.resample(audio.astype(np.float32), orig_sr=sr, target_sr=DEFAULT_SAMPLE_RATE)
         sr = DEFAULT_SAMPLE_RATE
@@ -244,7 +253,7 @@ def _load_audio(path: Path) -> Tuple[np.ndarray, int]:
 
 
 def _should_use_long_audio(duration_sec: float) -> bool:
-    mode = os.environ.get("XSUB_LONG_AUDIO_MODE")
+    mode = _env_value("XCAPTION_LONG_AUDIO_MODE")
     if mode is not None and mode.strip() != "":
         mode_norm = mode.strip().lower()
         if mode_norm in {"1", "true", "yes", "on"}:
@@ -253,7 +262,7 @@ def _should_use_long_audio(duration_sec: float) -> bool:
             return False
         # "auto" or unknown -> fall through to threshold logic.
 
-    threshold = _env_float("XSUB_LONG_AUDIO_MIN_SECONDS", LONG_AUDIO_MIN_SECONDS_DEFAULT)
+    threshold = _env_float("XCAPTION_LONG_AUDIO_MIN_SECONDS", LONG_AUDIO_MIN_SECONDS_DEFAULT)
     if threshold <= 0:
         return False
     return duration_sec >= threshold
@@ -268,7 +277,7 @@ def select_tenvad_segmenter(
         return (
             TenVadSegmenter.from_env(
                 defaults=LONG_AUDIO_TENVAD_DEFAULTS,
-                prefix="XSUB_LONG_AUDIO_TENVAD_",
+                prefix="XCAPTION_LONG_AUDIO_TENVAD_",
             ),
             True,
         )

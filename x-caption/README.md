@@ -1,8 +1,8 @@
-# XSub - Offline Speech Workspace
+# X-Caption - Offline Speech Workspace
 
-XSub is a self-contained speech-to-text studio that transcribes audio fully offline. SenseVoice ONNX handles transcription, TEN-VAD segments speech, and optional noise suppression runs locally. A native PyWebView shell wraps the Flask backend so the whole experience feels like a desktop app without internet or cloud dependencies.
+X-Caption is a self-contained speech-to-text studio that transcribes audio fully offline. SenseVoice ONNX handles transcription, TEN-VAD segments speech, and optional noise suppression runs locally. A native PyWebView shell wraps the Flask backend so the whole experience feels like a desktop app without internet or cloud dependencies.
 
-![XSub UI](assets/app_capture.png)
+![X-Caption UI](assets/app_capture.png)
 
 ## Highlights
 - True offline pipeline: bundled models + bundled FFmpeg, no cloud services.
@@ -11,7 +11,7 @@ XSub is a self-contained speech-to-text studio that transcribes audio fully offl
 - SenseVoice ONNX transcription: multilingual decoding with VAD-aware segmentation.
 - Persistent job history: results are stored in SQLite and restored after restarts.
 - Single-instance desktop shell: double-launches reuse the existing window and exit gracefully.
-- One-folder distribution: PyInstaller ships `XSub.exe` beside unpacked DLLs, Python runtime files, and resources.
+- One-folder distribution: PyInstaller ships `X-Caption.exe` beside unpacked DLLs, Python runtime files, and resources.
 
 ## Requirements
 - macOS (Apple Silicon) with Python 3.12
@@ -48,7 +48,7 @@ Note: On Linux/macOS use `source .venv312/bin/activate`.
 |-- installer/
 |   `-- windows/
 |       |-- prepare_layout.ps1  # Stages dist output before packaging
-|       `-- XSub.iss       # Inno Setup definition
+|       `-- X-Caption.iss       # Inno Setup definition
 |-- scripts/                    # UI + release build helpers
 |-- ui/                         # React UI source
 |-- static/                     # Bundled frontend assets (static/ui/app.js)
@@ -79,8 +79,8 @@ Note: On Linux/macOS use `source .venv312/bin/activate`.
 
 ### Offline runtime notes
 - The packaged desktop build runs fully offline: models are loaded from `data/models/` (or the PyInstaller-bundled copy) and no downloads occur at runtime.
-- TEN-VAD tuning can be adjusted with environment variables such as `XSUB_TENVAD_THRESHOLD`, `XSUB_TENVAD_MIN_SPEECH_MS`, and `XSUB_TENVAD_PAD_MS`.
-- Long-audio mode (enabled automatically for files >= 10 minutes) uses more aggressive TEN-VAD settings to reduce segment count. Configure via `XSUB_LONG_AUDIO_MODE=auto|1|0`, `XSUB_LONG_AUDIO_MIN_SECONDS`, and overrides like `XSUB_LONG_AUDIO_TENVAD_MIN_SILENCE_MS` / `XSUB_LONG_AUDIO_TENVAD_MAX_SEGMENT_MS`.
+- TEN-VAD tuning can be adjusted with environment variables such as `XCAPTION_TENVAD_THRESHOLD`, `XCAPTION_TENVAD_MIN_SPEECH_MS`, and `XCAPTION_TENVAD_PAD_MS`.
+- Long-audio mode (enabled automatically for files >= 10 minutes) uses more aggressive TEN-VAD settings to reduce segment count. Configure via `XCAPTION_LONG_AUDIO_MODE=auto|1|0`, `XCAPTION_LONG_AUDIO_MIN_SECONDS`, and overrides like `XCAPTION_LONG_AUDIO_TENVAD_MIN_SILENCE_MS` / `XCAPTION_LONG_AUDIO_TENVAD_MAX_SEGMENT_MS`.
 - The launcher sets `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` by default to prevent unintended downloads.
 - SenseVoice ONNX runtime: download the model assets into `data/models/sensevoice-onnx` via `python model_manager.py --download`.
 - The SenseVoice ONNX Python runtime is vendored in `./sensevoice` to keep installs simple; no additional pip package is required.
@@ -92,7 +92,7 @@ Live dev (hot reload / HMR, no Python restart needed for UI changes):
 ```bash
 python scripts/dev.py
 ```
-If port `5173` is busy, the dev script will auto-pick the next free port. If you see "Another XSub instance is already running", close the existing app instance and re-run the command.
+If port `5173` is busy, the dev script will auto-pick the next free port. If you see "Another X-Caption instance is already running", close the existing app instance and re-run the command.
 
 Build the UI for production (outputs to `static/ui/`):
 ```bash
@@ -130,19 +130,19 @@ Then run `python xsub_launcher.py` as usual.
    ```bash
    python -m PyInstaller xsub_native.spec --clean --noconfirm
    ```
-5. The result is `dist/XSub/` with `XSub.exe` plus `_internal/` support files. Distribute the entire directory together.
+5. The result is `dist/X-Caption/` with `X-Caption.exe` plus `_internal/` support files. Distribute the entire directory together.
 
 ## Preparing the Windows Installer
 1. Stage the PyInstaller output and documentation:
    ```powershell
    powershell -ExecutionPolicy Bypass -File installer\windows\prepare_layout.ps1
    ```
-   This copies `dist\\XSub\\` into `build\\windows\\stage\\` (ignored by Git).
+   This copies `dist\\X-Caption\\` into `build\\windows\\stage\\` (ignored by Git).
 2. Build the installer with Inno Setup:
    ```powershell
-   installer\\windows\\InnoSetup6\\ISCC.exe installer\\windows\\XSub.iss
+   installer\\windows\\InnoSetup6\\ISCC.exe installer\\windows\\X-Caption.iss
    ```
-   The generated `XSub-Setup.exe` sits next to the `.iss` file and installs into `C:\\Users\\{Users}\\AppData\\Local\\Programs\\XSub` with optional shortcuts.
+   The generated `X-Caption-Setup.exe` sits next to the `.iss` file and installs into `C:\\Users\\{Users}\\AppData\\Local\\Programs\\X-Caption` with optional shortcuts.
 
 ## Feature Rundown
 - Single-process guard (mutex on Windows, file lock elsewhere) prevents accidental double launches.

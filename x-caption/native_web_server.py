@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Native Web Server - XSub backend
+Native Web Server - X-Caption backend
 Serves the React UI and uses lightweight polling to emulate WebSocket behavior
 without socket.io dependencies.
 """
@@ -161,7 +161,7 @@ def create_app():
         static_folder=str(get_static_dir())
     )
 
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-xsub-native')
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-x-caption-native')
     app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
 
     # CORS support
@@ -207,7 +207,7 @@ def create_app():
 
             return jsonify({
                 "status": "healthy",
-                "service": "xsub-transcription-native",
+                "service": "x-caption-transcription-native",
                 "redis_connected": True,  # Fake for compatibility
                 "queues": queue_lengths,
                 "ffmpeg_available": test_ffmpeg(),
@@ -390,10 +390,10 @@ def create_app():
 
         if not react_entry.exists():
             return (
-                "<!doctype html><html><head><meta charset='utf-8'><title>XSub UI Missing</title>"
+                "<!doctype html><html><head><meta charset='utf-8'><title>X-Caption UI Missing</title>"
                 "<style>body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:40px;max-width:720px;line-height:1.5}</style>"
                 "</head><body>"
-                "<h2>XSub UI bundle not found</h2>"
+                "<h2>X-Caption UI bundle not found</h2>"
                 "<p>The React UI build output is missing (<code>static/ui/app.js</code>).</p>"
                 "<p>Fix:</p>"
                 "<ul>"

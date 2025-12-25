@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-XSub Native Launcher
+X-Caption Native Launcher
 Single executable - no Docker, no Redis, no external dependencies.
 
 This is the main entry point for the bundled application.
@@ -184,13 +184,13 @@ _SINGLE_INSTANCE_FILE = None
 
 def _ensure_single_instance():
     """
-    Ensure only one XSub instance is running.
+    Ensure only one X-Caption instance is running.
     Returns normally if ownership was acquired; raises RuntimeError otherwise.
     """
     global _SINGLE_INSTANCE_HANDLE, _SINGLE_INSTANCE_FILE
 
     if IS_WINDOWS:
-        mutex_name = "Global\\XSubSingleInstance"
+        mutex_name = "Global\\X-CaptionSingleInstance"
         kernel32 = ctypes.windll.kernel32
         handle = kernel32.CreateMutexW(None, False, mutex_name)
         if not handle:
@@ -200,19 +200,19 @@ def _ensure_single_instance():
         last_error = kernel32.GetLastError()
         if last_error == ERROR_ALREADY_EXISTS:
             kernel32.CloseHandle(handle)
-            raise RuntimeError("Another XSub instance is already running.")
+            raise RuntimeError("Another X-Caption instance is already running.")
 
         _SINGLE_INSTANCE_HANDLE = handle
     else:
         import fcntl  # type: ignore
 
-        lock_path = Path(tempfile.gettempdir()) / "xsub_single_instance.lock"
+        lock_path = Path(tempfile.gettempdir()) / "x-caption_single_instance.lock"
         file_handle = open(lock_path, "w")
         try:
             fcntl.flock(file_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             file_handle.close()
-            raise RuntimeError("Another XSub instance is already running.")
+            raise RuntimeError("Another X-Caption instance is already running.")
 
         _SINGLE_INSTANCE_FILE = file_handle
 # Set up logging
@@ -221,7 +221,7 @@ def _configure_logging():
     from native_config import get_logs_dir
 
     log_dir = get_logs_dir()
-    log_file = log_dir / "xsub.log"
+    log_file = log_dir / "x-caption.log"
 
     formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -231,7 +231,7 @@ def _configure_logging():
     root_logger.setLevel(logging.INFO)
 
     # Avoid duplicate handlers if already configured
-    if getattr(root_logger, "_xsub_configured", False):
+    if getattr(root_logger, "_xcaption_configured", False):
         return
 
     for handler in list(root_logger.handlers):
@@ -253,11 +253,11 @@ def _configure_logging():
 
     root_logger.addHandler(console_handler)
     root_logger.addHandler(file_handler)
-    root_logger._xsub_configured = True
+    root_logger._xcaption_configured = True
 
 _configure_logging()
 
-logger = logging.getLogger("xsub")
+logger = logging.getLogger("x-caption")
 
 _configure_logging()
 
@@ -266,7 +266,7 @@ def print_banner():
     """Print startup banner."""
     lines = [
         "=" * 70,
-        "XSub - Native Edition",
+        "X-Caption - Native Edition",
         "=" * 70,
         "    Professional Audio Transcription",
         "    No Docker | No Redis | No External Dependencies",
@@ -402,7 +402,7 @@ def start_web_server(port: int = 11220):
 
     print(f"[WEB] Starting web server on port {port}...")
     ui_mode = "React UI"
-    if os.environ.get("XSUB_UI_DEV_URL"):
+    if os.environ.get("XCAPTION_UI_DEV_URL") or os.environ.get("XSUB_UI_DEV_URL"):
         ui_mode = "React UI via Vite dev server"
     print(f"[UI] {ui_mode} with WebSocket emulation (HTTP polling)")
 
@@ -435,7 +435,7 @@ def open_browser(port: int = 11220, width: int = 1480, height: int = 900) -> str
 
     host = "127.0.0.1"
     url = f"http://{host}:{port}"
-    dev_url = os.environ.get("XSUB_UI_DEV_URL")
+    dev_url = os.environ.get("XCAPTION_UI_DEV_URL") or os.environ.get("XSUB_UI_DEV_URL")
     if dev_url:
         url = dev_url.strip()
     icon_filename = "icon.ico" if IS_WINDOWS else "icon.icns"
@@ -456,7 +456,7 @@ def open_browser(port: int = 11220, width: int = 1480, height: int = 900) -> str
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>XSub Loading</title>
+  <title>X-Caption Loading</title>
   <style>
     :root { color-scheme: dark; }
     body {
@@ -494,7 +494,7 @@ def open_browser(port: int = 11220, width: int = 1480, height: int = 900) -> str
 </head>
 <body>
   <div class="spinner"></div>
-  <p>Starting XSub services…</p>
+  <p>Starting X-Caption services…</p>
   <p class="hint">Large speech models are loading. This can take up to a minute on first launch.</p>
 </body>
 </html>
@@ -677,10 +677,11 @@ def open_browser(port: int = 11220, width: int = 1480, height: int = 900) -> str
             pass
 
         window_kwargs = {
-            "title": f"XSub {VERSION}",
+            "title": f"X-Caption {VERSION}",
             "html": placeholder_html,
             "width": width,
             "height": height,
+            "min_size": (360, 640),
             "resizable": True,
             "easy_drag": False,
             "frameless": IS_WINDOWS or sys.platform == "darwin",
@@ -866,10 +867,10 @@ def wait_for_url(url: str, timeout: float = 30.0) -> bool:
 
 def show_running_info(port: int = 11220):
     """Show information about the running application."""
-    dev_url = os.environ.get("XSUB_UI_DEV_URL")
+    dev_url = os.environ.get("XCAPTION_UI_DEV_URL") or os.environ.get("XSUB_UI_DEV_URL")
     lines = [
         "=" * 70,
-        "[OK]  XSub is now running!",
+        "[OK]  X-Caption is now running!",
         "=" * 70,
         "",
         f"Web Interface:  {dev_url}" if dev_url else f"Web Interface:  http://localhost:{port}",
@@ -905,7 +906,7 @@ def main():
         logger.warning(str(instance_error))
         if IS_WINDOWS:
             try:
-                ctypes.windll.user32.MessageBoxW(None, str(instance_error), "XSub", 0x00000040)
+                ctypes.windll.user32.MessageBoxW(None, str(instance_error), "X-Caption", 0x00000040)
             except Exception:
                 pass
         else:
@@ -933,9 +934,9 @@ def main():
         if launch_mode == "native":
             print()
             print("=" * 70)
-            print("XSub window closed.")
+            print("X-Caption window closed.")
             print("=" * 70)
-            print("Thank you for using XSub!")
+            print("Thank you for using X-Caption!")
             print()
             _force_exit(0)
 
@@ -948,7 +949,7 @@ def main():
             print("Shutting down...")
             print("=" * 70)
             print()
-            print("Thank you for using XSub!")
+            print("Thank you for using X-Caption!")
             print()
 
     except Exception as exc:
@@ -986,7 +987,7 @@ def main():
         logger.error("Application error: %s", exc, exc_info=True)
         print()
         print("=" * 70)
-        print("Application Error - XSub has crashed")
+        print("Application Error - X-Caption has crashed")
         print("=" * 70)
         print(f"Error: {exc}")
         print(f"Error Type: {type(exc).__name__}")

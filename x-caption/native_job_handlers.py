@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Native job handlers - lightweight, offline transcription pipeline for XSub.
+Native job handlers - lightweight, offline transcription pipeline for X-Caption.
 Uses native_job_queue instead of Redis/RQ.
 """
 from __future__ import annotations
@@ -38,9 +38,16 @@ _sensevoice_lock = threading.Lock()
 _VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mov", ".mkv", ".avi", ".flv", ".mpg", ".mpeg", ".webm"}
 _ALWAYS_TRANSCODE_AUDIO = {".m4a", ".aac", ".opus", ".weba"}
 
-_NOISE_SUPPRESSION_ENV = "XSUB_NOISE_SUPPRESSION"
-_RNNOISE_MODEL_ENV = "XSUB_RNNOISE_MODEL"
-_RNNOISE_MIX_ENV = "XSUB_RNNOISE_MIX"
+_NOISE_SUPPRESSION_ENV = "XCAPTION_NOISE_SUPPRESSION"
+_NOISE_SUPPRESSION_LEGACY_ENV = "XSUB_NOISE_SUPPRESSION"
+_RNNOISE_MODEL_ENV = "XCAPTION_RNNOISE_MODEL"
+_RNNOISE_MODEL_LEGACY_ENV = "XSUB_RNNOISE_MODEL"
+_RNNOISE_MIX_ENV = "XCAPTION_RNNOISE_MIX"
+_RNNOISE_MIX_LEGACY_ENV = "XSUB_RNNOISE_MIX"
+
+
+def _env_with_legacy(name: str, legacy: str) -> Optional[str]:
+    return os.environ.get(name) or os.environ.get(legacy)
 
 
 def _can_decode_with_soundfile(path: Path) -> bool:
@@ -52,7 +59,7 @@ def _can_decode_with_soundfile(path: Path) -> bool:
 
 
 def _noise_suppression_backend(value: Optional[str] = None) -> str:
-    raw_value = value if value is not None else os.environ.get(_NOISE_SUPPRESSION_ENV, "none")
+    raw_value = value if value is not None else (_env_with_legacy(_NOISE_SUPPRESSION_ENV, _NOISE_SUPPRESSION_LEGACY_ENV) or "none")
     normalized = (raw_value or "").strip().lower()
 
     if normalized in {"0", "false", "no", "off", "none", "disable", "disabled", ""}:
@@ -85,8 +92,10 @@ def _ffmpeg_escape_filter_path(path: Path) -> str:
     return value.replace(":", "\\\\:")
 
 
-def _parse_env_float(name: str, default: float) -> float:
+def _parse_env_float(name: str, default: float, *, legacy: Optional[str] = None) -> float:
     raw_value = os.environ.get(name)
+    if (raw_value is None or raw_value == "") and legacy:
+        raw_value = os.environ.get(legacy)
     if raw_value is None or raw_value == "":
         return default
     try:
@@ -96,7 +105,7 @@ def _parse_env_float(name: str, default: float) -> float:
 
 
 def _rnnoise_model_path() -> Optional[Path]:
-    model_name = (os.environ.get(_RNNOISE_MODEL_ENV) or "std.rnnn").strip()
+    model_name = (_env_with_legacy(_RNNOISE_MODEL_ENV, _RNNOISE_MODEL_LEGACY_ENV) or "std.rnnn").strip()
     if not model_name:
         model_name = "std.rnnn"
 
@@ -127,7 +136,7 @@ def _build_noise_suppression_filter(backend: str) -> Optional[str]:
         if model_path is None:
             return None
 
-        mix = _parse_env_float(_RNNOISE_MIX_ENV, 1.0)
+        mix = _parse_env_float(_RNNOISE_MIX_ENV, 1.0, legacy=_RNNOISE_MIX_LEGACY_ENV)
         if mix < -1.0:
             mix = -1.0
         elif mix > 1.0:

@@ -1,8 +1,8 @@
-; XSub Windows installer definition (Inno Setup 6+)
-#define MyAppName "XSub"
+; X-Caption Windows installer definition (Inno Setup 6+)
+#define MyAppName "X-Caption"
 #define MyAppVersion "0.1.0"
 #define MyAppPublisher "Billy YT Sin"
-#define MyAppExeName "XSub.exe"
+#define MyAppExeName "X-Caption.exe"
 
 [Setup]
 AppId={{2F7ED2B2-5F8E-4B37-A795-38FF3393025F}}
@@ -14,7 +14,7 @@ DefaultGroupName={#MyAppName}
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
 OutputDir=.
-OutputBaseFilename=XSub-Setup
+OutputBaseFilename=X-Caption-Setup
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -27,7 +27,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 ; Payload prepared via installer\windows\prepare_layout.ps1
-Source: "..\..\build\windows\stage\XSub\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "..\..\build\windows\stage\X-Caption\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

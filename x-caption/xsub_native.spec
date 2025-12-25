@@ -135,7 +135,7 @@ if sys.platform == "win32":
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-exe_name = "XSub" if sys.platform == "win32" else "xsub"
+exe_name = "X-Caption" if sys.platform == "win32" else "x-caption"
 
 exe = EXE(
     pyz,

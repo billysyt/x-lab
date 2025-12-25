@@ -108,7 +108,7 @@ def _vite_cmd(ui_dir: Path) -> list[str]:
 
 
 def _resolve_backend_python(root: Path) -> str:
-    override = os.environ.get("XSUB_BACKEND_PYTHON")
+    override = os.environ.get("XCAPTION_BACKEND_PYTHON") or os.environ.get("XSUB_BACKEND_PYTHON")
     if override:
         return override
 
@@ -121,7 +121,7 @@ def _resolve_backend_python(root: Path) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run XSub with React HMR (Vite).")
+    parser = argparse.ArgumentParser(description="Run X-Caption with React HMR (Vite).")
     parser.add_argument(
         "--port",
         type=int,
@@ -150,6 +150,7 @@ def main() -> int:
 
     port = _pick_free_port(args.host, args.port)
     ui_url = f"http://{args.host}:{port}/static/ui/"
+    env["XCAPTION_UI_DEV_URL"] = ui_url
     env["XSUB_UI_DEV_URL"] = ui_url
 
     print(f"[DEV] Starting Vite dev server at {ui_url} ...")
@@ -160,7 +161,7 @@ def main() -> int:
         env=env,
     )
 
-    print("[DEV] Starting XSub launcher...")
+    print("[DEV] Starting X-Caption launcher...")
     backend_python = _resolve_backend_python(root)
     print(f"[DEV] Using backend python: {backend_python}")
     launcher_proc = subprocess.Popen(

@@ -89,6 +89,156 @@ export function App() {
       ? /Mac/i.test(window.navigator.platform || "") || /Macintosh/i.test(window.navigator.userAgent || "")
       : false;
   const showCustomWindowControls = isWindows || isMac;
+  const [useCustomDrag, setUseCustomDrag] = useState(false);
+
+  // Use pywebview window_move to avoid drag-region glitches on transformed layouts (e.g. compact drawer).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let teardown: (() => void) | null = null;
+    let enabled = false;
+
+    const enableCustomDrag = () => {
+      if (enabled) return;
+      const win = window as any;
+      const api = win?.pywebview?.api;
+      if (!api) return;
+      const getPosition = api.window_get_position || api.windowGetPosition || api.window_getPosition;
+      const moveWindow = api.window_move || api.windowMove || api.window_moveWindow;
+      if (typeof getPosition !== "function" || typeof moveWindow !== "function") return;
+
+      enabled = true;
+      setUseCustomDrag(true);
+      document.documentElement.classList.add("pywebview-custom-drag");
+
+      let dragState: {
+        pointerId: number;
+        startX: number;
+        startY: number;
+        winX: number;
+        winY: number;
+        ready: boolean;
+        dragging: boolean;
+        captureEl: Element | null;
+      } | null = null;
+
+      let rafId = 0;
+      let pendingX = 0;
+      let pendingY = 0;
+      const DRAG_THRESHOLD_PX = 4;
+
+      const scheduleMove = (x: number, y: number) => {
+        pendingX = x;
+        pendingY = y;
+        if (rafId) return;
+        rafId = window.requestAnimationFrame(() => {
+          rafId = 0;
+          moveWindow(pendingX, pendingY);
+        });
+      };
+
+      const endDrag = (event: PointerEvent) => {
+        if (!dragState || dragState.pointerId !== event.pointerId) return;
+        if (dragState.captureEl && "releasePointerCapture" in dragState.captureEl) {
+          try {
+            dragState.captureEl.releasePointerCapture(event.pointerId);
+          } catch {
+            // ignore
+          }
+        }
+        dragState = null;
+        if (rafId) {
+          window.cancelAnimationFrame(rafId);
+          rafId = 0;
+        }
+      };
+
+      const onPointerDown = (event: PointerEvent) => {
+        if (event.button !== 0) return;
+        const target = event.target as HTMLElement | null;
+        if (!target) return;
+        const region = target.closest(".stt-drag-region");
+        if (!region) return;
+        if (target.closest(".pywebview-no-drag")) return;
+        if (target.closest("button, a, input, select, textarea, [role='button']")) return;
+
+        dragState = {
+          pointerId: event.pointerId,
+          startX: event.screenX,
+          startY: event.screenY,
+          winX: 0,
+          winY: 0,
+          ready: false,
+          dragging: false,
+          captureEl: region
+        };
+
+        Promise.resolve(getPosition())
+          .then((result: any) => {
+            if (!dragState || dragState.pointerId !== event.pointerId) return;
+            if (!result || result.success === false) {
+              endDrag(event);
+              return;
+            }
+            dragState.winX = Number(result.x) || 0;
+            dragState.winY = Number(result.y) || 0;
+            dragState.ready = true;
+          })
+          .catch(() => {
+            endDrag(event);
+          });
+      };
+
+      const onPointerMove = (event: PointerEvent) => {
+        if (!dragState || dragState.pointerId !== event.pointerId || !dragState.ready) return;
+        const dx = event.screenX - dragState.startX;
+        const dy = event.screenY - dragState.startY;
+        if (!dragState.dragging) {
+          if (Math.abs(dx) + Math.abs(dy) < DRAG_THRESHOLD_PX) return;
+          dragState.dragging = true;
+          if (dragState.captureEl && "setPointerCapture" in dragState.captureEl) {
+            try {
+              dragState.captureEl.setPointerCapture(event.pointerId);
+            } catch {
+              // ignore
+            }
+          }
+        }
+        const nextX = Math.round(dragState.winX + dx);
+        const nextY = Math.round(dragState.winY + dy);
+        scheduleMove(nextX, nextY);
+        event.preventDefault();
+      };
+
+      document.addEventListener("pointerdown", onPointerDown, true);
+      document.addEventListener("pointermove", onPointerMove, true);
+      document.addEventListener("pointerup", endDrag, true);
+      document.addEventListener("pointercancel", endDrag, true);
+
+      teardown = () => {
+        setUseCustomDrag(false);
+        document.documentElement.classList.remove("pywebview-custom-drag");
+        document.removeEventListener("pointerdown", onPointerDown, true);
+        document.removeEventListener("pointermove", onPointerMove, true);
+        document.removeEventListener("pointerup", endDrag, true);
+        document.removeEventListener("pointercancel", endDrag, true);
+        if (rafId) {
+          window.cancelAnimationFrame(rafId);
+          rafId = 0;
+        }
+      };
+    };
+
+    const onReady = () => enableCustomDrag();
+    enableCustomDrag();
+    window.addEventListener("pywebviewready", onReady as EventListener);
+    return () => {
+      window.removeEventListener("pywebviewready", onReady as EventListener);
+      if (teardown) {
+        teardown();
+        teardown = null;
+      }
+    };
+  }, []);
 
 
 
@@ -102,6 +252,9 @@ export function App() {
   }, []);
   const [isExporting, setIsExporting] = useState(false);
   const [isAltPressed, setIsAltPressed] = useState(false);
+  const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
+  const headerMenuRef = useRef<HTMLDivElement | null>(null);
+  const headerMenuButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const [playback, setPlayback] = useState({
     currentTime: 0,
@@ -143,8 +296,20 @@ export function App() {
     };
   }, []);
 
-  const [hasSelection, setHasSelection] = useState(false);
-  const [selectedName, setSelectedName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isHeaderMenuOpen) return;
+    const close = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (headerMenuRef.current?.contains(target)) return;
+      if (headerMenuButtonRef.current?.contains(target)) return;
+      setIsHeaderMenuOpen(false);
+    };
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [isHeaderMenuOpen]);
+
+  const [showImportModal, setShowImportModal] = useState(false);
   const [localMedia, setLocalMedia] = useState<MediaItem[]>([]);
   const [timelineZoom, setTimelineZoom] = useState(DEFAULT_TIMELINE_ZOOM);
   const [isCompact, setIsCompact] = useState(false);
@@ -194,6 +359,13 @@ export function App() {
   } | null>(null);
   const [timelineScrollLeft, setTimelineScrollLeft] = useState(0);
   const [timelineViewportWidth, setTimelineViewportWidth] = useState(0);
+  const dragRegionClass = useCustomDrag ? "stt-drag-region" : "pywebview-drag-region";
+
+  useEffect(() => {
+    if (!isCompact) {
+      setIsHeaderMenuOpen(false);
+    }
+  }, [isCompact]);
 
   useEffect(() => {
     if (!timelineMenu) return;
@@ -201,6 +373,17 @@ export function App() {
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, [timelineMenu]);
+
+  useEffect(() => {
+    if (!showImportModal) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowImportModal(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showImportModal]);
 
   useEffect(() => {
     const el = timelineScrollRef.current;
@@ -382,6 +565,22 @@ export function App() {
     }
     window.open(url, "_blank", "noopener,noreferrer");
   }, [notify, waitlistUrl]);
+
+  const handleOpenFiles = useCallback(() => {
+    dispatch(setActiveTab("media"));
+    if (isCompact) {
+      setIsLeftDrawerOpen(true);
+    }
+    uploadRef.current?.openFilePicker?.();
+  }, [dispatch, isCompact]);
+
+  const handleGenerateCaptions = useCallback(() => {
+    if (!timelineClips.length) {
+      setShowImportModal(true);
+      return;
+    }
+    uploadRef.current?.submitTranscription?.();
+  }, [timelineClips.length]);
 
   const handleWindowAction = useCallback((action: "close" | "minimize" | "zoom" | "fullscreen") => {
     const win = typeof window !== "undefined" ? (window as any) : null;
@@ -648,6 +847,12 @@ export function App() {
       } catch {
         // Ignore.
       }
+      if (pendingPlayRef.current) {
+        pendingPlayRef.current = false;
+        if (mediaEl.paused) {
+          void mediaEl.play();
+        }
+      }
     }
   }, [activeClipId, activeMedia, getActiveMediaEl]);
 
@@ -843,25 +1048,49 @@ export function App() {
     if (!clipTimeline.length && !activeMedia) {
       return;
     }
-    if (clipTimeline.length && !activeClipId) {
+    if (clipTimeline.length) {
       const range = timelineRanges.find(
         (r) => playback.currentTime >= r.startSec && playback.currentTime < r.startSec + r.durationSec
       );
-      if (range && range.type === "clip") {
-        const target = clipById.get(range.clipId);
-        if (target) {
-          isGapPlaybackRef.current = false;
-          setActiveClipId(target.id);
-          setActiveMedia(target.media);
-          const offset = Math.max(0, playback.currentTime - target.startSec);
-          pendingSeekRef.current = Math.min(target.trimEndSec, target.trimStartSec + offset);
-          pendingPlayRef.current = true;
-          return;
+      if (!range || range.type === "gap") {
+        const mediaEl = getActiveMediaEl();
+        if (mediaEl && !mediaEl.paused) {
+          try {
+            mediaEl.pause();
+          } catch {
+            // Ignore.
+          }
         }
+        isGapPlaybackRef.current = true;
+        if (activeMedia || activeClipId) {
+          setActiveClipId(null);
+          setActiveMedia(null);
+        }
+        pendingSeekRef.current = null;
+        setPlayback((prev) => ({ ...prev, isPlaying: !prev.isPlaying }));
+        return;
       }
-      isGapPlaybackRef.current = true;
-      setPlayback((prev) => ({ ...prev, isPlaying: !prev.isPlaying }));
-      return;
+      const target = clipById.get(range.clipId);
+      if (target && activeClipId !== target.id) {
+        isGapPlaybackRef.current = false;
+        if (playback.isPlaying) {
+          const mediaEl = getActiveMediaEl();
+          if (mediaEl && !mediaEl.paused) {
+            try {
+              mediaEl.pause();
+            } catch {
+              // Ignore.
+            }
+          }
+        }
+        setActiveClipId(target.id);
+        setActiveMedia(target.media);
+        const offset = Math.max(0, playback.currentTime - target.startSec);
+        pendingSeekRef.current = Math.min(target.trimEndSec, target.trimStartSec + offset);
+        pendingPlayRef.current = !playback.isPlaying;
+        setPlayback((prev) => ({ ...prev, isPlaying: !prev.isPlaying }));
+        return;
+      }
     }
     const mediaEl = getActiveMediaEl();
     if (!mediaEl) {
@@ -1274,12 +1503,12 @@ export function App() {
   }, []);
 
   const layoutClass = isCompact
-    ? "grid min-h-0 overflow-hidden grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)_240px]"
-    : "grid min-h-0 overflow-hidden grid-cols-[minmax(160px,240px)_minmax(0,1fr)_minmax(240px,340px)] 2xl:grid-cols-[minmax(200px,280px)_minmax(0,1fr)_minmax(280px,380px)] grid-rows-[minmax(0,1fr)_240px]";
+    ? "grid min-h-0 overflow-hidden grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto]"
+    : "grid min-h-0 overflow-hidden grid-cols-[minmax(160px,240px)_minmax(0,1fr)_minmax(240px,340px)] 2xl:grid-cols-[minmax(200px,280px)_minmax(0,1fr)_minmax(280px,380px)] grid-rows-[minmax(0,1fr)_auto]";
 
   const leftPanelContent = (
     <>
-    <div className="pywebview-drag-region flex items-center gap-2 px-4 py-3">
+    <div className={cn(dragRegionClass, "flex items-center gap-2 px-4 py-3")}>
         {([
           { id: "media", label: "Media" },
           { id: "captions", label: "Captions" }
@@ -1318,10 +1547,6 @@ export function App() {
             notify={notify}
             localMedia={localMedia}
             onLocalMediaChange={setLocalMedia}
-            onSelectionChange={(hasFile, filename) => {
-              setHasSelection(hasFile);
-              setSelectedName(filename ?? null);
-            }}
             onAddToTimeline={handleAddToTimeline}
             onDragPayloadChange={(payload) => {
               dragPayloadRef.current = payload;
@@ -1384,12 +1609,8 @@ export function App() {
             </div>
             <div className="pt-2">
               <button
-                className={cn(
-                  "inline-flex w-full items-center justify-center rounded-md border border-slate-700 bg-[#151515] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition",
-                  hasSelection ? "hover:border-slate-500" : "cursor-not-allowed opacity-50"
-                )}
-                disabled={!hasSelection}
-                onClick={() => uploadRef.current?.submitTranscription()}
+                className="inline-flex w-full items-center justify-center rounded-md bg-gradient-to-r from-[#2563eb] via-[#4338ca] to-[#6d28d9] px-3 py-2 text-[12px] font-semibold text-white shadow-[0_10px_24px_rgba(76,29,149,0.35)] transition hover:-translate-y-[1px] hover:brightness-110"
+                onClick={handleGenerateCaptions}
                 type="button"
               >
                 AI Generate Caption
@@ -1404,8 +1625,13 @@ export function App() {
   return (
     <>
       <div className="flex h-full w-full flex-col bg-[#0b0b0b] text-slate-100">
-        <div className="pywebview-drag-region flex h-10 select-none items-center justify-between bg-[#0b0b0b] px-3 text-xs text-slate-300">
-          <div className="flex min-w-0 flex-1 items-center gap-2">
+        <div
+          className={cn(
+            dragRegionClass,
+            "relative grid h-10 select-none grid-cols-[1fr_auto_1fr] items-center bg-[#0b0b0b] px-3 text-xs text-slate-300"
+          )}
+        >
+          <div className="flex min-w-0 items-center gap-2">
             {isMac ? (
               <div className="group mr-3 flex items-center gap-2">
                 <button
@@ -1469,63 +1695,177 @@ export function App() {
                 </button>
               </div>
             ) : null}
-            <span className="text-[11px] font-semibold text-slate-200">XSub</span>
-            {selectedName ? <span className="truncate text-[11px] text-slate-500">{selectedName}</span> : null}
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              className={cn(
-                "pywebview-no-drag inline-flex h-7 items-center justify-center gap-1.5 rounded-md border border-slate-700 bg-[#151515] px-2 text-[11px] font-semibold text-slate-200 transition",
-                exportSegments.length && !isExporting
-                  ? "hover:border-slate-500"
-                  : "cursor-not-allowed opacity-50"
-              )}
-              onClick={handleExportTranscript}
-              disabled={!exportSegments.length || isExporting}
-              type="button"
-            >
-              <AppIcon name="download" className="text-[10px]" />
-              Export
-            </button>
-            <button
-              className="pywebview-no-drag inline-flex h-7 items-center justify-center rounded-md bg-gradient-to-r from-[#2563eb] via-[#4338ca] to-[#6d28d9] px-2 text-[11px] font-semibold text-white shadow-[0_10px_24px_rgba(76,29,149,0.35)] transition hover:-translate-y-[1px] hover:brightness-110"
-              onClick={handleJoinWaitlist}
-              type="button"
-            >
-              Join the Waitlist
-            </button>
-            {showCustomWindowControls && !isMac ? (
-              <div className="ml-2 flex items-center gap-1 pl-2">
-                <button
-                  className="pywebview-no-drag inline-flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-[#151515] text-[10px] text-slate-200 hover:border-slate-500"
-                  onClick={() => handleWindowAction("minimize")}
-                  type="button"
-                  aria-label="Minimize"
-                  title="Minimize"
-                >
-                  <AppIcon name="windowMinimize" className="text-[10px]" />
-                </button>
-                <button
-                  className="pywebview-no-drag inline-flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-[#151515] text-[10px] text-slate-200 hover:border-slate-500"
-                  onClick={() => handleWindowAction("zoom")}
-                  type="button"
-                  aria-label="Zoom"
-                  title="Zoom"
-                >
-                  <AppIcon name="windowMaximize" className="text-[9px]" />
-                </button>
-                <button
-                  className="pywebview-no-drag inline-flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-[#151515] text-[10px] text-slate-200 hover:border-slate-500"
-                  onClick={() => handleWindowAction("close")}
-                  type="button"
-                  aria-label="Close"
-                  title="Close"
-                >
-                  <AppIcon name="times" className="text-[10px]" />
-                </button>
-              </div>
+          <div className="flex items-center justify-center gap-2">
+            <span className="text-[11px] font-semibold text-slate-200">X-Caption</span>
+            {!isCompact ? (
+              <button
+                className="pywebview-no-drag inline-flex h-7 items-center gap-1.5 rounded-md border border-slate-700 bg-[#151515] px-2 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500"
+                onClick={handleOpenFiles}
+                type="button"
+                aria-label="Open"
+                title="Open"
+              >
+                <AppIcon name="folderOpen" className="text-[11px]" />
+                Open
+              </button>
             ) : null}
           </div>
+          <div className="flex items-center justify-end gap-2">
+            {isCompact ? (
+              <button
+                ref={headerMenuButtonRef}
+                className="pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-700 bg-[#151515] text-[11px] text-slate-200 transition hover:border-slate-500"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIsHeaderMenuOpen((prev) => !prev);
+                }}
+                type="button"
+                aria-label="Menu"
+                title="Menu"
+              >
+                <AppIcon name="ellipsisV" className="text-[11px]" />
+              </button>
+            ) : (
+              <>
+                <button
+                  className={cn(
+                    "pywebview-no-drag inline-flex h-7 items-center justify-center gap-1.5 rounded-md border border-slate-700 bg-[#151515] px-2 text-[11px] font-semibold text-slate-200 transition",
+                    exportSegments.length && !isExporting
+                      ? "hover:border-slate-500"
+                      : "cursor-not-allowed opacity-50"
+                  )}
+                  onClick={handleExportTranscript}
+                  disabled={!exportSegments.length || isExporting}
+                  type="button"
+                >
+                  <AppIcon name="download" className="text-[10px]" />
+                  Export
+                </button>
+                <button
+                  className="pywebview-no-drag inline-flex h-7 items-center justify-center rounded-md bg-gradient-to-r from-[#2563eb] via-[#4338ca] to-[#6d28d9] px-2 text-[11px] font-semibold text-white shadow-[0_10px_24px_rgba(76,29,149,0.35)] transition hover:-translate-y-[1px] hover:brightness-110"
+                  onClick={handleJoinWaitlist}
+                  type="button"
+                >
+                  Join the Waitlist
+                </button>
+                {showCustomWindowControls && !isMac ? (
+                  <div className="ml-2 flex items-center gap-1 pl-2">
+                    <button
+                      className="pywebview-no-drag inline-flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-[#151515] text-[10px] text-slate-200 hover:border-slate-500"
+                      onClick={() => handleWindowAction("minimize")}
+                      type="button"
+                      aria-label="Minimize"
+                      title="Minimize"
+                    >
+                      <AppIcon name="windowMinimize" className="text-[10px]" />
+                    </button>
+                    <button
+                      className="pywebview-no-drag inline-flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-[#151515] text-[10px] text-slate-200 hover:border-slate-500"
+                      onClick={() => handleWindowAction("zoom")}
+                      type="button"
+                      aria-label="Zoom"
+                      title="Zoom"
+                    >
+                      <AppIcon name="windowMaximize" className="text-[9px]" />
+                    </button>
+                    <button
+                      className="pywebview-no-drag inline-flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-[#151515] text-[10px] text-slate-200 hover:border-slate-500"
+                      onClick={() => handleWindowAction("close")}
+                      type="button"
+                      aria-label="Close"
+                      title="Close"
+                    >
+                      <AppIcon name="times" className="text-[10px]" />
+                    </button>
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+          {isCompact && isHeaderMenuOpen ? (
+            <div
+              ref={headerMenuRef}
+              className="pywebview-no-drag absolute right-3 top-10 z-[130] min-w-[190px] overflow-hidden rounded-lg border border-slate-800/40 bg-[#151515] text-[11px] text-slate-200 shadow-xl"
+            >
+              <button
+                className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#1b1b22]"
+                onClick={() => {
+                  setIsHeaderMenuOpen(false);
+                  handleOpenFiles();
+                }}
+                type="button"
+              >
+                <AppIcon name="folderOpen" />
+                Open
+              </button>
+              <button
+                className={cn(
+                  "flex w-full items-center gap-2 px-3 py-2 text-left",
+                  exportSegments.length && !isExporting ? "hover:bg-[#1b1b22]" : "cursor-not-allowed opacity-50"
+                )}
+                onClick={() => {
+                  if (!exportSegments.length || isExporting) return;
+                  setIsHeaderMenuOpen(false);
+                  void handleExportTranscript();
+                }}
+                disabled={!exportSegments.length || isExporting}
+                type="button"
+              >
+                <AppIcon name="download" />
+                Export
+              </button>
+              <button
+                className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#1b1b22]"
+                onClick={() => {
+                  setIsHeaderMenuOpen(false);
+                  handleJoinWaitlist();
+                }}
+                type="button"
+              >
+                <AppIcon name="users" />
+                Join the Waitlist
+              </button>
+              {showCustomWindowControls && !isMac ? (
+                <>
+                  <div className="h-px bg-slate-800/60" />
+                  <button
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#1b1b22]"
+                    onClick={() => {
+                      setIsHeaderMenuOpen(false);
+                      handleWindowAction("minimize");
+                    }}
+                    type="button"
+                  >
+                    <AppIcon name="windowMinimize" />
+                    Minimize
+                  </button>
+                  <button
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#1b1b22]"
+                    onClick={() => {
+                      setIsHeaderMenuOpen(false);
+                      handleWindowAction("zoom");
+                    }}
+                    type="button"
+                  >
+                    <AppIcon name="windowMaximize" />
+                    Zoom
+                  </button>
+                  <button
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#1b1b22]"
+                    onClick={() => {
+                      setIsHeaderMenuOpen(false);
+                      handleWindowAction("close");
+                    }}
+                    type="button"
+                  >
+                    <AppIcon name="times" />
+                    Close
+                  </button>
+                </>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         <div className={cn(layoutClass, "flex-1")}>
           {/* Left */}
@@ -1537,7 +1877,7 @@ export function App() {
 
           {/* Middle */}
           <section className="row-start-1 row-end-2 flex min-h-0 flex-col bg-[#0b0b0b]">
-            <div className="pywebview-drag-region flex shrink-0 items-center justify-between px-4 py-2 text-xs text-slate-400">
+            <div className={cn(dragRegionClass, "flex shrink-0 items-center justify-between px-4 py-2 text-xs text-slate-400")}>
               <div className="flex items-center gap-2">
                 {isCompact ? (
                   <button
@@ -1696,7 +2036,7 @@ export function App() {
           {/* Right */}
           {!isCompact ? (
             <aside className="row-start-1 row-end-2 flex min-h-0 flex-col bg-[#0b0b0b]">
-              <div className="pywebview-drag-region flex items-center justify-between px-4 py-3 text-xs font-semibold text-slate-200">
+              <div className={cn(dragRegionClass, "flex items-center justify-between px-4 py-3 text-xs font-semibold text-slate-200")}>
                 <span>Transcription</span>
                 <span className="text-[10px] font-medium text-slate-500">Live sync</span>
               </div>
@@ -1728,7 +2068,7 @@ export function App() {
               </div>
             </div>
 
-            <div className="flex min-h-0 flex-1 overflow-hidden">
+            <div className="flex overflow-hidden">
               <div className="flex w-full min-h-0 gap-2 pl-2">
                 <div className="flex w-8 flex-shrink-0 flex-col text-[11px] text-slate-400">
                   <div className="flex h-10 items-center justify-center text-[10px] uppercase tracking-[0.2em] text-slate-500">
@@ -1736,10 +2076,11 @@ export function App() {
                   </div>
                   <div className="mt-2 flex flex-col space-y-2">
                     <div className="flex h-12 items-center justify-center">
-                      <AppIcon name="video" className="text-[12px] text-slate-200" />
-                    </div>
-                    <div className="flex h-10 items-center justify-center">
-                      <AppIcon name="volume" className="text-[12px] text-slate-200" />
+                      <div className="flex flex-col items-center justify-center py-3">
+                        <AppIcon name="video" className="text-[12px] text-slate-200" />
+                        <span className="my-3 block h-px w-4 bg-slate-300/30" />
+                        <AppIcon name="volume" className="text-[12px] text-slate-200" />
+                      </div>
                     </div>
                     <div className="flex h-10 items-center justify-center">
                       <AppIcon name="captions" className="text-[12px] text-slate-200" />
@@ -1758,7 +2099,7 @@ export function App() {
                 >
                   <div
                     className={cn(
-                      "min-w-full pb-4 transition",
+                      "min-w-full pb-3 transition",
                       isTimelineDragOver && "bg-[rgba(37,99,235,0.05)]"
                     )}
                     style={{ width: `${timelineScrollWidth}px` }}
@@ -1904,16 +2245,6 @@ export function App() {
                           style={{ width: `${timelineWidth}px` }}
                         >
                           <div className="absolute inset-0 bg-[#222228]" style={faintGridStyle} />
-                          {hasTimelineMedia ? (
-                            <div className="absolute inset-1 rounded bg-gradient-to-r from-[#1f2937] via-[#2f3b4b] to-[#1f2937] opacity-90" />
-                          ) : null}
-                        </div>
-
-                        <div
-                          className="relative h-10 overflow-hidden rounded-md border border-slate-800/20 bg-[#151515]"
-                          style={{ width: `${timelineWidth}px` }}
-                        >
-                          <div className="absolute inset-0 bg-[#222228]" style={faintGridStyle} />
                           {segments.map((segment: any) => {
                             const start = Number(segment.start ?? 0);
                             const end = Number(segment.end ?? 0);
@@ -1960,6 +2291,54 @@ export function App() {
             {leftPanelContent}
           </div>
         </>
+      ) : null}
+
+      {showImportModal ? (
+        <div
+          className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          onClick={() => setShowImportModal(false)}
+        >
+          <div
+            className="w-full max-w-[420px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
+            role="dialog"
+            aria-modal="true"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="h-1 w-full bg-gradient-to-r from-[#2563eb] via-[#4338ca] to-[#6d28d9]" />
+            <div className="p-5">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#111827] text-[#60a5fa]">
+                  <AppIcon name="exclamationTriangle" className="text-[16px]" />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-slate-100">Import media to generate captions</div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                    Add at least one audio or video clip to the timeline before running AI captions.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-5 flex items-center justify-end gap-2">
+                <button
+                  className="rounded-md border border-slate-700 bg-[#151515] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500"
+                  onClick={() => setShowImportModal(false)}
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button
+                  className="inline-flex items-center justify-center rounded-md bg-gradient-to-r from-[#2563eb] via-[#4338ca] to-[#6d28d9] px-3 py-1.5 text-[11px] font-semibold text-white shadow-[0_10px_24px_rgba(76,29,149,0.35)] transition hover:-translate-y-[1px] hover:brightness-110"
+                  onClick={() => {
+                    setShowImportModal(false);
+                    handleOpenFiles();
+                  }}
+                  type="button"
+                >
+                  Import Media
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {timelineMenu ? (

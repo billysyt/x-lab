@@ -177,7 +177,10 @@ class SenseVoiceOnnxTranscriber:
             raise FileNotFoundError(f"Missing SenseVoice CMVN file: {mvn_path}")
 
         self._vad_label = "ten-vad"
-        vad_backend = os.environ.get("XSUB_VAD_BACKEND", "ten-vad").strip().lower()
+        vad_backend = (
+            os.environ.get("XCAPTION_VAD_BACKEND")
+            or os.environ.get("XSUB_VAD_BACKEND", "ten-vad")
+        ).strip().lower()
         if vad_backend in {"fsmn", "fsmn-vad", "fsmn_vad"}:
             vad_config_dir = self.model_dir
             vad_model = vad_config_dir / "fsmnvad-offline.onnx"

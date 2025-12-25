@@ -6,7 +6,7 @@ data/
 .venv312/
 dist/
 ffmpeg/
-installer/windows/XSub-Setup.exe
+installer/windows/X-Caption-Setup.exe
 ui/node_modules/
 ui/.vite/
 static/ui/

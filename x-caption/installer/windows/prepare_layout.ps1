@@ -9,7 +9,7 @@ $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 $repoRoot = (Resolve-Path (Join-Path $scriptRoot '..\..')).Path
 
 if (-not $BuildOutput) {
-    $BuildOutput = Join-Path -Path $repoRoot -ChildPath 'dist\XSub'
+    $BuildOutput = Join-Path -Path $repoRoot -ChildPath 'dist\X-Caption'
 }
 
 if (-not $StagingDir) {

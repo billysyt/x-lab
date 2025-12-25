@@ -11,6 +11,7 @@ import { cn } from "../../../shared/lib/cn";
 export type UploadTabHandle = {
   submitTranscription: () => Promise<void>;
   hasSelection: () => boolean;
+  openFilePicker: () => void;
 };
 
 export type MediaItem = {
@@ -113,7 +114,10 @@ export const UploadTab = forwardRef<UploadTabHandle, {
 
   useImperativeHandle(ref, () => ({
     submitTranscription,
-    hasSelection: () => Boolean(selectedFile)
+    hasSelection: () => Boolean(selectedFile),
+    openFilePicker: () => {
+      fileInputRef.current?.click();
+    }
   }));
 
   useEffect(() => {

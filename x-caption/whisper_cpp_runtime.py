@@ -19,7 +19,7 @@ def _platform_exe_name(base: str) -> str:
 
 
 def resolve_whisper_engine() -> Optional[Path]:
-    env_path = os.environ.get("XSUB_WHISPER_ENGINE")
+    env_path = os.environ.get("XCAPTION_WHISPER_ENGINE") or os.environ.get("XSUB_WHISPER_ENGINE")
     candidates: List[Path] = []
     if env_path:
         candidates.append(Path(env_path))
@@ -151,7 +151,7 @@ def transcribe_whisper_cpp(
     if not engine:
         raise RuntimeError(
             "Whisper engine not found. Place a whisper.cpp binary at data/models/whisper/engine, "
-            "or add whisper/video.mjs with its native addon, or set XSUB_WHISPER_ENGINE to the path."
+            "or add whisper/video.mjs with its native addon, or set XCAPTION_WHISPER_ENGINE to the path."
         )
 
     model_file = resolve_whisper_model(model_path)
@@ -177,7 +177,8 @@ def transcribe_whisper_cpp(
         progress_callback(15, "Starting Whisper transcription")
 
     if engine.suffix.lower() == ".mjs":
-        json_marker = "__XSUB_JSON__"
+        json_marker = "__XCAPTION_JSON__"
+        legacy_marker = "__XSUB_JSON__"
         node_script = f"""
 import {{ pathToFileURL }} from 'url';
 const moduleUrl = pathToFileURL({json.dumps(str(engine))}).href;
@@ -199,8 +200,9 @@ console.log('{json_marker}' + JSON.stringify(result));
 
         parsed = None
         for line in (result.stdout or "").splitlines()[::-1]:
-            if json_marker in line:
-                payload = line.split(json_marker, 1)[-1].strip()
+            if json_marker in line or legacy_marker in line:
+                marker = json_marker if json_marker in line else legacy_marker
+                payload = line.split(marker, 1)[-1].strip()
                 try:
                     parsed = json.loads(payload)
                     break

@@ -39,14 +39,14 @@ def get_data_dir() -> Path:
     if is_frozen():
         # Production: Use user's home directory
         if sys.platform == 'win32':
-            # Windows: C:\Users\<username>\AppData\Local\XSub
-            data_dir = Path(os.environ.get('LOCALAPPDATA', Path.home() / 'AppData' / 'Local')) / 'XSub'
+            # Windows: C:\Users\<username>\AppData\Local\X-Caption
+            data_dir = Path(os.environ.get('LOCALAPPDATA', Path.home() / 'AppData' / 'Local')) / 'X-Caption'
         elif sys.platform == 'darwin':
-            # macOS: ~/Library/Application Support/XSub
-            data_dir = Path.home() / 'Library' / 'Application Support' / 'XSub'
+            # macOS: ~/Library/Application Support/X-Caption
+            data_dir = Path.home() / 'Library' / 'Application Support' / 'X-Caption'
         else:
-            # Linux: ~/.local/share/xsub
-            data_dir = Path.home() / '.local' / 'share' / 'xsub'
+            # Linux: ~/.local/share/x-caption
+            data_dir = Path.home() / '.local' / 'share' / 'x-caption'
     else:
         # Development: Use local directory
         data_dir = Path(__file__).parent / 'data'
@@ -73,7 +73,7 @@ def get_models_dir() -> Path:
         # Check macOS .app bundle Resources folder first
         if sys.platform == 'darwin':
             # macOS: Check Contents/Resources/data/models
-            models_path_pref = os.environ.get('XSUB_MODELS_PATH')
+            models_path_pref = os.environ.get('XCAPTION_MODELS_PATH') or os.environ.get('XSUB_MODELS_PATH')
             if not models_path_pref:
                 try:
                     import plistlib
@@ -81,7 +81,7 @@ def get_models_dir() -> Path:
                     if plist_path.exists():
                         with plist_path.open('rb') as plist_file:
                             info = plistlib.load(plist_file)
-                        models_path_pref = info.get('XSubModelsPath')
+                        models_path_pref = info.get('X-CaptionModelsPath') or info.get('XSubModelsPath')
                 except Exception as plist_exc:
                     logger.warning(f"Failed to read Info.plist for models path: {plist_exc}")
 
@@ -261,12 +261,18 @@ def setup_environment():
     _refresh_msvc_runtime()
 
     # Set application directories
-    os.environ['XSUB_BUNDLE_DIR'] = str(get_bundle_dir())
-    os.environ['XSUB_DATA_DIR'] = str(get_data_dir())
-    os.environ['XSUB_MODELS_DIR'] = str(get_models_dir())
-    os.environ['XSUB_TRANSCRIPTIONS_DIR'] = str(get_transcriptions_dir())
-    os.environ['XSUB_UPLOADS_DIR'] = str(get_uploads_dir())
-    os.environ['XSUB_LOGS_DIR'] = str(get_logs_dir())
+    os.environ['XCAPTION_BUNDLE_DIR'] = str(get_bundle_dir())
+    os.environ['XCAPTION_DATA_DIR'] = str(get_data_dir())
+    os.environ['XCAPTION_MODELS_DIR'] = str(get_models_dir())
+    os.environ['XCAPTION_TRANSCRIPTIONS_DIR'] = str(get_transcriptions_dir())
+    os.environ['XCAPTION_UPLOADS_DIR'] = str(get_uploads_dir())
+    os.environ['XCAPTION_LOGS_DIR'] = str(get_logs_dir())
+    os.environ['XSUB_BUNDLE_DIR'] = os.environ['XCAPTION_BUNDLE_DIR']
+    os.environ['XSUB_DATA_DIR'] = os.environ['XCAPTION_DATA_DIR']
+    os.environ['XSUB_MODELS_DIR'] = os.environ['XCAPTION_MODELS_DIR']
+    os.environ['XSUB_TRANSCRIPTIONS_DIR'] = os.environ['XCAPTION_TRANSCRIPTIONS_DIR']
+    os.environ['XSUB_UPLOADS_DIR'] = os.environ['XCAPTION_UPLOADS_DIR']
+    os.environ['XSUB_LOGS_DIR'] = os.environ['XCAPTION_LOGS_DIR']
 
     # Set Python environment variables
     os.environ['PYTHONUNBUFFERED'] = '1'
@@ -330,7 +336,7 @@ if __name__ == '__main__':
     config = get_config()
 
     print("=" * 60)
-    print("XSub Native Configuration")
+    print("X-Caption Native Configuration")
     print("=" * 60)
     for key, value in config.items():
         print(f"{key:20s}: {value}")
