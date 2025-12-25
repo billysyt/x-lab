@@ -457,30 +457,23 @@ def create_app():
                     "success": False,
                     "error": "job_id, segment_id, and new_text are required"
                 }), 400
+            record = native_history.get_job_record(job_id)
+            transcription = record.get("transcript") if record else None
 
-            # Load the transcription file
-            transcriptions_dir = get_transcriptions_dir()
-            job_dir = transcriptions_dir / job_id
-            json_file = job_dir / f"{job_id}.json"
-
-            if not json_file.exists():
+            if not transcription:
                 return jsonify({
                     "success": False,
-                    "error": "Transcription file not found"
+                    "error": "Transcription not found"
                 }), 404
 
-            # Read the transcription
-            with open(json_file, 'r', encoding='utf-8') as f:
-                transcription = json.load(f)
-
-            # Find and update the segment
             segment_found = False
-            if 'segments' in transcription:
-                for segment in transcription['segments']:
-                    if segment.get('id') == segment_id:
-                        segment['text'] = new_text
-                        segment_found = True
-                        break
+            segments = transcription.get("segments") or []
+            for segment in segments:
+                if segment.get('id') == segment_id:
+                    segment['text'] = new_text
+                    segment['originalText'] = new_text
+                    segment_found = True
+                    break
 
             if not segment_found:
                 return jsonify({
@@ -488,35 +481,12 @@ def create_app():
                     "error": f"Segment {segment_id} not found"
                 }), 404
 
-            # Rebuild full text
-            full_text = " ".join([seg['text'] for seg in transcription['segments'] if seg.get('text')])
+            full_text = " ".join([seg.get('text', '') for seg in segments if seg.get('text')])
             transcription['text'] = full_text
 
-            # Save updated transcription
-            with open(json_file, 'w', encoding='utf-8') as f:
-                json.dump(transcription, f, ensure_ascii=False, indent=2)
+            native_history.update_job_transcript(job_id, transcription)
 
-            # Update text file
-            text_file = job_dir / f"{job_id}.txt"
-            with open(text_file, 'w', encoding='utf-8') as f:
-                f.write(full_text)
-
-            # Update formatted file if it exists (timestamps only).
-            formatted_file = job_dir / f"{job_id}_formatted.txt"
-            if formatted_file.exists():
-                formatted_lines = []
-                for segment in transcription['segments']:
-                    start = segment.get('start', 0)
-                    end = segment.get('end', 0)
-                    start_min, start_sec = divmod(round(start), 60)
-                    end_min, end_sec = divmod(round(end), 60)
-                    time_str = f"[{start_min}:{start_sec:02d} - {end_min}:{end_sec:02d}]"
-                    formatted_lines.append(f"{time_str} {segment['text']}")
-
-                with open(formatted_file, 'w', encoding='utf-8') as f:
-                    f.write("\n".join(formatted_lines).strip())
-
-            logger.info(f"Updated segment {segment_id} in job {job_id}")
+            logger.info("Updated segment %s in job %s", segment_id, job_id)
 
             return jsonify({
                 "success": True,
@@ -531,6 +501,51 @@ def create_app():
                 "success": False,
                 "error": "Failed to edit segment"
             }), 500
+
+    @app.route('/api/job/record', methods=['POST'])
+    def upsert_job_record():
+        """Create or update a job record in the app database."""
+        try:
+            payload = request.get_json(force=True, silent=True) or {}
+            job_id = payload.get('job_id')
+            if not job_id:
+                return jsonify({"success": False, "error": "job_id is required"}), 400
+
+            record = {"job_id": job_id}
+            for key in [
+                "filename",
+                "media_path",
+                "media_kind",
+                "status",
+                "language",
+                "device",
+                "summary",
+                "transcript_json",
+                "transcript_text",
+                "segment_count",
+                "duration",
+                "ui_state",
+            ]:
+                if key in payload and payload.get(key) is not None:
+                    record[key] = payload.get(key)
+
+            native_history.upsert_job_record(record)
+            return jsonify({"success": True}), 200
+        except Exception as exc:
+            logger.error("Failed to upsert job record: %s", exc, exc_info=True)
+            return jsonify({"success": False, "error": "Failed to save job record"}), 500
+
+    @app.route('/api/job/record/<job_id>', methods=['GET'])
+    def get_job_record(job_id: str):
+        """Fetch a job record."""
+        try:
+            record = native_history.get_job_record(job_id)
+            if not record:
+                return jsonify({"success": False, "error": "Record not found"}), 404
+            return jsonify({"success": True, "record": record}), 200
+        except Exception as exc:
+            logger.error("Failed to load job record %s: %s", job_id, exc, exc_info=True)
+            return jsonify({"success": False, "error": "Failed to load job record"}), 500
 
     # Web UI - React
     @app.route('/', methods=['GET'])
@@ -713,6 +728,32 @@ def create_app():
                     continue
 
             if not job:
+                record = native_history.get_job_record(job_id)
+                if record:
+                    status = record.get("status") or "completed"
+                    normalized_status = status.lower()
+                    progress = 100 if normalized_status == "completed" else -1
+                    response = {
+                        "job_id": job_id,
+                        "status": status,
+                        "created_at": native_history._ts_to_iso(record.get("created_at")),
+                        "ended_at": native_history._ts_to_iso(record.get("updated_at")),
+                        "meta": {
+                            "progress": progress,
+                            "message": "",
+                            "stage": "pipeline",
+                        },
+                    }
+                    if record.get("transcript"):
+                        response["result"] = record.get("transcript")
+                    elif record.get("transcript_text"):
+                        response["result"] = {
+                            "job_id": job_id,
+                            "text": record.get("transcript_text"),
+                            "language": record.get("language"),
+                        }
+                    return jsonify(response)
+
                 history_entry = native_history.get_entry(job_id)
                 if history_entry:
                     status = history_entry.get("status", "completed")
@@ -729,23 +770,10 @@ def create_app():
                             "progress": progress,
                             "message": message,
                             "stage": "pipeline",
-                            "output_file": history_entry.get("output_file"),
-                            "text_file": history_entry.get("text_file"),
-                            "formatted_text_file": history_entry.get("formatted_text_file"),
                         },
                     }
 
-                    output_path = history_entry.get("output_file")
-                    if output_path:
-                        output_path = Path(output_path)
-                        if output_path.exists():
-                            try:
-                                with output_path.open("r", encoding="utf-8") as handle:
-                                    response["result"] = json.load(handle)
-                            except Exception as load_err:
-                                logger.warning("Failed to load stored result for job %s: %s", job_id, load_err)
-
-                    if "result" not in response and history_entry.get("summary"):
+                    if history_entry.get("summary"):
                         response["result"] = {
                             "job_id": job_id,
                             "text": history_entry.get("summary"),
@@ -779,7 +807,10 @@ def create_app():
 
             # Add result if completed
             if job.is_finished():
-                result = updates.get('result') or job.result
+                record = native_history.get_job_record(job_id)
+                result = record.get("transcript") if record else None
+                if not result:
+                    result = updates.get('result') or job.result
                 response["result"] = result
             elif job.is_failed():
                 response["error"] = str(job.exc_info)
@@ -941,6 +972,10 @@ def create_app():
             for path_str in candidate_paths:
                 try:
                     candidate_path = Path(path_str)
+                    resolved = candidate_path.resolve()
+                    allowed_roots = [uploads_dir.resolve(), transcriptions_dir.resolve(), temp_root]
+                    if not any(root == resolved or root in resolved.parents for root in allowed_roots):
+                        continue
                     if candidate_path.exists():
                         if candidate_path.is_file():
                             try:
@@ -1052,6 +1087,35 @@ def create_app():
             logger.error(f"Error serving audio file for job {job_id}: {e}")
             return jsonify({"error": "Failed to serve audio file"}), 500
 
+    @app.route('/media')
+    def serve_media_file():
+        """Serve a local media file by absolute path (audio/video)."""
+        try:
+            raw_path = request.args.get("path")
+            if not raw_path:
+                return jsonify({"error": "path is required"}), 400
+            try:
+                target_path = Path(raw_path).expanduser()
+            except Exception:
+                return jsonify({"error": "invalid path"}), 400
+
+            if not target_path.exists() or not target_path.is_file():
+                return jsonify({"error": "file not found"}), 404
+
+            if not allowed_file(target_path.name):
+                return jsonify({"error": "unsupported file type"}), 400
+
+            mime_type, _ = mimetypes.guess_type(str(target_path))
+            return send_file(
+                target_path,
+                as_attachment=False,
+                mimetype=mime_type or "application/octet-stream",
+                conditional=True
+            )
+        except Exception as e:
+            logger.error(f"Error serving media file: {e}")
+            return jsonify({"error": "Failed to serve media file"}), 500
+
     @app.route('/preprocess_audio', methods=['POST'])
     def preprocess_audio():
         try:
@@ -1121,16 +1185,24 @@ def create_app():
     def transcribe_audio():
         """Submit audio file for async transcription"""
         try:
-            preprocess_id = request.form.get('preprocess_id')
-
+            file_path = request.form.get('file_path') or request.form.get('path')
+            filename = request.form.get('filename')
+            media_kind = request.form.get('media_kind')
             file = request.files.get('file')
-            if (not file or file.filename == '') and not preprocess_id:
+
+            if not file_path and (not file or file.filename == ''):
                 return jsonify({"error": "No file provided"}), 400
 
-            if file and file.filename == '' and not preprocess_id:
+            if file_path:
+                source_path = Path(file_path)
+                if not source_path.exists():
+                    return jsonify({"error": "File not found"}), 400
+                filename = filename or source_path.name
+                if not allowed_file(filename):
+                    return jsonify({"error": "File type not allowed"}), 400
+            elif file and file.filename == '':
                 return jsonify({"error": "No file selected"}), 400
-
-            if file and not allowed_file(file.filename):
+            elif file and not allowed_file(file.filename):
                 return jsonify({"error": "File type not allowed"}), 400
 
             # Get parameters
@@ -1152,132 +1224,58 @@ def create_app():
                     )
                 }), 400
 
-            preprocess_id = request.form.get('preprocess_id')
-
-            uploads_dir = get_uploads_dir()
-            uploads_dir.mkdir(parents=True, exist_ok=True)
-
-            metadata = None
-            if preprocess_id:
-                metadata_path = uploads_dir / f"{preprocess_id}.json"
-                if metadata_path.exists():
-                    try:
-                        with open(metadata_path, 'r', encoding='utf-8') as meta_file:
-                            metadata = json.load(meta_file)
-                    except Exception as meta_error:
-                        logger.warning("Failed to load preprocessing metadata for %s: %s", preprocess_id, meta_error)
-
             # Create unique job ID
             job_id = str(uuid.uuid4())
 
-            temp_dir = Path(tempfile.mkdtemp())
-
-            if metadata and metadata.get("filename"):
-                filename = metadata["filename"]
-            else:
-                filename = secure_filename(file.filename)
-
+            if not filename:
+                filename = secure_filename(file.filename) if file else None
             if not filename:
                 filename = f"audio_{job_id}.wav"
 
-            file_path = temp_dir / f"{job_id}_{filename}"
-
-            if metadata and Path(metadata.get("original_path", "")).exists():
-                try:
-                    shutil.copy2(metadata["original_path"], file_path)
-                except Exception as copy_error:
-                    logger.warning("Failed to reuse preprocessed original for %s: %s", job_id, copy_error)
-                    metadata = None
-
-            if metadata is None:
+            cleanup_paths = []
+            if file_path:
+                input_path = str(Path(file_path).resolve())
+            else:
+                temp_dir = Path(tempfile.mkdtemp())
+                temp_file = temp_dir / f"{job_id}_{filename}"
                 if not file or file.filename == '':
                     return jsonify({"error": "No file provided"}), 400
-                file.save(str(file_path))
+                file.save(str(temp_file))
+                input_path = str(temp_file)
+                cleanup_paths.append(str(temp_file))
+                cleanup_paths.append(str(temp_dir))
 
-            file_extension = Path(filename).suffix or '.mp3'
-            permanent_file_path = uploads_dir / f"{job_id}{file_extension}"
-            with contextlib.suppress(Exception):
-                shutil.copy2(str(file_path), str(permanent_file_path))
+            if not media_kind:
+                ext = Path(filename).suffix.lower().lstrip(".")
+                media_kind = "video" if ext in _VIDEO_EXTENSIONS else "audio"
 
-            reuse_prepared = False
-            prepared_candidate = None
-            if metadata:
-                prepared_candidate = Path(metadata.get("prepared_path", ""))
-                reuse_prepared = prepared_candidate.exists() and prepared_candidate.suffix.lower() == ".wav"
-
-            if metadata and Path(metadata.get("prepared_path", "")).exists() and reuse_prepared:
-                prepared_source = prepared_candidate or Path(metadata["prepared_path"])
-                prepared_destination = uploads_dir / _normalized_audio_filename(job_id)
-                try:
-                    shutil.copy2(str(prepared_source), str(prepared_destination))
-                except Exception as copy_error:
-                    logger.warning("Failed to copy normalized audio for job %s: %s", job_id, copy_error)
-                    prepared_destination = prepared_source
-                prepared_path = str(prepared_destination)
-                was_transcoded = bool(metadata.get("was_transcoded"))
-
-                # Remove metadata file to avoid stale entries
-                with contextlib.suppress(Exception):
-                    (uploads_dir / f"{preprocess_id}.json").unlink()
-                # Remove obsolete preprocess artifacts
-                with contextlib.suppress(Exception):
-                    if prepared_source.exists() and prepared_source != prepared_destination:
-                        prepared_source.unlink()
-                with contextlib.suppress(Exception):
-                    original_meta_path = Path(metadata.get("original_path", ""))
-                    if original_meta_path.exists() and original_meta_path != permanent_file_path:
-                        original_meta_path.unlink()
-            else:
-                try:
-                    prepared_path, was_transcoded = _prepare_audio_for_processing(job_id, str(file_path))
-                except Exception as prep_error:
-                    logger.error("Audio preparation failed for job %s: %s", job_id, prep_error)
-                    return jsonify({"error": f"Failed to prepare audio: {prep_error}"}), 500
-
-                if preprocess_id and metadata:
-                    with contextlib.suppress(Exception):
-                        (uploads_dir / f"{preprocess_id}.json").unlink()
-
-                    prepared_meta_path = Path(metadata.get("prepared_path") or "")
-                    original_meta_path = Path(metadata.get("original_path") or "")
-
-                    with contextlib.suppress(Exception):
-                        if prepared_meta_path.exists() and prepared_meta_path.is_file():
-                            prepared_meta_path.unlink()
-                    with contextlib.suppress(Exception):
-                        if (
-                            original_meta_path.exists()
-                            and original_meta_path.is_file()
-                            and original_meta_path != permanent_file_path
-                        ):
-                            original_meta_path.unlink()
-
-            playback_path = prepared_path
-            playback_size = None
-            with contextlib.suppress(OSError):
-                playback_size = Path(playback_path).stat().st_size
-
-            # Create output directory
-            output_dir = get_transcriptions_dir() / job_id
-            output_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                native_history.upsert_job_record({
+                    "job_id": job_id,
+                    "filename": filename,
+                    "media_path": input_path,
+                    "media_kind": media_kind,
+                    "status": "processing",
+                    "language": language,
+                    "device": device,
+                })
+            except Exception as record_error:
+                logger.debug("Failed to create job record %s: %s", job_id, record_error)
 
             # Prepare job arguments
             job_args = {
                 'job_id': job_id,
-                'file_path': str(prepared_path),
+                'file_path': input_path,
                 'model_path': model,
                 'language': language,
                 'device': device,
                 'compute_type': compute_type,
                 'vad_filter': vad_filter,
                 'noise_suppression': requested_noise_backend,
-                'output_dir': str(output_dir),
                 'original_filename': filename,
-                'uploaded_audio_path': str(prepared_path),
-                'uploaded_audio_size': playback_size,
-                'prepared_audio_path': str(prepared_path),
-                'audio_was_transcoded': was_transcoded,
-                'original_audio_path': str(permanent_file_path) if permanent_file_path.exists() else None,
+                'cleanup_paths': cleanup_paths,
+                'media_path': input_path,
+                'media_kind': media_kind,
             }
 
             # Submit job to queue
@@ -1294,22 +1292,22 @@ def create_app():
             logger.info(f"Submitted job {job_id} to queue: {queue.name}")
 
             try:
-                playback_stat_size = playback_size if playback_size is not None else Path(playback_path).stat().st_size
+                playback_stat_size = None
+                with contextlib.suppress(OSError):
+                    playback_stat_size = Path(input_path).stat().st_size
                 queue.update_job_meta(job_id, {
                     "original_filename": filename,
-                    "uploaded_audio_path": str(prepared_path),
                     "audio_file": {
                         "name": filename,
-                        "path": str(prepared_path),
+                        "path": input_path,
                         "size": playback_stat_size,
-                        "was_transcoded": was_transcoded,
+                        "was_transcoded": False,
                     },
                     "language": language,
                     "device": device,
                     "model": model,
                     "message": "Job submitted successfully",
                     "progress": 0,
-                    "audio_was_transcoded": was_transcoded,
                 })
             except Exception as meta_error:
                 logger.warning("Failed to persist initial job metadata for %s: %s", job_id, meta_error)
@@ -1331,9 +1329,9 @@ def create_app():
                 "websocket_channel": f"job:{job_id}",
                 "audio_file": {
                     "name": filename,
-                    "path": str(prepared_path),
-                    "size": playback_size,
-                    "was_transcoded": was_transcoded,
+                    "path": input_path,
+                    "size": playback_stat_size if 'playback_stat_size' in locals() else None,
+                    "was_transcoded": False,
                 }
             })
 

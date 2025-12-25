@@ -72,6 +72,9 @@ export type HistoryEntry = {
   summary?: string;
   progress?: number;
   original_filename?: string;
+  media_path?: string;
+  media_kind?: string;
+  ui_state?: any;
   audio_file?: {
     name?: string;
     size?: number;

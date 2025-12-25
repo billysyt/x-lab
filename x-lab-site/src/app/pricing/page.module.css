@@ -1,0 +1,142 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 100px;
+}
+
+.hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.heroTitle {
+  font-size: clamp(2.5rem, 4vw, 4rem);
+  font-family: var(--font-display);
+  letter-spacing: -0.03em;
+  margin-top: 12px;
+}
+
+.heroLead {
+  margin-top: 16px;
+  max-width: 640px;
+  color: var(--ink-muted);
+  font-size: 1.05rem;
+}
+
+.heroNote {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 18px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.heroNote strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.pricing {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.planCard {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 26px;
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 420px;
+}
+
+.planHeader h2 {
+  font-size: 1.5rem;
+  margin-bottom: 6px;
+}
+
+.planPrice {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.planHeader p {
+  color: var(--ink-muted);
+  margin-top: 10px;
+}
+
+.planCard ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--ink-muted);
+}
+
+.planCard ul li::before {
+  content: "+";
+  margin-right: 8px;
+  color: var(--ink-soft);
+}
+
+.planCard :global(.btn) {
+  margin-top: auto;
+  width: 100%;
+}
+
+.highlight {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: var(--surface-strong);
+}
+
+.faq {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.sectionHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.faqGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.faqGrid h3 {
+  margin-bottom: 10px;
+  font-size: 1.2rem;
+}
+
+.faqGrid p {
+  color: var(--ink-muted);
+}
+
+@media (max-width: 980px) {
+  .hero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .pricing {
+    grid-template-columns: 1fr;
+  }
+
+  .faqGrid {
+    grid-template-columns: 1fr;
+  }
+}

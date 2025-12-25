@@ -7,6 +7,7 @@ import json
 import logging
 import sqlite3
 from datetime import datetime, timezone
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -39,7 +40,223 @@ def _db_path() -> Path:
 def _connect() -> sqlite3.Connection:
     path = _db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    return sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path))
+    _ensure_records_table(conn)
+    return conn
+
+
+def _ensure_records_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS job_records (
+            job_id TEXT PRIMARY KEY,
+            filename TEXT,
+            media_path TEXT,
+            media_kind TEXT,
+            status TEXT,
+            language TEXT,
+            device TEXT,
+            summary TEXT,
+            transcript_json TEXT,
+            transcript_text TEXT,
+            segment_count INTEGER,
+            duration REAL,
+            created_at REAL,
+            updated_at REAL,
+            ui_state TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_job_records_updated
+        ON job_records(updated_at)
+        """
+    )
+
+
+def _serialize_json(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except Exception:
+        return None
+
+
+def _parse_json(value: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not value:
+        return None
+    try:
+        return json.loads(value)
+    except Exception:
+        return None
+
+
+def upsert_job_record(record: Dict[str, Any]) -> None:
+    job_id = record.get("job_id")
+    if not job_id:
+        return
+
+    now = time.time()
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT filename, media_path, media_kind, status, language, device,
+                   summary, transcript_json, transcript_text, segment_count, duration,
+                   created_at, ui_state
+            FROM job_records
+            WHERE job_id = ?
+            """,
+            (job_id,),
+        ).fetchone()
+        existing = None
+        if row:
+            existing = {
+                "filename": row[0],
+                "media_path": row[1],
+                "media_kind": row[2],
+                "status": row[3],
+                "language": row[4],
+                "device": row[5],
+                "summary": row[6],
+                "transcript_json": row[7],
+                "transcript_text": row[8],
+                "segment_count": row[9],
+                "duration": row[10],
+                "created_at": row[11],
+                "ui_state": row[12],
+            }
+
+        def pick(key: str, serializer=None):
+            if key in record:
+                value = record.get(key)
+                return serializer(value) if serializer else value
+            if existing:
+                return existing.get(key)
+            return None
+
+        created_at = record.get("created_at") or (existing.get("created_at") if existing else None) or now
+        updated_at = record.get("updated_at") or now
+
+        payload = {
+            "job_id": job_id,
+            "filename": pick("filename"),
+            "media_path": pick("media_path"),
+            "media_kind": pick("media_kind"),
+            "status": pick("status"),
+            "language": pick("language"),
+            "device": pick("device"),
+            "summary": pick("summary"),
+            "transcript_json": pick("transcript_json", _serialize_json),
+            "transcript_text": pick("transcript_text"),
+            "segment_count": pick("segment_count"),
+            "duration": pick("duration"),
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "ui_state": pick("ui_state", _serialize_json),
+        }
+
+        columns = ", ".join(payload.keys())
+        placeholders = ", ".join(["?"] * len(payload))
+        updates = ", ".join([f"{key}=excluded.{key}" for key in payload.keys() if key != "job_id"])
+        conn.execute(
+            f"""
+            INSERT INTO job_records ({columns})
+            VALUES ({placeholders})
+            ON CONFLICT(job_id) DO UPDATE SET {updates}
+            """,
+            tuple(payload.values()),
+        )
+        conn.commit()
+
+
+def get_job_record(job_id: str) -> Optional[Dict[str, Any]]:
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT job_id, filename, media_path, media_kind, status, language, device,
+                   summary, transcript_json, transcript_text, segment_count, duration,
+                   created_at, updated_at, ui_state
+            FROM job_records
+            WHERE job_id = ?
+            """,
+            (job_id,),
+        ).fetchone()
+
+    if not row:
+        return None
+
+    (
+        job_id,
+        filename,
+        media_path,
+        media_kind,
+        status,
+        language,
+        device,
+        summary,
+        transcript_json,
+        transcript_text,
+        segment_count,
+        duration,
+        created_at,
+        updated_at,
+        ui_state,
+    ) = row
+
+    if not filename and media_path:
+        try:
+            filename = Path(str(media_path)).name
+        except Exception:
+            filename = filename
+
+    transcript = _parse_json(transcript_json)
+    if not media_path and transcript:
+        media_path = transcript.get("file_path") or transcript.get("original_audio_path")
+    if not filename and media_path:
+        try:
+            filename = Path(str(media_path)).name
+        except Exception:
+            filename = filename
+
+    return {
+        "job_id": job_id,
+        "filename": filename,
+        "media_path": media_path,
+        "media_kind": media_kind,
+        "status": status,
+        "language": language,
+        "device": device,
+        "summary": summary,
+        "transcript": transcript,
+        "transcript_text": transcript_text,
+        "segment_count": segment_count,
+        "duration": duration,
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "ui_state": _parse_json(ui_state),
+    }
+
+
+def update_job_ui_state(job_id: str, ui_state: Dict[str, Any]) -> None:
+    upsert_job_record({"job_id": job_id, "ui_state": ui_state})
+
+
+def update_job_transcript(job_id: str, transcript: Dict[str, Any]) -> None:
+    text = transcript.get("text") if isinstance(transcript, dict) else None
+    segments = transcript.get("segments") if isinstance(transcript, dict) else None
+    upsert_job_record({
+        "job_id": job_id,
+        "transcript_json": transcript,
+        "transcript_text": text,
+        "segment_count": len(segments) if isinstance(segments, list) else None,
+        "language": transcript.get("language") if isinstance(transcript, dict) else None,
+        "duration": transcript.get("audio_duration") if isinstance(transcript, dict) else None,
+        "status": "completed",
+    })
 
 
 def _ts_to_iso(ts: Optional[float]) -> Optional[str]:
@@ -52,70 +269,87 @@ def _ts_to_iso(ts: Optional[float]) -> Optional[str]:
 
 
 def load_history(limit: int = 200) -> List[Dict[str, Any]]:
-    """Return recent finished or failed jobs stored in the queue database."""
+    """Return recent jobs stored in the records table."""
     _cleanup_legacy_history()
-    query = """
-        SELECT job_id, status, meta, result, created_at, ended_at
-        FROM jobs
-        WHERE status IN ('finished', 'failed', 'canceled', 'cancelled')
-        ORDER BY COALESCE(ended_at, created_at) DESC
-        LIMIT ?
-    """
     entries: List[Dict[str, Any]] = []
 
     try:
         with _connect() as conn:
-            for row in conn.execute(query, (limit,)):
-                job_id, status, meta_json, result_json, created_at, ended_at = row
-                meta = json.loads(meta_json) if meta_json else {}
-                result = json.loads(result_json) if result_json else {}
+            rows = conn.execute(
+                """
+                SELECT job_id, filename, media_path, media_kind, status, language, device,
+                       summary, transcript_text, segment_count, duration, created_at, updated_at, ui_state,
+                       transcript_json
+                FROM job_records
+                ORDER BY COALESCE(updated_at, created_at) DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
 
-                normalized_status = status.lower()
-                progress = meta.get("progress")
-                if progress is None:
-                    if normalized_status in FINISHED_STATES:
-                        progress = 100
-                    elif normalized_status in FAILED_STATES:
-                        progress = -1
-                    elif normalized_status in CANCELLED_STATES:
-                        progress = -1
-                    else:
-                        progress = 0
+        for row in rows:
+            (
+                job_id,
+                filename,
+                media_path,
+                media_kind,
+                status,
+                language,
+                device,
+                summary,
+                transcript_text,
+                segment_count,
+                duration,
+                created_at,
+                updated_at,
+                ui_state,
+                transcript_json,
+            ) = row
 
-                entry: Dict[str, Any] = {
-                    "job_id": job_id,
-                    "status": status,
-                    "message": meta.get("message") or meta.get("last_message") or "",
-                    "created_at": _ts_to_iso(created_at),
-                    "completed_at": _ts_to_iso(ended_at),
-                    "language": result.get("language") or meta.get("language"),
-                    "device": result.get("device") or meta.get("device"),
-                    "audio_duration": result.get("audio_duration"),
-                    "output_file": meta.get("output_file"),
-                    "text_file": meta.get("text_file"),
-                    "formatted_text_file": meta.get("formatted_text_file"),
-                    "audio_file": meta.get("audio_file"),
-                    "summary": meta.get("summary") or (result.get("text") or "")[:500],
-                    "progress": progress,
+            transcript = _parse_json(transcript_json)
+            if not media_path and transcript:
+                media_path = transcript.get("file_path") or transcript.get("original_audio_path")
+
+            if not filename and media_path:
+                try:
+                    filename = Path(str(media_path)).name
+                except Exception:
+                    filename = filename
+
+            normalized_status = (status or "completed").lower()
+            progress = 100 if normalized_status in FINISHED_STATES else (-1 if normalized_status in FAILED_STATES else 0)
+
+            entry: Dict[str, Any] = {
+                "job_id": job_id,
+                "status": status or "completed",
+                "message": "",
+                "created_at": _ts_to_iso(created_at),
+                "completed_at": _ts_to_iso(updated_at),
+                "language": language,
+                "device": device,
+                "summary": summary or (transcript_text or "")[:500],
+                "progress": progress,
+                "original_filename": filename or job_id,
+                "media_path": media_path,
+                "media_kind": media_kind,
+                "audio_file": {
+                    "name": filename or job_id,
+                    "path": media_path,
+                },
+                "ui_state": _parse_json(ui_state),
+            }
+
+            if transcript_text or segment_count:
+                entry["result_preview"] = {
+                    "segment_count": int(segment_count or 0),
+                    "text": transcript_text,
+                    "language": language,
                 }
 
-                original_filename = meta.get("original_filename")
-                if not original_filename:
-                    audio_info = meta.get("audio_file") or {}
-                    original_filename = audio_info.get("name")
-                if not original_filename:
-                    file_path = (result.get("file_path") or meta.get("file_path") or "")
-                    original_filename = Path(file_path).name if file_path else job_id
-                entry["original_filename"] = original_filename
+            if duration is not None:
+                entry["audio_duration"] = duration
 
-                if result:
-                    entry["result_preview"] = {
-                        "segment_count": len(result.get("segments") or []),
-                        "text": result.get("text"),
-                        "language": result.get("language"),
-                    }
-
-                entries.append(entry)
+            entries.append(entry)
     except Exception as exc:
         logger.error("Failed to load job history: %s", exc)
 
@@ -140,16 +374,28 @@ def mark_completed(
         "original_filename": original_filename,
         "language": language or result.get("language"),
         "device": device or result.get("device"),
-        "output_dir": str(output_dir),
-        "output_file": str(Path(output_dir) / f"{job_id}.json"),
-        "text_file": str(Path(output_dir) / f"{job_id}.txt"),
-        "formatted_text_file": str(Path(output_dir) / f"{job_id}_formatted.txt"),
         "summary": (result.get("text") or "")[:500],
         "audio_file": audio_file,
-        "uploaded_audio_path": (audio_file.get("path") if isinstance(audio_file, dict) else None),
-        "file_path": result.get("file_path"),
     }
     queue.update_job_meta(job_id, meta_update)
+
+    try:
+        upsert_job_record({
+            "job_id": job_id,
+            "filename": original_filename,
+            "media_path": (audio_file.get("path") if isinstance(audio_file, dict) else None),
+            "media_kind": None,
+            "status": "completed",
+            "language": language or result.get("language"),
+            "device": device or result.get("device"),
+            "summary": (result.get("text") or "")[:500],
+            "transcript_json": result,
+            "transcript_text": result.get("text"),
+            "segment_count": len(result.get("segments") or []),
+            "duration": result.get("audio_duration"),
+        })
+    except Exception as exc:
+        logger.debug("Failed to upsert job record %s: %s", job_id, exc)
 
 
 def mark_failed(*, job_id: str, original_filename: str, message: str) -> None:
@@ -160,47 +406,50 @@ def mark_failed(*, job_id: str, original_filename: str, message: str) -> None:
         "original_filename": original_filename,
     }
     queue.update_job_meta(job_id, meta_update)
+    try:
+        upsert_job_record({
+            "job_id": job_id,
+            "filename": original_filename,
+            "status": "failed",
+            "summary": message,
+        })
+    except Exception as exc:
+        logger.debug("Failed to upsert failed job record %s: %s", job_id, exc)
 
 
 def remove_entry(job_id: str) -> None:
     queue = get_queue('default')
     queue.remove_job(job_id)
+    try:
+        with _connect() as conn:
+            conn.execute("DELETE FROM job_records WHERE job_id = ?", (job_id,))
+            conn.commit()
+    except Exception as exc:
+        logger.debug("Failed to remove job record %s: %s", job_id, exc)
 
 
 def get_entry(job_id: str) -> Optional[Dict[str, Any]]:
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT job_id, status, meta, result, created_at, ended_at FROM jobs WHERE job_id = ?",
-            (job_id,),
-        ).fetchone()
-        if not row:
-            return None
-        job_id, status, meta_json, result_json, created_at, ended_at = row
-        meta = json.loads(meta_json) if meta_json else {}
-        result = json.loads(result_json) if result_json else {}
-
+    record = get_job_record(job_id)
+    if record:
+        status = record.get("status") or "completed"
         normalized_status = status.lower()
-        progress = meta.get("progress")
-        if progress is None:
-            if normalized_status in FINISHED_STATES:
-                progress = 100
-            elif normalized_status in FAILED_STATES or normalized_status in CANCELLED_STATES:
-                progress = -1
-            else:
-                progress = 0
-
+        progress = 100 if normalized_status in FINISHED_STATES else (-1 if normalized_status in FAILED_STATES else 0)
         entry = {
             "job_id": job_id,
             "status": status,
-            "message": meta.get("message") or "",
-            "created_at": _ts_to_iso(created_at),
-            "completed_at": _ts_to_iso(ended_at),
-            "original_filename": meta.get("original_filename") or Path(result.get("file_path", job_id)).name,
-            "audio_file": meta.get("audio_file"),
-            "output_file": meta.get("output_file"),
-            "text_file": meta.get("text_file"),
-            "formatted_text_file": meta.get("formatted_text_file"),
-            "summary": meta.get("summary") or (result.get("text") or "")[:500],
+            "message": "",
+            "created_at": _ts_to_iso(record.get("created_at")),
+            "completed_at": _ts_to_iso(record.get("updated_at")),
+            "original_filename": record.get("filename") or job_id,
+            "audio_file": {
+                "name": record.get("filename") or job_id,
+                "path": record.get("media_path"),
+            },
+            "summary": record.get("summary") or (record.get("transcript_text") or "")[:500],
             "progress": progress,
+            "media_path": record.get("media_path"),
+            "media_kind": record.get("media_kind"),
+            "ui_state": record.get("ui_state"),
         }
         return entry
+    return None

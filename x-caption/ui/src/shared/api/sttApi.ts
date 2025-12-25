@@ -66,16 +66,29 @@ export async function apiGetWhisperModelDownload(downloadId: string): Promise<Wh
 }
 
 export async function apiTranscribeAudio(args: {
-  file: File;
+  file?: File;
+  filePath?: string | null;
+  filename?: string | null;
+  mediaKind?: "audio" | "video" | null;
   model: string;
   language: string;
   noiseSuppression: boolean;
-  preprocessId?: string | null;
   chineseStyle?: "spoken" | "written";
   chineseScript?: "traditional" | "simplified";
 }): Promise<TranscribeResponse> {
   const formData = new FormData();
-  formData.append("file", args.file);
+  if (args.file) {
+    formData.append("file", args.file);
+  }
+  if (args.filePath) {
+    formData.append("file_path", args.filePath);
+  }
+  if (args.filename) {
+    formData.append("filename", args.filename);
+  }
+  if (args.mediaKind) {
+    formData.append("media_kind", args.mediaKind);
+  }
   formData.append("model", args.model || "whisper");
   formData.append("language", args.language);
   formData.append("device", "auto");
@@ -86,10 +99,33 @@ export async function apiTranscribeAudio(args: {
   if (args.chineseScript) {
     formData.append("chinese_script", args.chineseScript);
   }
-  if (args.preprocessId) {
-    formData.append("preprocess_id", args.preprocessId);
-  }
   return fetchJson<TranscribeResponse>("/transcribe", { method: "POST", body: formData });
+}
+
+export async function apiUpsertJobRecord(payload: {
+  job_id: string;
+  filename?: string | null;
+  media_path?: string | null;
+  media_kind?: string | null;
+  status?: string | null;
+  language?: string | null;
+  device?: string | null;
+  summary?: string | null;
+  transcript_json?: unknown;
+  transcript_text?: string | null;
+  segment_count?: number | null;
+  duration?: number | null;
+  ui_state?: unknown;
+}): Promise<{ success?: boolean; error?: string }> {
+  return fetchJson<{ success?: boolean; error?: string }>("/api/job/record", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function apiGetJobRecord(jobId: string): Promise<{ success?: boolean; record?: any; error?: string }> {
+  return fetchJson<{ success?: boolean; record?: any; error?: string }>(`/api/job/record/${jobId}`);
 }
 
 export async function apiRemoveJob(jobId: string): Promise<RemoveJobResponse> {

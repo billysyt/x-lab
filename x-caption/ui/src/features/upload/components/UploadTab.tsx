@@ -8,18 +8,14 @@ import {
   useState,
   type Dispatch,
   type ForwardedRef,
-  type RefObject,
   type SetStateAction
 } from "react";
-import { apiPreprocessAudio } from "../../../shared/api/sttApi";
 import { useAppDispatch, useAppSelector } from "../../../app/hooks";
 import { removeJob, startTranscription } from "../../jobs/jobsSlice";
 import { setActiveTab } from "../../ui/uiSlice";
-import type { AudioFileInfo, PreprocessResponse } from "../../../shared/types";
 import type { ToastType } from "../../../shared/components/ToastHost";
 import { AppIcon } from "../../../shared/components/AppIcon";
 import { cn } from "../../../shared/lib/cn";
-import { fileFromBase64 } from "../../../shared/lib/file";
 
 export type UploadTabHandle = {
   submitTranscription: () => Promise<void>;
@@ -34,6 +30,7 @@ export type MediaItem = {
   source: "job" | "local";
   jobId?: string;
   file?: File;
+  localPath?: string | null;
   previewUrl?: string | null;
   thumbnailUrl?: string | null;
   createdAt?: number;
@@ -41,7 +38,6 @@ export type MediaItem = {
 };
 
 type UploadTabProps = {
-  audioRef: RefObject<HTMLAudioElement>;
   notify: (message: string, type?: ToastType) => void;
   onSelectionChange?: (hasFile: boolean, filename?: string | null, file?: File | null) => void;
   onAddToTimeline?: (items: MediaItem[]) => void;
@@ -49,10 +45,6 @@ type UploadTabProps = {
   onLocalMediaChange?: Dispatch<SetStateAction<MediaItem[]>>;
   onRequestFilePicker?: (open: () => void) => void;
 };
-
-type AudioTarget =
-  | { kind: "job" | "preprocess"; id: string; audioFile: AudioFileInfo }
-  | { kind: "none" };
 
 const VIDEO_EXTENSIONS = new Set(["mp4", "m4v", "mov", "mkv", "avi", "webm", "flv", "mpg", "mpeg"]);
 const AUDIO_EXTENSIONS = new Set(["mp3", "wav", "flac", "m4a", "aac", "ogg", "opus"]);
@@ -75,20 +67,12 @@ export const UploadTab = forwardRef(function UploadTab(
   const dispatch = useAppDispatch();
   const settings = useAppSelector((s) => s.settings);
   const exportLanguage = useAppSelector((s) => s.transcript.exportLanguage);
-  const selectedJobId = useAppSelector((s) => s.jobs.selectedJobId);
-  const selectedJob = useAppSelector((s) => (selectedJobId ? s.jobs.jobsById[selectedJobId] : null));
   const jobsById = useAppSelector((s) => s.jobs.jobsById);
   const jobOrder = useAppSelector((s) => s.jobs.order);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const preprocessRequestIdRef = useRef(0);
-
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [preprocess, setPreprocess] = useState<PreprocessResponse | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [audioTarget, setAudioTarget] = useState<AudioTarget>({ kind: "none" });
-  const [audioVersion, setAudioVersion] = useState(0);
-  const lastSelectedJobIdRef = useRef<string | null>(null);
   const [sortMode, setSortMode] = useState<"recent" | "name">("recent");
   const [filterMode, setFilterMode] = useState<"all" | "video" | "audio">("all");
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
@@ -99,12 +83,29 @@ export const UploadTab = forwardRef(function UploadTab(
   const [localMediaState, setLocalMediaState] = useState<MediaItem[]>([]);
   const localMedia = props.localMedia ?? localMediaState;
   const setLocalMedia = props.onLocalMediaChange ?? setLocalMediaState;
+  const [jobPreviewMeta, setJobPreviewMeta] = useState<
+    Record<string, { thumbnailUrl?: string | null; durationSec?: number | null }>
+  >({});
+  const jobThumbInFlight = useRef<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
     item: MediaItem;
   } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const scheduleIdle = useCallback((task: () => void) => {
+    if (typeof window === "undefined") {
+      task();
+      return;
+    }
+    const win = window as any;
+    if (typeof win.requestIdleCallback === "function") {
+      win.requestIdleCallback(() => task());
+    } else {
+      window.setTimeout(task, 0);
+    }
+  }, []);
 
   const formatTimestamp = useCallback((value?: number | null) => {
     if (!value || !Number.isFinite(value)) return "";
@@ -131,11 +132,10 @@ export const UploadTab = forwardRef(function UploadTab(
     }
   }, [contextMenu, filterMenuOpen, sortMenuOpen]);
 
-  const audioUrl = useMemo(() => {
-    if (audioTarget.kind === "none") return "";
-    const cacheBuster = audioVersion ? `?v=${audioVersion}` : "";
-    return `/audio/${audioTarget.id}${cacheBuster}`;
-  }, [audioTarget, audioVersion]);
+  const toFileUrl = useCallback((path: string) => {
+    if (!path) return "";
+    return `/media?path=${encodeURIComponent(path)}`;
+  }, []);
 
   const requestFilePicker = useCallback(() => {
     const open = () => {
@@ -146,7 +146,7 @@ export const UploadTab = forwardRef(function UploadTab(
           .call(api)
           .then((result: any) => {
             if (!result || result.cancelled) return;
-            if (!result.success || !result.file?.data) {
+            if (!result.success) {
               const message =
                 result?.error === "unsupported_file"
                   ? "Unsupported file type. Please choose an audio or video file."
@@ -154,8 +154,16 @@ export const UploadTab = forwardRef(function UploadTab(
               props.notify(message, "error");
               return;
             }
-            const file = fileFromBase64(result.file.data, result.file.name || "media", result.file.mime);
-            addLocalFiles([file]);
+            if (result.file?.path) {
+              const filePath = String(result.file.path);
+              const fileName = result.file.name || filePath.split(/[\\/]/).pop() || "media";
+              addLocalPathItem({
+                path: filePath,
+                name: fileName,
+                size: typeof result.file.size === "number" ? result.file.size : null,
+                mime: result.file.mime || null
+              });
+            }
           })
           .catch((error: any) => {
             const message = error instanceof Error ? error.message : String(error);
@@ -173,11 +181,11 @@ export const UploadTab = forwardRef(function UploadTab(
       return;
     }
     open();
-  }, [props.onRequestFilePicker]);
+  }, [addLocalFiles, addLocalPathItem, props.notify, props.onRequestFilePicker]);
 
   useImperativeHandle(ref, () => ({
     submitTranscription,
-    hasSelection: () => Boolean(selectedFile),
+    hasSelection: () => Boolean(selectedFile || selectedId),
     openFilePicker: requestFilePicker
   }));
 
@@ -185,110 +193,12 @@ export const UploadTab = forwardRef(function UploadTab(
     props.onSelectionChange?.(Boolean(selectedFile), selectedFile?.name ?? null, selectedFile ?? null);
   }, [selectedFile, props.onSelectionChange]);
 
-  useEffect(() => {
-    if (!selectedJob || !selectedJobId) {
-      return;
-    }
-
-    const selectionChanged = lastSelectedJobIdRef.current !== selectedJobId;
-    lastSelectedJobIdRef.current = selectedJobId;
-
-    if (!selectionChanged && audioTarget.kind === "preprocess") {
-      return;
-    }
-
-    const audioFile: AudioFileInfo = selectedJob.audioFile ?? {
-      name: selectedJob.filename || selectedJobId,
-      size: null,
-      path: null,
-      originalPath: null
-    };
-    setAudioTarget({ kind: "job", id: selectedJobId, audioFile });
-  }, [selectedJobId, selectedJob, audioTarget.kind]);
-
-  useEffect(() => {
-    if (audioTarget.kind !== "job") return;
-    if (audioTarget.id in jobsById) return;
-    setAudioTarget({ kind: "none" });
-  }, [audioTarget, jobsById]);
-
-  useEffect(() => {
-    const audioEl = props.audioRef.current;
-    if (!audioEl) return;
-
-    try {
-      audioEl.pause();
-    } catch {
-      // Ignore.
-    }
-
-    try {
-      audioEl.currentTime = 0;
-    } catch {
-      // Ignore.
-    }
-
-    try {
-      audioEl.load();
-    } catch {
-      // Ignore.
-    }
-  }, [audioUrl, props.audioRef]);
-
-  useEffect(() => {
-    if (!selectedJob || selectedJob.status !== "completed") return;
-    if (audioTarget.kind !== "job" || audioTarget.id !== selectedJob.id) return;
-    setAudioVersion((v) => v + 1);
-  }, [audioTarget.kind, audioTarget.id, selectedJob?.status, selectedJob?.id]);
-
-  const preprocessSelectedFile = useCallback(async (file: File) => {
-    const requestId = preprocessRequestIdRef.current + 1;
-    preprocessRequestIdRef.current = requestId;
-    try {
-      const preprocessInfo = await apiPreprocessAudio(file);
-      if (preprocessRequestIdRef.current !== requestId) return;
-      setPreprocess(preprocessInfo);
-
-      const audioFile: AudioFileInfo = {
-        name: preprocessInfo.audio_file?.name || file.name,
-        size:
-          typeof preprocessInfo.audio_file?.size === "number" ? preprocessInfo.audio_file?.size : file.size,
-        path: preprocessInfo.audio_file?.path ?? null,
-        wasTranscoded: Boolean(preprocessInfo.audio_file?.was_transcoded)
-      };
-      setAudioTarget({ kind: "preprocess", id: preprocessInfo.preprocess_id, audioFile });
-      setAudioVersion((v) => v + 1);
-    } catch (error) {
-      if (preprocessRequestIdRef.current !== requestId) return;
-      const message = error instanceof Error ? error.message : String(error);
-      props.notify(message || "Failed to prepare audio for playback.", "error");
-      setPreprocess(null);
-    }
-  }, [props.notify]);
-
-  useEffect(() => {
-    if (!selectedFile) return;
-    if (getKind(selectedFile.name) === "caption") {
-      setPreprocess(null);
-      if (audioTarget.kind === "preprocess") {
-        setAudioTarget({ kind: "none" });
-        setAudioVersion((v) => v + 1);
-      }
-      return;
-    }
-    void preprocessSelectedFile(selectedFile);
-  }, [audioTarget.kind, preprocessSelectedFile, selectedFile]);
 
   function clearSelectedFile() {
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
     setSelectedFile(null);
-    setPreprocess(null);
-    if (audioTarget.kind === "preprocess") {
-      setAudioTarget({ kind: "none" });
-      setAudioVersion((v) => v + 1);
-    }
   }
 
   function buildLocalItem(file: File): MediaItem {
@@ -301,6 +211,24 @@ export const UploadTab = forwardRef(function UploadTab(
       kind: getKind(file.name),
       source: "local",
       file,
+      localPath: null,
+      previewUrl,
+      thumbnailUrl: null,
+      createdAt: Date.now(),
+      durationSec: null
+    };
+  }
+
+  function buildLocalPathItem(args: { path: string; name: string; size?: number | null; mime?: string | null }): MediaItem {
+    const id = `local-path-${args.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const previewUrl = toFileUrl(args.path);
+    return {
+      id,
+      name: args.name,
+      kind: getKind(args.name),
+      source: "local",
+      file: undefined,
+      localPath: args.path,
       previewUrl,
       thumbnailUrl: null,
       createdAt: Date.now(),
@@ -393,6 +321,86 @@ export const UploadTab = forwardRef(function UploadTab(
     return { duration, thumbnail };
   }
 
+  async function captureVideoThumbnailFromUrl(url: string) {
+    const video = document.createElement("video");
+    video.preload = "auto";
+    video.muted = true;
+    video.playsInline = true;
+    video.src = url;
+
+    const waitFor = (event: string) =>
+      new Promise<void>((resolve, reject) => {
+        const onEvent = () => {
+          cleanup();
+          resolve();
+        };
+        const onError = () => {
+          cleanup();
+          reject(new Error("video load failed"));
+        };
+        const cleanup = () => {
+          video.removeEventListener(event, onEvent);
+          video.removeEventListener("error", onError);
+        };
+        video.addEventListener(event, onEvent, { once: true });
+        video.addEventListener("error", onError, { once: true });
+      });
+
+    try {
+      await waitFor("loadeddata");
+    } catch {
+      try {
+        await waitFor("loadedmetadata");
+      } catch {
+        return { duration: 0, thumbnail: null as string | null };
+      }
+    }
+
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    const width = video.videoWidth || 0;
+    const height = video.videoHeight || 0;
+    if (!duration || !width || !height) {
+      return { duration, thumbnail: null as string | null };
+    }
+
+    const targetHeight = 40;
+    const targetWidth = 64;
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return { duration, thumbnail: null as string | null };
+    }
+
+    const seekTo = (time: number) =>
+      new Promise<void>((resolve) => {
+        const onSeeked = () => {
+          video.removeEventListener("seeked", onSeeked);
+          resolve();
+        };
+        video.addEventListener("seeked", onSeeked, { once: true });
+        try {
+          video.currentTime = time;
+        } catch {
+          video.removeEventListener("seeked", onSeeked);
+          resolve();
+        }
+      });
+
+    const midpoint = Math.max(0, Math.min(duration / 2, Math.max(0, duration - 0.1)));
+    await seekTo(midpoint);
+    const scale = Math.max(targetWidth / width, targetHeight / height);
+    const drawWidth = width * scale;
+    const drawHeight = height * scale;
+    const dx = (targetWidth - drawWidth) / 2;
+    const dy = (targetHeight - drawHeight) / 2;
+    ctx.drawImage(video, 0, 0, width, height, dx, dy, drawWidth, drawHeight);
+
+    const thumbnail = canvas.toDataURL("image/jpeg", 0.6);
+    return { duration, thumbnail };
+  }
+
   function addLocalFiles(files: File[]) {
     if (!files.length) return;
     const supported = files.filter((file) => {
@@ -429,44 +437,76 @@ export const UploadTab = forwardRef(function UploadTab(
     const playable = picked.find((file) => getKind(file.name) !== "caption") ?? null;
     if (playable) {
       setSelectedFile(playable);
-      setPreprocess(null);
     } else {
       clearSelectedFile();
     }
 
-    items.forEach(async (item) => {
+    items.forEach((item) => {
       if (!item.file) return;
       if (item.kind === "caption") return;
-      const meta =
-        item.kind === "video"
-          ? await captureVideoThumbnail(item.file as File)
-          : await new Promise<{ duration: number; thumbnail: string | null }>((resolve) => {
-              const url = URL.createObjectURL(item.file as File);
-              const el = document.createElement("audio");
-              el.preload = "metadata";
-              el.src = url;
-              el.onloadedmetadata = () => {
-                const dur = Number.isFinite(el.duration) ? el.duration : 0;
-                URL.revokeObjectURL(url);
-                resolve({ duration: dur, thumbnail: null });
-              };
-              el.onerror = () => {
-                URL.revokeObjectURL(url);
-                resolve({ duration: 0, thumbnail: null });
-              };
-            });
-      setLocalMedia((prev) =>
-        prev.map((m) =>
-          m.id === item.id
-            ? { ...m, durationSec: meta.duration || m.durationSec, thumbnailUrl: meta.thumbnail ?? m.thumbnailUrl }
-            : m
-        )
-      );
+      scheduleIdle(() => {
+        void (async () => {
+          const meta =
+            item.kind === "video"
+              ? await captureVideoThumbnail(item.file as File)
+              : await new Promise<{ duration: number; thumbnail: string | null }>((resolve) => {
+                  const url = URL.createObjectURL(item.file as File);
+                  const el = document.createElement("audio");
+                  el.preload = "metadata";
+                  el.src = url;
+                  el.onloadedmetadata = () => {
+                    const dur = Number.isFinite(el.duration) ? el.duration : 0;
+                    URL.revokeObjectURL(url);
+                    resolve({ duration: dur, thumbnail: null });
+                  };
+                  el.onerror = () => {
+                    URL.revokeObjectURL(url);
+                    resolve({ duration: 0, thumbnail: null });
+                  };
+                });
+          setLocalMedia((prev) =>
+            prev.map((m) =>
+              m.id === item.id
+                ? { ...m, durationSec: meta.duration || m.durationSec, thumbnailUrl: meta.thumbnail ?? m.thumbnailUrl }
+                : m
+            )
+          );
+        })();
+      });
     });
   }
 
+  function addLocalPathItem(args: { path: string; name: string; size?: number | null; mime?: string | null }) {
+    const item = buildLocalPathItem(args);
+    setLocalMedia((prev) => {
+      prev.forEach((prevItem) => {
+        if (prevItem.previewUrl && prevItem.file) {
+          URL.revokeObjectURL(prevItem.previewUrl);
+        }
+      });
+      return [item];
+    });
+    setSelectedId(item.id);
+    props.onAddToTimeline?.([item]);
+    clearSelectedFile();
+    if (item.kind === "video" && item.previewUrl) {
+      scheduleIdle(() => {
+        void (async () => {
+          const meta = await captureVideoThumbnailFromUrl(item.previewUrl as string);
+          setLocalMedia((prev) =>
+            prev.map((m) =>
+              m.id === item.id
+                ? { ...m, durationSec: meta.duration || m.durationSec, thumbnailUrl: meta.thumbnail ?? m.thumbnailUrl }
+                : m
+            )
+          );
+        })();
+      });
+    }
+  }
+
   function removeLocalItem(item: MediaItem) {
-    if (item.previewUrl) {
+    if (item.previewUrl && item.file) {
       URL.revokeObjectURL(item.previewUrl);
     }
     setLocalMedia((prev) => prev.filter((m) => m.id !== item.id));
@@ -480,8 +520,23 @@ export const UploadTab = forwardRef(function UploadTab(
     const jobItems = jobOrder
       .map((id) => buildJobItem(id))
       .filter(Boolean) as MediaItem[];
-    return [...localMedia, ...jobItems];
-  }, [jobOrder, localMedia, jobsById]);
+    if (!localMedia.length) {
+      return jobItems;
+    }
+    const jobNames = new Set(jobItems.map((item) => item.name.toLowerCase()));
+    const jobPaths = new Set(
+      jobItems
+        .map((item) => item.localPath ?? item.previewUrl)
+        .filter((value): value is string => Boolean(value))
+    );
+    const dedupedLocal = localMedia.filter((item) => {
+      if (jobNames.has(item.name.toLowerCase())) return false;
+      if (item.localPath && jobPaths.has(item.localPath)) return false;
+      if (item.previewUrl && jobPaths.has(item.previewUrl)) return false;
+      return true;
+    });
+    return [...dedupedLocal, ...jobItems];
+  }, [jobOrder, localMedia, jobsById, jobPreviewMeta]);
 
   const filteredMediaItems = useMemo(() => {
     let items = [...mediaItems];
@@ -503,6 +558,34 @@ export const UploadTab = forwardRef(function UploadTab(
       setSelectedId(null);
     }
   }, [mediaItems, selectedId]);
+
+  useEffect(() => {
+    const videoJobs = mediaItems.filter(
+      (item) => item.source === "job" && item.kind === "video" && item.previewUrl
+    );
+    videoJobs.forEach((item) => {
+      if (jobPreviewMeta[item.id] || jobThumbInFlight.current.has(item.id)) {
+        return;
+      }
+      jobThumbInFlight.current.add(item.id);
+      scheduleIdle(() => {
+        void (async () => {
+          try {
+            const meta = await captureVideoThumbnailFromUrl(item.previewUrl as string);
+            setJobPreviewMeta((prev) => ({
+              ...prev,
+              [item.id]: {
+                thumbnailUrl: meta.thumbnail ?? null,
+                durationSec: meta.duration || null
+              }
+            }));
+          } finally {
+            jobThumbInFlight.current.delete(item.id);
+          }
+        })();
+      });
+    });
+  }, [jobPreviewMeta, mediaItems, scheduleIdle]);
 
   async function handleRemoveJob(e: React.MouseEvent, id: string) {
     e.preventDefault();
@@ -529,38 +612,55 @@ export const UploadTab = forwardRef(function UploadTab(
     const kind = getKind(job.filename);
     if (kind === "caption") return null;
     const localMatch = localMedia.find((item) => item.name === job.filename && item.kind === "video");
+    const meta = jobPreviewMeta[id];
+    const mediaPath = job.audioFile?.path || job.result?.file_path || null;
+    const previewUrl = mediaPath ? toFileUrl(mediaPath) : null;
     return {
       id,
       name: job.filename || id,
       kind,
       source: "job",
       jobId: id,
+      localPath: mediaPath,
+      previewUrl,
       createdAt: job.startTime || Date.now(),
-      durationSec: typeof jobDuration === "number" ? jobDuration : localMatch?.durationSec ?? null,
-      thumbnailUrl: localMatch?.thumbnailUrl ?? null
+      durationSec:
+        typeof jobDuration === "number" ? jobDuration : meta?.durationSec ?? localMatch?.durationSec ?? null,
+      thumbnailUrl: localMatch?.thumbnailUrl ?? meta?.thumbnailUrl ?? null
     };
   }
 
   async function submitTranscription() {
-    if (!selectedFile) {
+    const current = localMedia.find((item) => item.id === selectedId);
+    const filePath = current?.localPath ?? null;
+    const filename = current?.name || selectedFile?.name;
+    if (!filename) {
       props.notify("Please select a file first", "info");
+      return;
+    }
+    if (!filePath) {
+      props.notify("Please use Open to select a local media file.", "error");
       return;
     }
 
     try {
-      await dispatch(
+      const { job } = await dispatch(
         startTranscription({
-          file: selectedFile,
+          file: undefined,
+          filePath,
+          filename,
+          mediaKind: (current?.kind === "audio" || current?.kind === "video") ? current.kind : undefined,
           language: settings.language,
           model: settings.model,
           noiseSuppression: settings.noiseSuppression,
-          preprocessId: preprocess?.preprocess_id ?? null,
           chineseStyle: settings.chineseStyle,
           chineseScript: exportLanguage
         })
       ).unwrap();
 
-      setPreprocess(null);
+      setLocalMedia([]);
+      setSelectedId(job.id);
+      clearSelectedFile();
       dispatch(setActiveTab("captions"));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -796,7 +896,6 @@ export const UploadTab = forwardRef(function UploadTab(
           }}
         />
 
-        <audio ref={props.audioRef} preload="metadata" src={audioUrl || undefined} className="sr-only" />
       </div>
     </>
   );

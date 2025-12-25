@@ -267,7 +267,27 @@ function TranscriptSegments(props: {
     const adjustedTime = numericStart + props.timestampOffsetSeconds;
     mediaEl.currentTime = Math.max(0, adjustedTime);
     if (mediaEl.paused) {
-      void mediaEl.play();
+      const attempt = () => {
+        try {
+          return mediaEl.play();
+        } catch {
+          return undefined;
+        }
+      };
+      const first = attempt();
+      if (first && typeof (first as Promise<void>).catch === "function") {
+        void (first as Promise<void>).catch(() => {
+          try {
+            mediaEl.load();
+          } catch {
+            // Ignore.
+          }
+          const retry = attempt();
+          if (retry && typeof (retry as Promise<void>).catch === "function") {
+            void (retry as Promise<void>).catch(() => undefined);
+          }
+        });
+      }
     }
   }
 
@@ -297,7 +317,7 @@ function TranscriptSegments(props: {
           "hover:bg-[#1b1b22] hover:rounded-md",
           props.isStreaming && !isCurrentPlaying && "border-l-[3px] border-warning pl-2 -ml-2",
           isBeforeActive && "border-b-0",
-          isCurrentPlaying && "bg-[#1b1b22] border-l-2 border-white/40 rounded-lg border-b-0 border-t-0"
+          isCurrentPlaying && "bg-[#1b1b22] rounded-lg border-b-0 border-t-0"
         );
 
         return (
@@ -441,6 +461,17 @@ const TranscriptSegmentRow = (function () {
               )}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (autosaveRef.current) {
+                    window.clearTimeout(autosaveRef.current);
+                    autosaveRef.current = null;
+                  }
+                  void saveEdit(draft);
+                  setIsEditing(false);
+                }
+              }}
               onBlur={() => {
                 if (autosaveRef.current) {
                   window.clearTimeout(autosaveRef.current);

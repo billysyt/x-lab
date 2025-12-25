@@ -547,11 +547,34 @@ def open_browser(port: int = 11220, width: int = 1480, height: int = 900) -> str
                 if suffix not in media_extensions:
                     return {"success": False, "error": "unsupported_file"}
 
-                return self._read_file_payload(target_path)
+                try:
+                    file_size = Path(str(target_path)).stat().st_size
+                except Exception:
+                    file_size = None
+
+                mime_type, _ = mimetypes.guess_type(str(target_path))
+                return {
+                    "success": True,
+                    "file": {
+                        "name": Path(str(target_path)).name,
+                        "path": str(target_path),
+                        "mime": mime_type or "application/octet-stream",
+                        "size": file_size,
+                    },
+                    "mode": "path",
+                }
 
             def openMediaDialog(self):
                 """Alias for camelCase access from JavaScript."""
                 return self.open_media_dialog()
+
+            def read_file(self, target_path: str):
+                """Read a file by path (used for large local files)."""
+                return self._read_file_payload(target_path)
+
+            def readFile(self, target_path: str):
+                """Alias for camelCase access from JavaScript."""
+                return self.read_file(target_path)
 
             def open_srt_dialog(self):
                 if not self._window:

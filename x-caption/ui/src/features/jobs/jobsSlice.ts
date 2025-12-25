@@ -1,12 +1,13 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit";
 import {
+  apiGetHistory,
   apiGetJob,
   apiPollJob,
   apiRemoveJob,
   apiTranscribeAudio
 } from "../../shared/api/sttApi";
 import type { Job, PollUpdate, TranscriptResult, TranscriptSegment } from "../../shared/types";
-import { deriveFilenameFromResult, normalizeJobStatus, sanitizeProgressValue } from "../../shared/lib/utils";
+import { convertHistoryEntry, deriveFilenameFromResult, normalizeJobStatus, sanitizeProgressValue } from "../../shared/lib/utils";
 import type { RootState } from "../../app/store";
 
 type JobsState = {
@@ -34,7 +35,18 @@ export const bootstrapJobs = createAsyncThunk<
   void,
   { state: RootState }
 >("jobs/bootstrap", async () => {
-  return { jobsById: {}, order: [] };
+  try {
+    const history = await apiGetHistory();
+    const entries = Array.isArray(history.jobs) ? history.jobs : [];
+    const jobs = entries.map(convertHistoryEntry).filter(Boolean) as Job[];
+    const jobsById: Record<string, Job> = {};
+    jobs.forEach((job) => {
+      jobsById[job.id] = job;
+    });
+    return { jobsById, order: sortOrder(jobsById) };
+  } catch {
+    return { jobsById: {}, order: [] };
+  }
 });
 
 export const fetchJobDetails = createAsyncThunk<
@@ -89,45 +101,49 @@ export const removeJob = createAsyncThunk<
 export const startTranscription = createAsyncThunk<
   { job: Job },
   {
-    file: File;
+    file?: File;
+    filePath?: string | null;
+    filename: string;
+    mediaKind?: "audio" | "video";
     language: string;
     model: string;
     noiseSuppression: boolean;
-    preprocessId?: string | null;
     chineseStyle?: "spoken" | "written";
     chineseScript?: "traditional" | "simplified";
   },
   { state: RootState }
 >(
   "jobs/startTranscription",
-  async ({ file, language, model, noiseSuppression, preprocessId, chineseStyle, chineseScript }) => {
+  async ({ file, filePath, filename, mediaKind, language, model, noiseSuppression, chineseStyle, chineseScript }) => {
     const result = await apiTranscribeAudio({
       file,
+      filePath,
+      filename,
+      mediaKind,
       model,
       language,
       noiseSuppression,
-      preprocessId,
       chineseStyle,
       chineseScript
     });
 
     const audioFile = result.audio_file
       ? {
-          name: result.audio_file.name || file.name,
-          size: typeof result.audio_file.size === "number" ? result.audio_file.size : file.size,
+          name: result.audio_file.name || filename,
+          size: typeof result.audio_file.size === "number" ? result.audio_file.size : null,
           path: result.audio_file.path ?? null,
           wasTranscoded: Boolean(result.audio_file.was_transcoded)
         }
       : {
-          name: file.name,
-          size: file.size,
+          name: filename,
+          size: null,
           path: null,
           wasTranscoded: false
         };
 
     const job: Job = {
       id: result.job_id,
-      filename: file.name,
+      filename,
       status: "queued",
       progress: 0,
       startTime: Date.now(),

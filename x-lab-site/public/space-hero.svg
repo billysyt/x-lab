@@ -1,0 +1,29 @@
+<svg width="1200" height="800" viewBox="0 0 1200 800" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(300 200) rotate(45) scale(380 280)">
+      <stop stop-color="#7AB4FF" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#7AB4FF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="planet" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(900 300) rotate(120) scale(180 180)">
+      <stop stop-color="#6FE7D6"/>
+      <stop offset="1" stop-color="#1B2A3A"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#E8EDF3" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#7AB4FF" stop-opacity="0.15"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="800" fill="url(#glow)"/>
+  <g opacity="0.8">
+    <circle cx="140" cy="140" r="2" fill="#E8EDF3"/>
+    <circle cx="220" cy="260" r="1.5" fill="#E8EDF3"/>
+    <circle cx="360" cy="120" r="1" fill="#E8EDF3"/>
+    <circle cx="1080" cy="180" r="1.5" fill="#E8EDF3"/>
+    <circle cx="980" cy="640" r="1" fill="#E8EDF3"/>
+    <circle cx="640" cy="520" r="1.2" fill="#E8EDF3"/>
+  </g>
+  <circle cx="900" cy="300" r="140" fill="url(#planet)"/>
+  <ellipse cx="900" cy="300" rx="220" ry="70" fill="none" stroke="url(#ring)" stroke-width="1.2"/>
+  <circle cx="280" cy="560" r="80" fill="#161C24" stroke="#1F2630" stroke-width="1.2"/>
+  <circle cx="280" cy="560" r="18" fill="#6FE7D6" opacity="0.6"/>
+</svg>

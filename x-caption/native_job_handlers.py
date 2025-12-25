@@ -332,17 +332,18 @@ def process_transcription_job(
     inference_audio_path: Optional[str] = None,
     audio_was_transcoded: Optional[bool] = None,
     original_audio_path: Optional[str] = None,
+    cleanup_paths: Optional[list] = None,
+    media_path: Optional[str] = None,
+    media_kind: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Process audio transcription job using the selected backend."""
+    prepared_audio_path_obj: Optional[Path] = None
+    was_transcoded = False
     try:
         start_time = time.time()
         update_job_progress(job_id, 0, "Starting transcription...", {"stage": "transcription"})
 
-        if not output_dir:
-            output_dir_path = get_transcriptions_dir() / job_id
-        else:
-            output_dir_path = Path(output_dir)
-        output_dir_path.mkdir(parents=True, exist_ok=True)
+        output_dir_path = Path(tempfile.mkdtemp())
 
         update_job_progress(job_id, 5, "Preparing Whisper.cpp pipeline...", {"stage": "transcription"})
 
@@ -447,15 +448,13 @@ def process_transcription_job(
         result = {
             "job_id": job_id,
             "status": "completed",
-            "file_path": file_path,
+            "file_path": media_path or file_path,
             "segments": segments,
             "text": full_text,
             "language": detected_language or "auto",
             "transcription_time": round(transcription_time, 2),
             "model": model_label,
             "device": device_label,
-            "audio_was_transcoded": was_transcoded,
-            "normalized_audio_path": str(prepared_audio_path_obj),
             "segment_count": len(segments),
         }
         if effective_duration is not None:
@@ -464,43 +463,33 @@ def process_transcription_job(
             except Exception:
                 pass
 
-        if original_audio_path:
-            result["original_audio_path"] = str(original_audio_path)
-
-        output_file = output_dir_path / f"{job_id}.json"
-        with output_file.open("w", encoding="utf-8") as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
-
-        text_file = output_dir_path / f"{job_id}.txt"
-        with text_file.open("w", encoding="utf-8") as f:
-            f.write(full_text)
-
-        formatted_lines = []
-        for segment in segments:
-            start = _format_timestamp(segment.get("start", 0.0))
-            end = _format_timestamp(segment.get("end", 0.0))
-            formatted_lines.append(f"[{start} - {end}] {segment.get('text', '')}")
-        formatted_text = "\n".join(formatted_lines).strip()
-        formatted_file = output_dir_path / f"{job_id}_formatted.txt"
-        with formatted_file.open("w", encoding="utf-8") as f:
-            f.write(formatted_text)
-
-        final_payload = {
-            "output_file": str(output_file),
-            "text_file": str(text_file),
-            "formatted_text_file": str(formatted_file),
-            "result": result,
-        }
+        try:
+            native_history.upsert_job_record({
+                "job_id": job_id,
+                "filename": Path(media_path or file_path).name,
+                "media_path": media_path or file_path,
+                "media_kind": media_kind,
+                "status": "completed",
+                "language": detected_language or "auto",
+                "device": device_label,
+                "summary": full_text[:500],
+                "transcript_json": result,
+                "transcript_text": full_text,
+                "segment_count": len(segments),
+                "duration": result.get("audio_duration"),
+            })
+        except Exception as history_error:
+            logger.warning("Failed to store job record %s: %s", job_id, history_error)
 
         if send_completion:
             update_job_progress(job_id, 100, "Transcription completed successfully", {
-                **final_payload,
+                "result": result,
                 "stage": "completed",
             })
             time.sleep(0.1)
         else:
             update_job_progress(job_id, 100, "Transcription completed", {
-                **final_payload,
+                "result": result,
                 "stage": "transcription_complete",
             })
 
@@ -513,6 +502,25 @@ def process_transcription_job(
             "error": str(e),
         })
         raise
+    finally:
+        with contextlib.suppress(Exception):
+            shutil.rmtree(output_dir_path, ignore_errors=True)
+        if cleanup_paths:
+            for path in cleanup_paths:
+                with contextlib.suppress(Exception):
+                    target = Path(path)
+                    if target.is_dir():
+                        shutil.rmtree(target, ignore_errors=True)
+                    else:
+                        target.unlink()
+        try:
+            if was_transcoded and prepared_audio_path_obj:
+                uploads_dir = get_uploads_dir().resolve()
+                prepared_path = Path(prepared_audio_path_obj).resolve()
+                if uploads_dir in prepared_path.parents:
+                    prepared_path.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 def process_full_pipeline_job(
@@ -531,10 +539,12 @@ def process_full_pipeline_job(
     prepared_audio_path: Optional[str] = None,
     audio_was_transcoded: Optional[bool] = None,
     original_audio_path: Optional[str] = None,
+    cleanup_paths: Optional[list] = None,
+    media_path: Optional[str] = None,
+    media_kind: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Process transcription pipeline with optional noise suppression."""
     reference_name = original_filename or (original_audio_path and Path(original_audio_path).name) or Path(file_path).name
-    output_dir_path = Path(output_dir) if output_dir else get_transcriptions_dir() / job_id
     try:
         processing_source = Path(prepared_audio_path or file_path)
 
@@ -556,18 +566,18 @@ def process_full_pipeline_job(
                 compute_type=compute_type,
                 vad_filter=vad_filter,
                 batch_size=8,
-                output_dir=str(output_dir_path),
                 send_completion=False,
                 prepared_audio_path=prepared_audio_path,
                 inference_audio_path=str(processing_audio),
                 audio_was_transcoded=audio_was_transcoded,
                 original_audio_path=original_audio_path or file_path,
+                cleanup_paths=cleanup_paths,
+                media_path=media_path or file_path,
+                media_kind=media_kind,
             )
 
         audio_info: Dict[str, Any] = {"name": reference_name}
-        playback_path_candidate = prepared_audio_path or uploaded_audio_path or file_path
-        playback_path = transcription_result.get("normalized_audio_path", playback_path_candidate)
-        playback_path = str(playback_path)
+        playback_path = str(media_path or file_path)
         audio_info["path"] = playback_path
 
         reference_for_size = prepared_audio_path or uploaded_audio_path
@@ -579,11 +589,6 @@ def process_full_pipeline_job(
 
         if original_audio_path:
             audio_info["original_path"] = str(original_audio_path)
-
-        if not transcription_result.get("normalized_audio_path"):
-            transcription_result["normalized_audio_path"] = playback_path
-        if original_audio_path and not transcription_result.get("original_audio_path"):
-            transcription_result["original_audio_path"] = str(original_audio_path)
 
         transcription_result["total_processing_time"] = round(
             transcription_result["transcription_time"], 2
@@ -603,7 +608,7 @@ def process_full_pipeline_job(
                 original_filename=reference_name,
                 message="All processing completed",
                 result=transcription_result,
-                output_dir=output_dir_path,
+                output_dir=None,
                 audio_file=audio_info,
                 language=transcription_result.get("language"),
                 device=transcription_result.get("device"),

@@ -1,0 +1,116 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+}
+
+@theme {
+  --color-x-bg: #05060a;
+  --color-x-surface: #0b0f16;
+  --color-x-surface-2: #0f1622;
+  --color-x-line: #141c2b;
+  --color-x-text: #f2f5f9;
+  --color-x-muted: #b3bcc9;
+  --color-x-soft: #7b889a;
+  --color-x-accent: #74f0da;
+  --color-x-accent-2: #7aa8ff;
+  --color-x-glow: rgba(116, 240, 218, 0.35);
+  --shadow-glow-sm: 0 0 18px rgba(116, 240, 218, 0.18);
+  --shadow-glow-md: 0 0 36px rgba(116, 240, 218, 0.25);
+  --shadow-deep: 0 30px 60px rgba(0, 0, 0, 0.55);
+}
+
+@keyframes orbit {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes floaty {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
+}
+
+@keyframes twinkle {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes drift {
+  0% {
+    transform: translateX(0px);
+  }
+  100% {
+    transform: translateX(40px);
+  }
+}
+
+@keyframes scan {
+  0% {
+    transform: translateY(-20%);
+    opacity: 0;
+  }
+  30% {
+    opacity: 0.6;
+  }
+  100% {
+    transform: translateY(120%);
+    opacity: 0;
+  }
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-x-bg text-x-text antialiased;
+}
+
+::selection {
+  background: rgba(116, 240, 218, 0.25);
+  color: #f2f5f9;
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-x-text px-5 py-2.5 text-sm font-semibold text-x-bg shadow-glow-sm transition hover:shadow-glow-md;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-x-line px-5 py-2.5 text-sm font-semibold text-x-text transition hover:border-x-text/60;
+  }
+
+  .section-label {
+    @apply text-xs uppercase tracking-[0.35em] text-x-soft;
+  }
+}
+
+@layer utilities {
+  .grid-overlay {
+    background-image: linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    background-size: 70px 70px;
+  }
+
+  .glow-ring {
+    box-shadow: 0 0 40px rgba(116, 240, 218, 0.18);
+  }
+
+  .mask-fade {
+    mask-image: radial-gradient(circle at center, black 40%, transparent 75%);
+  }
+}

@@ -104,7 +104,7 @@ export function convertHistoryEntry(entry: HistoryEntry): Job | null {
   const audioFile: AudioFileInfo = {
     name: audioMeta.name ?? entry.original_filename ?? entry.job_id,
     size: typeof audioMeta.size === "number" ? audioMeta.size : null,
-    path: audioMeta.path ?? null,
+    path: audioMeta.path ?? entry.media_path ?? null,
     originalPath: audioMeta.original_path ?? null
   };
 

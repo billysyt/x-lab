@@ -3,7 +3,7 @@ import { setActiveTab, setVersion } from "../features/ui/uiSlice";
 import { setChineseStyle, setLanguage } from "../features/settings/settingsSlice";
 import { setExportLanguage } from "../features/transcript/transcriptSlice";
 import { useAppDispatch, useAppSelector } from "./hooks";
-import { addJob, bootstrapJobs, pollJobUpdates, selectJob, setJobSegments } from "../features/jobs/jobsSlice";
+import { addJob, bootstrapJobs, pollJobUpdates, selectJob, setJobSegments, updateSegmentText } from "../features/jobs/jobsSlice";
 import { UploadTab, type UploadTabHandle, type MediaItem } from "../features/upload/components/UploadTab";
 import { TranscriptPanel } from "../features/transcript/components/TranscriptPanel";
 import type { ToastType } from "../shared/components/ToastHost";
@@ -11,7 +11,15 @@ import { AppIcon } from "../shared/components/AppIcon";
 import { Select } from "../shared/components/Select";
 import { cn } from "../shared/lib/cn";
 import { fileFromBase64 } from "../shared/lib/file";
-import { apiConvertChinese, apiGetWhisperModelDownload, apiGetWhisperModelStatus, apiStartWhisperModelDownload } from "../shared/api/sttApi";
+import {
+  apiConvertChinese,
+  apiEditSegment,
+  apiGetJobRecord,
+  apiGetWhisperModelDownload,
+  apiGetWhisperModelStatus,
+  apiStartWhisperModelDownload,
+  apiUpsertJobRecord
+} from "../shared/api/sttApi";
 import type { ExportLanguage, Job, TranscriptSegment, WhisperModelDownload, WhisperModelStatus } from "../shared/types";
 
 function formatTime(seconds: number) {
@@ -186,9 +194,10 @@ export function App() {
   const showCustomWindowControls = isWindows || isMac;
   const [useCustomDrag, setUseCustomDrag] = useState(false);
 
-  // Use pywebview window_move to avoid drag-region glitches on transformed layouts (e.g. compact drawer).
+  // Custom drag for macOS to avoid app-region issues on rotated/hiDPI monitors.
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (!isMac) return;
     let teardown: (() => void) | null = null;
     let enabled = false;
 
@@ -219,7 +228,7 @@ export function App() {
       let rafId = 0;
       let pendingX = 0;
       let pendingY = 0;
-      const DRAG_THRESHOLD_PX = 4;
+      const DRAG_THRESHOLD_PX = 3;
 
       const scheduleMove = (x: number, y: number) => {
         pendingX = x;
@@ -260,8 +269,8 @@ export function App() {
           pointerId: event.pointerId,
           startX: event.screenX,
           startY: event.screenY,
-          winX: 0,
-          winY: 0,
+          winX: window.screenX || 0,
+          winY: window.screenY || 0,
           ready: false,
           dragging: false,
           captureEl: region
@@ -333,7 +342,7 @@ export function App() {
         teardown = null;
       }
     };
-  }, []);
+  }, [isMac]);
 
 
 
@@ -371,8 +380,11 @@ export function App() {
   const [subtitlePosition, setSubtitlePosition] = useState({ x: 0.5, y: 0.85 });
   const [subtitleMaxWidth, setSubtitleMaxWidth] = useState(520);
   const [subtitleBoxSize, setSubtitleBoxSize] = useState({ width: 0, height: 0 });
+  const [subtitleEditSize, setSubtitleEditSize] = useState<{ width: number; height: number } | null>(null);
   const subtitleBoxRef = useRef<HTMLDivElement | null>(null);
   const subtitleMeasureRef = useRef<HTMLSpanElement | null>(null);
+  const subtitleUiSaveRef = useRef<number | null>(null);
+  const subtitleUiLoadRef = useRef<string | null>(null);
   const subtitleDragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -382,6 +394,7 @@ export function App() {
     moved: boolean;
     container: DOMRect;
     box: DOMRect;
+    allowEdit: boolean;
   } | null>(null);
 
   const [isTranscriptEdit, setIsTranscriptEdit] = useState(false);
@@ -617,6 +630,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (subtitleEditor && subtitleEditSize) return;
     const measureEl = subtitleMeasureRef.current;
     if (!measureEl) return;
     const text = (subtitleEditor ? subtitleDraft : currentSubtitle) || " ";
@@ -627,7 +641,43 @@ export function App() {
     const width = Math.min(subtitleMaxWidth, rect.width + paddingX * 2);
     const height = rect.height + paddingY * 2;
     setSubtitleBoxSize({ width, height });
-  }, [currentSubtitle, subtitleDraft, subtitleEditor, subtitleMaxWidth, subtitleScale]);
+  }, [currentSubtitle, subtitleDraft, subtitleEditor, subtitleEditSize, subtitleMaxWidth, subtitleScale]);
+
+  const scheduleSubtitleUiSave = useCallback(() => {
+    if (!selectedJobId) return;
+    if (subtitleUiSaveRef.current) {
+      window.clearTimeout(subtitleUiSaveRef.current);
+    }
+    const size = subtitleEditSize ?? subtitleBoxSize;
+    const payload = {
+      job_id: selectedJobId,
+      ui_state: {
+        subtitle: {
+          position: subtitlePosition,
+          size,
+          scale: subtitleScale
+        }
+      }
+    };
+    subtitleUiSaveRef.current = window.setTimeout(() => {
+      void apiUpsertJobRecord(payload).catch(() => undefined);
+    }, 400);
+  }, [selectedJobId, subtitleBoxSize, subtitleEditSize, subtitlePosition, subtitleScale]);
+
+  useEffect(() => {
+    if (!subtitleEditor) return;
+    const el = subtitleBoxRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      const rect = entry?.contentRect;
+      if (!rect) return;
+      setSubtitleEditSize({ width: rect.width, height: rect.height });
+      scheduleSubtitleUiSave();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [scheduleSubtitleUiSave, subtitleEditor]);
 
   useEffect(() => {
     const container = previewContainerRef.current?.getBoundingClientRect();
@@ -643,6 +693,48 @@ export function App() {
       setSubtitlePosition({ x: nextX, y: nextY });
     }
   }, [subtitleBoxSize.width, subtitleBoxSize.height, subtitlePosition.x, subtitlePosition.y]);
+
+  useEffect(() => {
+    if (!selectedJobId) return;
+    scheduleSubtitleUiSave();
+  }, [scheduleSubtitleUiSave, selectedJobId, subtitleScale]);
+
+  useEffect(() => {
+    if (!selectedJobId) return;
+    if (subtitleUiLoadRef.current === selectedJobId) return;
+    subtitleUiLoadRef.current = selectedJobId;
+    void apiGetJobRecord(selectedJobId)
+      .then((res) => {
+        const record = res?.record;
+        const uiState = record?.ui_state?.subtitle;
+        if (!uiState) {
+          setSubtitlePosition({ x: 0.5, y: 0.85 });
+          setSubtitleEditSize(null);
+          setSubtitleScale(1);
+          return;
+        }
+        if (uiState.position) {
+          setSubtitlePosition({
+            x: Number(uiState.position.x) || 0.5,
+            y: Number(uiState.position.y) || 0.85
+          });
+        }
+        if (uiState.size) {
+          const width = Number(uiState.size.width) || subtitleBoxSize.width;
+          const height = Number(uiState.size.height) || subtitleBoxSize.height;
+          if (width && height) {
+            setSubtitleEditSize({ width, height });
+          }
+        }
+        if (uiState.scale) {
+          const nextScale = Number(uiState.scale);
+          if (Number.isFinite(nextScale)) {
+            setSubtitleScale(clamp(nextScale, 0.6, 2));
+          }
+        }
+      })
+      .catch(() => undefined);
+  }, [selectedJobId, subtitleBoxSize.height, subtitleBoxSize.width]);
 
   const waitlistUrl =
     typeof window !== "undefined" && typeof (window as any).__WAITLIST_URL__ === "string"
@@ -955,6 +1047,35 @@ export function App() {
     [playbackRate]
   );
 
+  const safePlay = useCallback((mediaEl: HTMLMediaElement | null) => {
+    if (!mediaEl) return Promise.resolve(false);
+    const attempt = () => {
+      try {
+        return mediaEl.play();
+      } catch {
+        return undefined;
+      }
+    };
+    const initial = attempt();
+    if (initial && typeof (initial as Promise<void>).then === "function") {
+      return (initial as Promise<void>)
+        .then(() => true)
+        .catch(() => {
+          try {
+            mediaEl.load();
+          } catch {
+            // Ignore.
+          }
+          const retry = attempt();
+          if (retry && typeof (retry as Promise<void>).then === "function") {
+            return (retry as Promise<void>).then(() => true).catch(() => false);
+          }
+          return false;
+        });
+    }
+    return Promise.resolve(true);
+  }, []);
+
   const getActiveVideoEl = useCallback(() => {
     return activeVideoSlot === 0 ? videoRefA.current : videoRefB.current;
   }, [activeVideoSlot]);
@@ -964,7 +1085,7 @@ export function App() {
   }, [activeVideoSlot]);
 
   const getActiveMediaEl = useCallback(() => {
-    return activeMedia?.kind === "video" && activeMedia.source === "local" ? getActiveVideoEl() : audioRef.current;
+    return activeMedia?.kind === "video" ? getActiveVideoEl() : audioRef.current;
   }, [activeMedia, getActiveVideoEl]);
 
   const cyclePlaybackRate = useCallback(() => {
@@ -1025,6 +1146,21 @@ export function App() {
         dispatch(setJobSegments({ jobId, segments: parsed }));
         dispatch(selectJob(jobId));
         dispatch(setActiveTab("captions"));
+        const mergedText = parsed.map((segment) => segment.text || "").join(" ").trim();
+        void apiUpsertJobRecord({
+          job_id: jobId,
+          filename,
+          media_path: (activeMedia as any)?.localPath ?? null,
+          media_kind: activeMedia?.kind ?? null,
+          status: "completed",
+          transcript_json: {
+            job_id: jobId,
+            segments: parsed,
+            text: mergedText
+          },
+          transcript_text: mergedText,
+          segment_count: parsed.length
+        }).catch(() => undefined);
         notify("SRT loaded into captions.", "success");
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -1202,7 +1338,7 @@ export function App() {
 
 
   const transcriptMediaRef =
-    activeMedia?.kind === "video" && activeMedia.source === "local"
+    activeMedia?.kind === "video"
       ? (activeVideoSlot === 0
         ? (videoRefA as RefObject<HTMLMediaElement>)
         : (videoRefB as RefObject<HTMLMediaElement>))
@@ -1237,7 +1373,6 @@ export function App() {
           const canSwapVideo =
             !sameMedia &&
             nextEntry.media.kind === "video" &&
-            nextEntry.media.source === "local" &&
             Boolean(getInactiveVideoEl());
           if (canSwapVideo) {
             const nextVideo = getInactiveVideoEl();
@@ -1274,7 +1409,7 @@ export function App() {
                 setPlayback((prev) => ({ ...prev, isPlaying: true }));
               };
               const playAndSwap = () => {
-                void nextVideo.play().catch(() => undefined);
+                void safePlay(nextVideo);
                 const anyVideo = nextVideo as HTMLVideoElement & {
                   requestVideoFrameCallback?: (cb: () => void) => void;
                 };
@@ -1338,7 +1473,17 @@ export function App() {
       pendingPlayRef.current = false;
       setPlayback((prev) => ({ ...prev, isPlaying: true }));
     },
-    [activeMedia?.id, activeMedia?.kind, applyPlaybackRate, clipById, clipTimeline, getActiveMediaEl, getActiveVideoEl, getInactiveVideoEl]
+    [
+      activeMedia?.id,
+      activeMedia?.kind,
+      applyPlaybackRate,
+      clipById,
+      clipTimeline,
+      getActiveMediaEl,
+      getActiveVideoEl,
+      getInactiveVideoEl,
+      safePlay
+    ]
   );
 
   useEffect(() => {
@@ -1376,7 +1521,7 @@ export function App() {
         pendingSeekRef.current = null;
       }
       if (pendingPlayRef.current) {
-        void mediaEl.play();
+        void safePlay(mediaEl);
         pendingPlayRef.current = false;
       }
       clearPosterIfReady();
@@ -1440,7 +1585,7 @@ export function App() {
       mediaEl.removeEventListener("pause", onPause);
       mediaEl.removeEventListener("ended", onEnded);
     };
-  }, [activeClipId, advanceFromClip, clipById, clipTimeline, getActiveMediaEl, applyPlaybackRate]);
+  }, [activeClipId, advanceFromClip, clipById, clipTimeline, getActiveMediaEl, applyPlaybackRate, safePlay]);
 
   useEffect(() => {
     const mediaEl = getActiveMediaEl();
@@ -1497,6 +1642,10 @@ export function App() {
       setActivePreviewUrl(null);
       return;
     }
+    if (activeMedia.previewUrl) {
+      setActivePreviewUrl(null);
+      return;
+    }
     if (activeMedia.source === "job" && activeMedia.jobId) {
       setActivePreviewUrl(`/audio/${activeMedia.jobId}?v=${Date.now()}`);
       return;
@@ -1513,14 +1662,31 @@ export function App() {
   }, [activeMedia]);
 
   const resolvedPreviewUrl = activeMedia?.previewUrl ?? activePreviewUrl;
-  const activeVideoSrc =
-    resolvedPreviewUrl && activeMedia?.kind === "video" && activeMedia.source === "local"
-      ? resolvedPreviewUrl
-      : null;
+  const activeVideoSrc = resolvedPreviewUrl && activeMedia?.kind === "video" ? resolvedPreviewUrl : null;
+  const audioPreviewSrc = activeMedia?.kind === "audio" ? resolvedPreviewUrl : null;
+  useEffect(() => {
+    const audioEl = audioRef.current;
+    if (!audioEl) return;
+    try {
+      audioEl.pause();
+    } catch {
+      // Ignore.
+    }
+    try {
+      audioEl.currentTime = 0;
+    } catch {
+      // Ignore.
+    }
+    try {
+      audioEl.load();
+    } catch {
+      // Ignore.
+    }
+  }, [audioPreviewSrc]);
   const shouldShowPreviewPoster = Boolean(previewPoster);
   const nextVideoTarget = useMemo(() => {
     if (!nextClip) return null;
-    if (nextClip.media.kind !== "video" || nextClip.media.source !== "local") return null;
+    if (nextClip.media.kind !== "video") return null;
     if (activeMedia?.id === nextClip.media.id) return null;
     return {
       url: nextClip.media.previewUrl ?? null,
@@ -1567,11 +1733,11 @@ export function App() {
       if (pendingPlayRef.current) {
         pendingPlayRef.current = false;
         if (mediaEl.paused) {
-          void mediaEl.play();
+          void safePlay(mediaEl);
         }
       }
     }
-  }, [activeClipId, activeMedia, getActiveMediaEl]);
+  }, [activeClipId, activeMedia, getActiveMediaEl, safePlay]);
 
   useEffect(() => {
     if (activeClipId && !clipById.has(activeClipId)) {
@@ -1787,9 +1953,19 @@ export function App() {
       }
     }
     const baseText = currentSubtitleMatch.segment.originalText ?? currentSubtitleMatch.segment.text ?? "";
+    const boxRect = subtitleBoxRef.current?.getBoundingClientRect();
+    if (boxRect) {
+      const isSingleLine = !baseText.includes("\n");
+      let width = boxRect.width;
+      if (isSingleLine) {
+        const available = Math.max(0, subtitleMaxWidth - width);
+        width = width + Math.min(80, available);
+      }
+      setSubtitleEditSize({ width, height: boxRect.height });
+    }
     setSubtitleDraft(baseText);
     setSubtitleEditor({ segmentId: currentSubtitleMatch.segment.id, text: baseText });
-  }, [currentSubtitleMatch, getActiveMediaEl]);
+  }, [currentSubtitleMatch, getActiveMediaEl, subtitleMaxWidth]);
 
   const handleSaveSubtitleEdit = useCallback(async () => {
     if (!subtitleEditor || !selectedJobId) {
@@ -1814,12 +1990,16 @@ export function App() {
 
   const handleSubtitlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      if (!subtitleEditor) return;
+      if (!currentSubtitle && !subtitleEditor) return;
       if (event.button !== 0) return;
       if (event.target !== event.currentTarget) return;
       const container = previewContainerRef.current?.getBoundingClientRect();
       const box = subtitleBoxRef.current?.getBoundingClientRect();
       if (!container || !box) return;
+      if (subtitleEditor) {
+        const nearResizeHandle = box.right - event.clientX < 14 && box.bottom - event.clientY < 14;
+        if (nearResizeHandle) return;
+      }
       subtitleDragRef.current = {
         pointerId: event.pointerId,
         startX: event.clientX,
@@ -1828,12 +2008,13 @@ export function App() {
         originY: subtitlePosition.y,
         moved: false,
         container,
-        box
+        box,
+        allowEdit: !subtitleEditor
       };
       event.currentTarget.setPointerCapture(event.pointerId);
       event.preventDefault();
     },
-    [subtitleEditor, subtitlePosition.x, subtitlePosition.y]
+    [currentSubtitle, subtitleEditor, subtitlePosition.x, subtitlePosition.y]
   );
 
   const handleSubtitlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
@@ -1862,7 +2043,13 @@ export function App() {
     } catch {
       // Ignore.
     }
-  }, []);
+    if (drag.moved) {
+      scheduleSubtitleUiSave();
+    }
+    if (drag.allowEdit && !drag.moved) {
+      handleOpenSubtitleEditor();
+    }
+  }, [handleOpenSubtitleEditor, scheduleSubtitleUiSave]);
 
 
   const togglePlayback = () => {
@@ -1936,10 +2123,9 @@ export function App() {
       }
     }
     if (mediaEl.paused) {
-      void mediaEl
-        .play()
-        .then(() => {
-          setPlayback((prev) => ({ ...prev, isPlaying: true }));
+      void safePlay(mediaEl)
+        .then((ok) => {
+          setPlayback((prev) => ({ ...prev, isPlaying: ok }));
         })
         .catch(() => {
           setPlayback((prev) => ({ ...prev, isPlaying: false }));
@@ -1994,7 +2180,7 @@ export function App() {
             mediaEl.currentTime = newTime;
             pendingSeekRef.current = null;
             if (shouldResume && mediaEl.paused) {
-              void mediaEl.play();
+              void safePlay(mediaEl);
             }
           } catch {
             // Ignore.
@@ -2038,7 +2224,7 @@ export function App() {
       const mediaEl = getActiveMediaEl();
       if (mediaEl && mediaEl.readyState >= 1) {
         try {
-          void mediaEl.play();
+          void safePlay(mediaEl);
           pendingPlayRef.current = true;
         } catch {
           // Ignore.
@@ -2230,7 +2416,6 @@ export function App() {
         <div className={cn(activeTab === "media" ? "block" : "hidden")}>
           <UploadTab
             ref={uploadRef}
-            audioRef={audioRef}
             notify={notify}
             localMedia={localMedia}
             onLocalMediaChange={setLocalMedia}
@@ -2698,31 +2883,37 @@ export function App() {
                       {subtitleEditor || currentSubtitle ? (
                         <div
                           ref={subtitleBoxRef}
-                          className={cn("absolute z-10", subtitleEditor ? "cursor-move" : "cursor-pointer")}
+                          className={cn(
+                            "absolute z-10 rounded-md bg-black/70 px-3 py-1 shadow",
+                            subtitleEditor
+                              ? "cursor-move border border-white/35 resize overflow-hidden"
+                              : "cursor-move"
+                          )}
                           style={{
                             left: `${subtitlePosition.x * 100}%`,
                             top: `${subtitlePosition.y * 100}%`,
-                            transform: "translate(-50%, -50%)"
+                            transform: "translate(-50%, -50%)",
+                            width: (subtitleEditSize ?? subtitleBoxSize).width
+                              ? `${(subtitleEditSize ?? subtitleBoxSize).width}px`
+                              : undefined,
+                            height: (subtitleEditSize ?? subtitleBoxSize).height
+                              ? `${(subtitleEditSize ?? subtitleBoxSize).height}px`
+                              : undefined,
+                            maxWidth: `${subtitleMaxWidth}px`,
+                            minWidth: "140px",
+                            minHeight: "36px"
                           }}
+                          onPointerDown={handleSubtitlePointerDown}
+                          onPointerMove={handleSubtitlePointerMove}
+                          onPointerUp={handleSubtitlePointerUp}
+                          onPointerCancel={handleSubtitlePointerUp}
                         >
                           {subtitleEditor ? (
-                            <div
-                              className="rounded-md border border-white/35 bg-black/70 px-3 py-1 shadow cursor-move"
-                              style={{
-                                width: subtitleBoxSize.width ? `${subtitleBoxSize.width}px` : undefined,
-                                height: subtitleBoxSize.height ? `${subtitleBoxSize.height}px` : undefined,
-                                maxWidth: `${subtitleMaxWidth}px`
-                              }}
-                              onPointerDown={handleSubtitlePointerDown}
-                              onPointerMove={handleSubtitlePointerMove}
-                              onPointerUp={handleSubtitlePointerUp}
-                              onPointerCancel={handleSubtitlePointerUp}
-                            >
-                              <textarea
-                                className="h-full w-full resize-none bg-transparent text-center text-[13px] font-medium text-white outline-none cursor-text"
-                                style={{ fontSize: `${13 * subtitleScale}px`, lineHeight: "1.2" }}
-                                value={subtitleDraft}
-                                onChange={(e) => setSubtitleDraft(e.target.value)}
+                            <textarea
+                              className="h-full w-full resize-none bg-transparent text-center text-[13px] font-medium text-white outline-none cursor-text"
+                              style={{ fontSize: `${13 * subtitleScale}px`, lineHeight: "1.2" }}
+                              value={subtitleDraft}
+                              onChange={(e) => setSubtitleDraft(e.target.value)}
                                 onKeyDown={(e) => {
                                   if (e.key === "Escape") {
                                     e.preventDefault();
@@ -2730,22 +2921,19 @@ export function App() {
                                   } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
                                     e.preventDefault();
                                     void handleSaveSubtitleEdit();
-                                  }
-                                }}
-                                onBlur={() => void handleSaveSubtitleEdit()}
-                                autoFocus
-                                aria-label="Edit subtitle"
-                              />
-                            </div>
+                                }
+                              }}
+                              onBlur={() => void handleSaveSubtitleEdit()}
+                              autoFocus
+                              aria-label="Edit subtitle"
+                            />
                           ) : (
-                            <button
-                              className="inline-block whitespace-pre-wrap break-words rounded-md bg-black/70 px-3 py-1 text-[13px] font-medium text-white shadow transition hover:bg-black/80"
-                              style={{ fontSize: `${13 * subtitleScale}px`, maxWidth: `${subtitleMaxWidth}px` }}
-                              onClick={handleOpenSubtitleEditor}
-                              type="button"
+                            <div
+                              className="whitespace-pre-wrap break-words text-[13px] font-medium text-white pointer-events-none"
+                              style={{ fontSize: `${13 * subtitleScale}px` }}
                             >
                               {currentSubtitle}
-                            </button>
+                            </div>
                           )}
                         </div>
                       ) : null}
@@ -3309,6 +3497,7 @@ export function App() {
           }
         }}
       />
+      <audio ref={audioRef} preload="auto" src={audioPreviewSrc || undefined} className="sr-only" />
 
     </>
   );
