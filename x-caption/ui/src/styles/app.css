@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+
+    /* Capcut-style dark theme */
+    --primary-color: #2563eb;
+    --primary-dark: #1e40af;
+    --primary-rgb: 37, 99, 235;
+
+    --secondary-color: #0b0f1a;
+    --text-primary: #e2e8f0;
+    --text-secondary: #94a3b8;
+    --border-color: #1f2937;
+    --success-color: #10b981;
+    --warning-color: #f59e0b;
+    --error-color: #ef4444;
+    --speaker-1: #60a5fa;
+    --speaker-2: #f87171;
+    --speaker-3: #34d399;
+    --speaker-4: #fbbf24;
+    --speaker-5: #a78bfa;
+    --speaker-6: #f472b6;
+    --speaker-7: #22d3ee;
+    --speaker-8: #a3e635;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply font-sans bg-secondary text-text-primary antialiased overflow-hidden;
+  }
+
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+}
+
+@layer components {
+  .stt-select-dark button {
+    background: #111115 !important;
+    border-color: #2a2a32 !important;
+    color: #e5e7eb !important;
+    box-shadow: none !important;
+  }
+
+  .stt-select-dark button:hover {
+    border-color: #3a3a44 !important;
+  }
+
+  .stt-select-dark button span {
+    color: #e5e7eb !important;
+  }
+
+  .stt-select-dark [role="listbox"] {
+    background: #111115 !important;
+    border-color: #2a2a32 !important;
+    color: #e5e7eb !important;
+  }
+
+  .stt-select-dark [role="option"] {
+    color: #e5e7eb !important;
+  }
+
+  .stt-select-dark [role="option"]:hover {
+    background: #1a1a20 !important;
+  }
+}
+
+@layer utilities {
+  .pywebview-drag-region {
+    -webkit-app-region: drag;
+  }
+
+  .pywebview-no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  .stt-icon {
+    vertical-align: -0.125em;
+    display: inline-block;
+  }
+
+  .stt-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: var(--text-secondary) var(--border-color);
+  }
+
+  .stt-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .stt-scrollbar::-webkit-scrollbar-track {
+    background: var(--border-color);
+    border-radius: 4px;
+  }
+
+  .stt-scrollbar::-webkit-scrollbar-thumb {
+    background: var(--text-secondary);
+    border-radius: 4px;
+  }
+
+  .stt-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: var(--primary-color);
+  }
+}

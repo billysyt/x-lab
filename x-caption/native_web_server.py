@@ -1,0 +1,1281 @@
+#!/usr/bin/env python3
+"""
+Native Web Server - XSub backend
+Serves the React UI and uses lightweight polling to emulate WebSocket behavior
+without socket.io dependencies.
+"""
+import os
+import sys
+import logging
+import json
+import uuid
+import tempfile
+import time
+import shutil
+import mimetypes
+import contextlib
+from urllib.parse import urlparse
+from pathlib import Path
+from typing import Dict, Any, Optional
+from collections import defaultdict
+import threading
+
+try:
+    from opencc import OpenCC
+except ImportError:
+    OpenCC = None
+
+from flask import Flask, request, jsonify, send_file, render_template, send_from_directory
+from werkzeug.utils import secure_filename
+
+# Set up environment first
+from native_config import (
+    setup_environment,
+    get_templates_dir,
+    get_static_dir,
+    get_transcriptions_dir,
+    get_uploads_dir,
+    get_config,
+    VERSION
+)
+setup_environment()
+
+# Import native modules
+from native_job_queue import get_queue, start_worker
+import native_history
+from native_job_handlers import (
+    process_full_pipeline_job,
+    _prepare_audio_for_processing,
+    _noise_suppression_backend,
+    _normalized_audio_filename,
+)
+
+# Import model warmup event for readiness check
+from native_config import MODEL_WARMUP_EVENT
+from native_ffmpeg import setup_ffmpeg_environment, test_ffmpeg
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Allowed file extensions
+ALLOWED_EXTENSIONS = {'wav', 'mp3', 'mp4', 'avi', 'mov', 'flac', 'm4a', 'ogg'}
+
+# WebSocket emulation - store pending updates for each job
+job_update_queues = defaultdict(list)
+job_update_lock = threading.Lock()
+
+# Chinese conversion cache
+opencc_converters: Dict[str, "OpenCC"] = {}
+opencc_lock = threading.Lock()
+
+LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def is_loopback_origin(origin: Optional[str]) -> bool:
+    """Return True if the supplied Origin header represents a loopback host."""
+    if not origin:
+        return False
+    try:
+        parsed = urlparse(origin)
+    except ValueError:
+        return False
+
+    hostname = parsed.hostname
+    if hostname is None:
+        return False
+
+    return hostname in LOOPBACK_HOSTS
+
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def emit_update(room: str, event: str, data: Dict[str, Any]):
+    """
+    Emulate socket.emit() by storing updates for polling
+    room format: "job:job_id"
+    """
+    with job_update_lock:
+        job_update_queues[room].append({
+            'event': event,
+            'data': data,
+            'timestamp': time.time()
+        })
+        # Keep only last 100 updates per job
+        if len(job_update_queues[room]) > 100:
+            job_update_queues[room] = job_update_queues[room][-100:]
+
+
+def publish_job_update(job_id: str, status: str, data: Dict[str, Any]):
+    """Publish job update (compatible with WebSocket emit)"""
+    try:
+        room = f"job:{job_id}"
+        message = {
+            'job_id': job_id,
+            'status': status,
+            'timestamp': time.time(),
+            'data': data
+        }
+        emit_update(room, 'job_update', message)
+        logger.info(f"Published update for job {job_id}: {status}")
+    except Exception as e:
+        logger.error(f"Failed to publish job update: {e}")
+
+
+def convert_chinese_text(text: str, target: str) -> str:
+    """Convert Chinese text between simplified and traditional variants"""
+    if OpenCC is None:
+        raise RuntimeError("Chinese conversion library (opencc) is not available")
+
+    mode_map = {
+        'traditional': 's2t',
+        'simplified': 't2s'
+    }
+
+    config = mode_map.get(target)
+    if not config:
+        raise ValueError(f"Unsupported conversion target: {target}")
+
+    with opencc_lock:
+        converter = opencc_converters.get(config)
+        if converter is None:
+            converter = OpenCC(config)
+            opencc_converters[config] = converter
+
+    # Ensure we always convert a string
+    return converter.convert(str(text))
+
+
+def create_app():
+    """Create and configure Flask application"""
+
+    # Create Flask app with custom template and static folders
+    app = Flask(
+        __name__,
+        template_folder=str(get_templates_dir()),
+        static_folder=str(get_static_dir())
+    )
+
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-xsub-native')
+    app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
+
+    # CORS support
+    @app.after_request
+    def after_request(response):
+        origin = request.headers.get('Origin')
+        if is_loopback_origin(origin):
+            response.headers['Access-Control-Allow-Origin'] = origin
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+            response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+            response.headers['Vary'] = 'Origin'
+        return response
+
+    # Health check endpoints
+    @app.route('/health', methods=['GET'])
+    def health_check():
+        """Health check endpoint - waits for models to warm up before returning healthy"""
+        try:
+            # Wait for model warmup to complete
+            if not MODEL_WARMUP_EVENT.is_set():
+                print("[HEALTH] Waiting for model warmup to complete... (timeout: 60s)")
+                logger.info("Health check: waiting for model warmup to complete...")
+                ready = MODEL_WARMUP_EVENT.wait(timeout=60)  # Wait up to 60 seconds
+                if ready:
+                    print("[HEALTH] ✓ Models are ready!")
+                else:
+                    print("[HEALTH] ⚠ Model warmup timed out after 60 seconds")
+            else:
+                print("[HEALTH] Models already ready")
+
+            high_queue = get_queue('high')
+            default_queue = get_queue('default')
+            low_queue = get_queue('low')
+
+            queue_lengths = {
+                "high": len(high_queue),
+                "default": len(default_queue),
+                "low": len(low_queue)
+            }
+
+            models_ready = MODEL_WARMUP_EVENT.is_set()
+            print(f"[HEALTH] Returning response: models_ready={models_ready}")
+
+            return jsonify({
+                "status": "healthy",
+                "service": "xsub-transcription-native",
+                "redis_connected": True,  # Fake for compatibility
+                "queues": queue_lengths,
+                "ffmpeg_available": test_ffmpeg(),
+                "models_ready": models_ready
+            }), 200
+
+        except Exception as e:
+            logger.error(f"Health check error: {e}")
+            print(f"[HEALTH] ERROR: {e}")
+            return jsonify({
+                "status": "unhealthy",
+                "error": str(e)
+            }), 500
+
+    @app.route('/ready', methods=['GET'])
+    def readiness_check():
+        """Readiness check endpoint - waits for models to warm up before returning ready"""
+        try:
+            # Wait for model warmup to complete
+            if not MODEL_WARMUP_EVENT.is_set():
+                logger.debug("Readiness check: waiting for model warmup to complete...")
+                MODEL_WARMUP_EVENT.wait(timeout=60)  # Wait up to 60 seconds
+
+            return jsonify({
+                "status": "ready",
+                "available_models": ["whisper", "sensevoice-small"],
+                "redis_connected": True,  # Fake for compatibility
+                "models_ready": MODEL_WARMUP_EVENT.is_set()
+            }), 200
+
+        except Exception as e:
+            return jsonify({"status": "not ready", "error": str(e)}), 503
+
+    @app.route('/history', methods=['GET'])
+    def history():
+        """Return persisted transcription history."""
+        try:
+            return jsonify({"jobs": native_history.load_history()}), 200
+        except Exception as exc:
+            logger.error("Failed to load job history: %s", exc)
+            return jsonify({"error": "Failed to load history"}), 500
+
+    @app.route('/convert_chinese', methods=['POST'])
+    def convert_chinese():
+        """Convert Chinese text between simplified and traditional variants"""
+        if OpenCC is None:
+            return jsonify({
+                "success": False,
+                "error": "Chinese conversion library not available"
+            }), 503
+
+        try:
+            payload = request.get_json(force=True, silent=True) or {}
+            text = payload.get('text', '')
+            target = payload.get('target', 'traditional')
+
+            if not isinstance(text, str):
+                raise ValueError("text must be a string")
+
+            converted = convert_chinese_text(text, target)
+
+            return jsonify({
+                "success": True,
+                "converted_text": converted
+            }), 200
+
+        except ValueError as ve:
+            return jsonify({
+                "success": False,
+                "error": str(ve)
+            }), 400
+        except Exception as e:
+            logger.error(f"Failed to convert Chinese text: {e}")
+            return jsonify({
+                "success": False,
+                "error": "Failed to convert text"
+            }), 500
+
+    @app.route('/api/segment/edit', methods=['POST'])
+    def edit_segment():
+        """Edit a specific segment in a transcription"""
+        try:
+            data = request.get_json()
+            job_id = data.get('job_id')
+            segment_id = data.get('segment_id')
+            new_text = data.get('new_text')
+
+            if not job_id or segment_id is None or not new_text:
+                return jsonify({
+                    "success": False,
+                    "error": "job_id, segment_id, and new_text are required"
+                }), 400
+
+            # Load the transcription file
+            transcriptions_dir = get_transcriptions_dir()
+            job_dir = transcriptions_dir / job_id
+            json_file = job_dir / f"{job_id}.json"
+
+            if not json_file.exists():
+                return jsonify({
+                    "success": False,
+                    "error": "Transcription file not found"
+                }), 404
+
+            # Read the transcription
+            with open(json_file, 'r', encoding='utf-8') as f:
+                transcription = json.load(f)
+
+            # Find and update the segment
+            segment_found = False
+            if 'segments' in transcription:
+                for segment in transcription['segments']:
+                    if segment.get('id') == segment_id:
+                        segment['text'] = new_text
+                        segment_found = True
+                        break
+
+            if not segment_found:
+                return jsonify({
+                    "success": False,
+                    "error": f"Segment {segment_id} not found"
+                }), 404
+
+            # Rebuild full text
+            full_text = " ".join([seg['text'] for seg in transcription['segments'] if seg.get('text')])
+            transcription['text'] = full_text
+
+            # Save updated transcription
+            with open(json_file, 'w', encoding='utf-8') as f:
+                json.dump(transcription, f, ensure_ascii=False, indent=2)
+
+            # Update text file
+            text_file = job_dir / f"{job_id}.txt"
+            with open(text_file, 'w', encoding='utf-8') as f:
+                f.write(full_text)
+
+            # Update formatted file if it exists (timestamps only).
+            formatted_file = job_dir / f"{job_id}_formatted.txt"
+            if formatted_file.exists():
+                formatted_lines = []
+                for segment in transcription['segments']:
+                    start = segment.get('start', 0)
+                    end = segment.get('end', 0)
+                    start_min, start_sec = divmod(round(start), 60)
+                    end_min, end_sec = divmod(round(end), 60)
+                    time_str = f"[{start_min}:{start_sec:02d} - {end_min}:{end_sec:02d}]"
+                    formatted_lines.append(f"{time_str} {segment['text']}")
+
+                with open(formatted_file, 'w', encoding='utf-8') as f:
+                    f.write("\n".join(formatted_lines).strip())
+
+            logger.info(f"Updated segment {segment_id} in job {job_id}")
+
+            return jsonify({
+                "success": True,
+                "message": "Segment updated successfully"
+            }), 200
+
+        except Exception as e:
+            logger.error(f"Error editing segment: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return jsonify({
+                "success": False,
+                "error": "Failed to edit segment"
+            }), 500
+
+    # Web UI - React
+    @app.route('/', methods=['GET'])
+    def index():
+        """Web UI for transcription."""
+        templates_dir = get_templates_dir()
+        static_dir = get_static_dir()
+
+        react_template = templates_dir / 'index.html'
+        react_entry = static_dir / 'ui' / 'app.js'
+
+        if not react_template.exists():
+            return "Error: React template missing (templates/index.html).", 500
+
+        if not react_entry.exists():
+            return (
+                "<!doctype html><html><head><meta charset='utf-8'><title>XSub UI Missing</title>"
+                "<style>body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:40px;max-width:720px;line-height:1.5}</style>"
+                "</head><body>"
+                "<h2>XSub UI bundle not found</h2>"
+                "<p>The React UI build output is missing (<code>static/ui/app.js</code>).</p>"
+                "<p>Fix:</p>"
+                "<ul>"
+                "<li>Dev (HMR): <code>python scripts/dev.py</code></li>"
+                "<li>Build UI: <code>python scripts/build_ui.py</code></li>"
+                "</ul>"
+                "</body></html>",
+                503,
+                {"Content-Type": "text/html; charset=utf-8"},
+            )
+
+        return render_template('index.html', VERSION=VERSION)
+
+    @app.route('/test', methods=['GET'])
+    def test_ui():
+        """Test UI (alias to the main UI)."""
+        return index()
+
+    # Static files fallback
+    @app.route('/static/<path:filename>')
+    def serve_static(filename):
+        """Serve static files"""
+        static_dir = get_static_dir()
+        return send_from_directory(static_dir, filename)
+
+    # WebSocket emulation endpoints
+    @app.route('/socket.io/', methods=['GET', 'POST', 'OPTIONS'])
+    def socket_io_endpoint():
+        """
+        Emulate socket.io endpoint for compatibility
+        Returns updates for subscribed jobs
+        """
+        if request.method == 'OPTIONS':
+            return '', 200
+
+        # Get job_id from query or body
+        job_id = request.args.get('job_id') or request.json.get('job_id') if request.json else None
+
+        if job_id:
+            room = f"job:{job_id}"
+
+            # Get pending updates
+            with job_update_lock:
+                updates = job_update_queues.get(room, [])
+                # Clear old updates (older than 30 seconds)
+                current_time = time.time()
+                updates = [u for u in updates if current_time - u['timestamp'] < 30]
+                job_update_queues[room] = []
+
+            return jsonify({
+                'connected': True,
+                'updates': updates
+            })
+
+        return jsonify({'connected': True, 'updates': []})
+
+    # Job polling endpoint (for WebSocket emulation)
+    @app.route('/job/<job_id>/poll', methods=['GET'])
+    def poll_job_updates(job_id):
+        """
+        Poll for job updates (WebSocket emulation)
+        Compatible with original UI's socket.on('job_update')
+        """
+        try:
+            room = f"job:{job_id}"
+
+            # Get pending updates
+            with job_update_lock:
+                updates = job_update_queues.get(room, [])
+                # Return and clear updates
+                result = list(updates)
+                job_update_queues[room] = []
+
+            # Also get current job status from database
+            job = None
+            job_queue = None
+            for queue_name in ['high', 'default', 'low']:
+                try:
+                    queue = get_queue(queue_name)
+                    job = queue.fetch_job(job_id)
+                    if job:
+                        job_queue = queue
+                        break
+                except:
+                    continue
+
+            # Always include current job status in response
+            if job:
+                # Use the queue the job belongs to for meta updates
+                if job_queue is None:
+                    job_queue = get_queue('default')
+
+                meta_updates = job_queue.get_job_updates(job_id)
+                job_meta = getattr(job, 'meta', {}) or {}
+
+                def _meta_value(key, default=None):
+                    if isinstance(meta_updates, dict) and key in meta_updates:
+                        return meta_updates[key]
+                    if key in job_meta:
+                        return job_meta[key]
+                    return default
+
+                # Always append current status (even if there are pending updates)
+                # This ensures UI always gets the latest state, including stage info
+                current_status_data = {
+                    'job_id': job_id,
+                    'status': job.get_status(),
+                    'progress': _meta_value('progress', 0),
+                    'message': _meta_value('message', ''),
+                    'timestamp': time.time()
+                }
+
+                # Merge other metadata (stage, partial_result, etc.) so the UI can reflect state transitions
+                if isinstance(meta_updates, dict):
+                    for key, value in meta_updates.items():
+                        if key not in current_status_data:
+                            current_status_data[key] = value
+                for key, value in job_meta.items():
+                    if key not in current_status_data:
+                        current_status_data[key] = value
+
+                current_status = {
+                    'event': 'job_update',
+                    'data': current_status_data,
+                    'timestamp': time.time()
+                }
+
+                # If there are pending updates, append status at the end
+                # If no pending updates, status is the only update
+                if result:
+                    result.append(current_status)
+                else:
+                    result = [current_status]
+
+            return jsonify({
+                'success': True,
+                'updates': result
+            })
+
+        except Exception as e:
+            logger.error(f"Error polling job updates: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    # Job status endpoint
+    @app.route('/job/<job_id>', methods=['GET'])
+    def get_job_status(job_id):
+        """Get job status and results"""
+        try:
+            # Try to find job in all queues
+            job = None
+            job_queue = None
+            for queue_name in ['high', 'default', 'low']:
+                try:
+                    queue = get_queue(queue_name)
+                    job = queue.fetch_job(job_id)
+                    if job:
+                        job_queue = queue
+                        break
+                except:
+                    continue
+
+            if not job:
+                history_entry = native_history.get_entry(job_id)
+                if history_entry:
+                    status = history_entry.get("status", "completed")
+                    normalized_status = status.lower()
+                    progress = 100 if normalized_status == "completed" else history_entry.get("progress", -1)
+                    message = history_entry.get("message", "")
+
+                    response = {
+                        "job_id": job_id,
+                        "status": status,
+                        "created_at": history_entry.get("created_at"),
+                        "ended_at": history_entry.get("completed_at"),
+                        "meta": {
+                            "progress": progress,
+                            "message": message,
+                            "stage": "pipeline",
+                            "output_file": history_entry.get("output_file"),
+                            "text_file": history_entry.get("text_file"),
+                            "formatted_text_file": history_entry.get("formatted_text_file"),
+                        },
+                    }
+
+                    output_path = history_entry.get("output_file")
+                    if output_path:
+                        output_path = Path(output_path)
+                        if output_path.exists():
+                            try:
+                                with output_path.open("r", encoding="utf-8") as handle:
+                                    response["result"] = json.load(handle)
+                            except Exception as load_err:
+                                logger.warning("Failed to load stored result for job %s: %s", job_id, load_err)
+
+                    if "result" not in response and history_entry.get("summary"):
+                        response["result"] = {
+                            "job_id": job_id,
+                            "text": history_entry.get("summary"),
+                            "language": history_entry.get("language"),
+                        }
+
+                    return jsonify(response)
+
+                return jsonify({"error": "Job not found"}), 404
+
+            # Get latest updates
+            if job_queue is None:
+                job_queue = get_queue('default')
+
+            updates = job_queue.get_job_updates(job_id)
+
+            # Build response (compatible with original UI)
+            response = {
+                "job_id": job_id,
+                "status": job.get_status(),
+                "created_at": job.created_at.isoformat() if job.created_at else None,
+                "started_at": job.started_at.isoformat() if job.started_at else None,
+                "ended_at": job.ended_at.isoformat() if job.ended_at else None,
+                "meta": {
+                    'progress': updates.get('progress', 0),
+                    'message': updates.get('message', ''),
+                    'stage': updates.get('stage', 'transcription'),  # Include stage field
+                    **updates
+                }
+            }
+
+            # Add result if completed
+            if job.is_finished():
+                result = updates.get('result') or job.result
+                response["result"] = result
+            elif job.is_failed():
+                response["error"] = str(job.exc_info)
+
+            return jsonify(response)
+
+        except Exception as e:
+            logger.error(f"Error getting job status: {e}")
+            return jsonify({"error": f"Failed to get job status: {str(e)}"}), 500
+
+    @app.route('/job/<job_id>/terminate', methods=['POST'])
+    def terminate_job(job_id):
+        """Terminate a specific job"""
+        try:
+            # Try to find and cancel job in all queues
+            for queue_name in ['high', 'default', 'low']:
+                try:
+                    queue = get_queue(queue_name)
+                    job = queue.fetch_job(job_id)
+
+                    if job:
+                        job.cancel()
+                        queue.update_job_status(job_id, 'canceled')
+
+                        # Emit termination event
+                        emit_update(f"job:{job_id}", 'job_terminated', {
+                            'job_id': job_id,
+                            'message': 'Job was manually terminated',
+                            'timestamp': time.time()
+                        })
+
+                        logger.info(f"Terminated job {job_id}")
+
+                        return jsonify({
+                            "success": True,
+                            "message": f"Job {job_id} terminated successfully"
+                        })
+
+                except:
+                    continue
+
+            return jsonify({"error": "Job not found"}), 404
+
+        except Exception as e:
+            logger.error(f"Error terminating job {job_id}: {e}")
+            return jsonify({"error": f"Failed to terminate job: {str(e)}"}), 500
+
+    @app.route('/job/<job_id>', methods=['DELETE'])
+    def remove_job(job_id):
+        """Remove a job and all associated artifacts"""
+        try:
+            uploads_dir = get_uploads_dir()
+            transcriptions_dir = get_transcriptions_dir()
+            removed_files = []
+            removed_dirs = []
+            cleanup_errors = []
+            candidate_paths = set()
+            job_found = False
+
+            for queue_name in ['high', 'default', 'low']:
+                try:
+                    queue = get_queue(queue_name)
+                except Exception as queue_error:
+                    logger.warning(f"Unable to access queue '{queue_name}' while removing job {job_id}: {queue_error}")
+                    continue
+
+                meta_sources = []
+
+                try:
+                    job = queue.fetch_job(job_id)
+                except Exception:
+                    job = None
+
+                if job:
+                    job_found = True
+                    if getattr(job, 'kwargs', None):
+                        file_path = job.kwargs.get('file_path')
+                        if file_path:
+                            candidate_paths.add(file_path)
+                    if isinstance(getattr(job, 'meta', None), dict):
+                        meta_sources.append(job.meta)
+                    if isinstance(getattr(job, 'result', None), dict):
+                        meta_sources.append(job.result)
+
+                    try:
+                        if job.get_status() not in ('finished', 'failed', 'canceled', 'cancelled', 'deleted'):
+                            job.cancel()
+                    except Exception as cancel_error:
+                        logger.warning(f"Failed to cancel job {job_id}: {cancel_error}")
+
+                meta_updates = queue.get_job_updates(job_id)
+                if isinstance(meta_updates, dict):
+                    meta_sources.append(meta_updates)
+
+                for meta in meta_sources:
+                    if not isinstance(meta, dict):
+                        continue
+                    file_path = meta.get('file_path')
+                    if file_path:
+                        candidate_paths.add(file_path)
+                    for key in ('result', 'partial_result'):
+                        nested = meta.get(key)
+                        if isinstance(nested, dict):
+                            nested_path = nested.get('file_path')
+                            if nested_path:
+                                candidate_paths.add(nested_path)
+
+                try:
+                    queue.remove_job(job_id)
+                except Exception as remove_error:
+                    logger.debug(f"No queue record to remove for job {job_id} in queue '{queue_name}': {remove_error}")
+
+            # Inspect persisted transcription output before deletion
+            job_output_dir = transcriptions_dir / job_id
+            job_json = job_output_dir / f"{job_id}.json"
+            if job_json.exists():
+                try:
+                    with open(job_json, 'r', encoding='utf-8') as f:
+                        stored_result = json.load(f)
+                        if isinstance(stored_result, dict):
+                            stored_path = stored_result.get('file_path')
+                            if stored_path:
+                                candidate_paths.add(stored_path)
+                except Exception as inspect_error:
+                    cleanup_errors.append(f"Failed to inspect stored result for {job_id}: {inspect_error}")
+
+            # Remove uploaded audio copies
+            for upload_file in uploads_dir.glob(f"{job_id}*"):
+                try:
+                    if upload_file.is_file():
+                        upload_file.unlink()
+                        removed_files.append(str(upload_file))
+                    elif upload_file.is_dir():
+                        shutil.rmtree(upload_file, ignore_errors=True)
+                        removed_dirs.append(str(upload_file))
+                except Exception as upload_error:
+                    cleanup_errors.append(f"Failed to remove upload artifact {upload_file}: {upload_error}")
+
+            # Remove transcription artifacts
+            if job_output_dir.exists():
+                try:
+                    shutil.rmtree(job_output_dir, ignore_errors=True)
+                    removed_dirs.append(str(job_output_dir))
+                except Exception as dir_error:
+                    cleanup_errors.append(f"Failed to remove transcription directory {job_output_dir}: {dir_error}")
+            else:
+                for artifact in transcriptions_dir.glob(f"{job_id}*"):
+                    if artifact.is_file():
+                        try:
+                            artifact.unlink()
+                            removed_files.append(str(artifact))
+                        except Exception as artifact_error:
+                            cleanup_errors.append(f"Failed to remove transcription artifact {artifact}: {artifact_error}")
+
+            # Remove temporary processing files
+            temp_root = Path(tempfile.gettempdir()).resolve()
+            temp_dirs_to_remove = set()
+
+            for path_str in candidate_paths:
+                try:
+                    candidate_path = Path(path_str)
+                    if candidate_path.exists():
+                        if candidate_path.is_file():
+                            try:
+                                candidate_path.unlink()
+                                removed_files.append(str(candidate_path))
+                            except Exception as file_error:
+                                cleanup_errors.append(f"Failed to remove file {candidate_path}: {file_error}")
+                        elif candidate_path.is_dir():
+                            try:
+                                shutil.rmtree(candidate_path, ignore_errors=True)
+                                removed_dirs.append(str(candidate_path))
+                            except Exception as dir_error:
+                                cleanup_errors.append(f"Failed to remove directory {candidate_path}: {dir_error}")
+
+                    parent = candidate_path.parent
+                    try:
+                        parent_resolved = parent.resolve()
+                        if (
+                            parent_resolved != temp_root
+                            and temp_root in parent_resolved.parents
+                            and parent.name.startswith("tmp")
+                        ):
+                            temp_dirs_to_remove.add(parent)
+                    except Exception:
+                        continue
+                except Exception as path_error:
+                    cleanup_errors.append(f"Failed to process candidate path {path_str}: {path_error}")
+
+            for temp_dir in temp_dirs_to_remove:
+                try:
+                    if temp_dir.exists():
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+                        removed_dirs.append(str(temp_dir))
+                except Exception as temp_error:
+                    cleanup_errors.append(f"Failed to remove temp directory {temp_dir}: {temp_error}")
+
+            # Clear any pending updates for this job
+            room_name = f"job:{job_id}"
+            with job_update_lock:
+                job_update_queues.pop(room_name, None)
+
+            with contextlib.suppress(Exception):
+                native_history.remove_entry(job_id)
+
+            message = f"Job {job_id} removed"
+            if not job_found:
+                message = f"Job {job_id} removed (no active queue entry found)"
+
+            response = {
+                "success": True,
+                "job_found": job_found,
+                "removed_files": sorted(set(removed_files)),
+                "removed_directories": sorted(set(removed_dirs)),
+                "message": message
+            }
+
+            if cleanup_errors:
+                response["warnings"] = cleanup_errors
+
+            logger.info(f"Removed job {job_id}: files={len(removed_files)}, dirs={len(removed_dirs)}")
+
+            return jsonify(response), 200
+
+        except Exception as e:
+            logger.error(f"Error removing job {job_id}: {e}")
+            return jsonify({"success": False, "error": f"Failed to remove job: {str(e)}"}), 500
+
+    @app.route('/audio/<job_id>')
+    def serve_audio_file(job_id):
+        """Serve the uploaded audio file for a specific job"""
+        try:
+            uploads_dir = get_uploads_dir()
+
+            audio_file = None
+
+            normalized_file = uploads_dir / _normalized_audio_filename(job_id)
+            if normalized_file.exists():
+                audio_file = normalized_file
+            else:
+                audio_extensions = ['.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac', '.wma', '.webm']
+                for ext in audio_extensions:
+                    potential_file = uploads_dir / f"{job_id}{ext}"
+                    if potential_file.exists():
+                        audio_file = potential_file
+                        break
+
+            if not audio_file:
+                return jsonify({"error": "Audio file not found"}), 404
+
+            mime_type, _ = mimetypes.guess_type(str(audio_file))
+            if mime_type is None and audio_file.suffix:
+                if audio_file.suffix.lower() in {'.m4a', '.mp4', '.m4v'}:
+                    mime_type = 'audio/mp4'
+                elif audio_file.suffix.lower() in {'.ogg'}:
+                    mime_type = 'audio/ogg'
+                elif audio_file.suffix.lower() in {'.webm'}:
+                    mime_type = 'audio/webm'
+                else:
+                    mime_type = 'audio/wav'
+
+            return send_file(
+                audio_file,
+                as_attachment=False,
+                download_name=f"{job_id}{audio_file.suffix or ''}",
+                mimetype=mime_type
+            )
+
+        except Exception as e:
+            logger.error(f"Error serving audio file for job {job_id}: {e}")
+            return jsonify({"error": "Failed to serve audio file"}), 500
+
+    @app.route('/preprocess_audio', methods=['POST'])
+    def preprocess_audio():
+        try:
+            if 'file' not in request.files:
+                return jsonify({"error": "No file provided"}), 400
+
+            file = request.files['file']
+            if not file or file.filename == '':
+                return jsonify({"error": "No file selected"}), 400
+
+            if not allowed_file(file.filename):
+                return jsonify({"error": "File type not allowed"}), 400
+
+            preprocess_id = str(uuid.uuid4())
+            uploads_dir = get_uploads_dir()
+            uploads_dir.mkdir(parents=True, exist_ok=True)
+
+            filename = secure_filename(file.filename)
+            suffix = Path(filename).suffix or '.wav'
+            original_path = uploads_dir / f"{preprocess_id}{suffix}"
+            file.save(str(original_path))
+
+            prepared_path, was_transcoded = _prepare_audio_for_processing(
+                preprocess_id,
+                str(original_path),
+            )
+
+            metadata = {
+                "preprocess_id": preprocess_id,
+                "original_path": str(original_path),
+                "prepared_path": str(prepared_path),
+                "was_transcoded": was_transcoded,
+                "filename": filename,
+                "created_at": time.time(),
+            }
+
+            with contextlib.suppress(OSError):
+                metadata["original_size"] = Path(original_path).stat().st_size
+            with contextlib.suppress(OSError):
+                metadata["prepared_size"] = Path(prepared_path).stat().st_size
+
+            metadata_path = uploads_dir / f"{preprocess_id}.json"
+            with contextlib.suppress(Exception):
+                with open(metadata_path, 'w', encoding='utf-8') as meta_file:
+                    json.dump(metadata, meta_file)
+
+            return jsonify({
+                "preprocess_id": preprocess_id,
+                "playback_url": f"/audio/{preprocess_id}",
+                "audio_file": {
+                    "name": filename,
+                    "path": str(prepared_path),
+                    "size": metadata.get("prepared_size"),
+                    "was_transcoded": was_transcoded,
+                },
+                "original_file": {
+                    "path": str(original_path),
+                    "size": metadata.get("original_size"),
+                },
+            })
+
+        except Exception as exc:
+            logger.error("Audio preprocessing failed: %s", exc, exc_info=True)
+            return jsonify({"error": f"Failed to preprocess audio: {exc}"}), 500
+
+    @app.route('/transcribe', methods=['POST'])
+    def transcribe_audio():
+        """Submit audio file for async transcription"""
+        try:
+            preprocess_id = request.form.get('preprocess_id')
+
+            file = request.files.get('file')
+            if (not file or file.filename == '') and not preprocess_id:
+                return jsonify({"error": "No file provided"}), 400
+
+            if file and file.filename == '' and not preprocess_id:
+                return jsonify({"error": "No file selected"}), 400
+
+            if file and not allowed_file(file.filename):
+                return jsonify({"error": "File type not allowed"}), 400
+
+            # Get parameters
+            model = request.form.get('model', 'whisper')
+            language = request.form.get('language', 'auto')
+            device = request.form.get('device', 'auto') or 'auto'
+            compute_type = request.form.get('compute_type', None)
+            vad_filter = request.form.get('vad_filter', 'True').lower() == 'true'
+            noise_suppression = request.form.get("noise_suppression")
+            requested_noise_backend = _noise_suppression_backend(noise_suppression)
+
+            preprocess_id = request.form.get('preprocess_id')
+
+            uploads_dir = get_uploads_dir()
+            uploads_dir.mkdir(parents=True, exist_ok=True)
+
+            metadata = None
+            if preprocess_id:
+                metadata_path = uploads_dir / f"{preprocess_id}.json"
+                if metadata_path.exists():
+                    try:
+                        with open(metadata_path, 'r', encoding='utf-8') as meta_file:
+                            metadata = json.load(meta_file)
+                    except Exception as meta_error:
+                        logger.warning("Failed to load preprocessing metadata for %s: %s", preprocess_id, meta_error)
+
+            # Create unique job ID
+            job_id = str(uuid.uuid4())
+
+            temp_dir = Path(tempfile.mkdtemp())
+
+            if metadata and metadata.get("filename"):
+                filename = metadata["filename"]
+            else:
+                filename = secure_filename(file.filename)
+
+            if not filename:
+                filename = f"audio_{job_id}.wav"
+
+            file_path = temp_dir / f"{job_id}_{filename}"
+
+            if metadata and Path(metadata.get("original_path", "")).exists():
+                try:
+                    shutil.copy2(metadata["original_path"], file_path)
+                except Exception as copy_error:
+                    logger.warning("Failed to reuse preprocessed original for %s: %s", job_id, copy_error)
+                    metadata = None
+
+            if metadata is None:
+                if not file or file.filename == '':
+                    return jsonify({"error": "No file provided"}), 400
+                file.save(str(file_path))
+
+            file_extension = Path(filename).suffix or '.mp3'
+            permanent_file_path = uploads_dir / f"{job_id}{file_extension}"
+            with contextlib.suppress(Exception):
+                shutil.copy2(str(file_path), str(permanent_file_path))
+
+            reuse_prepared = False
+            prepared_candidate = None
+            if metadata:
+                prepared_candidate = Path(metadata.get("prepared_path", ""))
+                reuse_prepared = prepared_candidate.exists() and prepared_candidate.suffix.lower() == ".wav"
+
+            if metadata and Path(metadata.get("prepared_path", "")).exists() and reuse_prepared:
+                prepared_source = prepared_candidate or Path(metadata["prepared_path"])
+                prepared_destination = uploads_dir / _normalized_audio_filename(job_id)
+                try:
+                    shutil.copy2(str(prepared_source), str(prepared_destination))
+                except Exception as copy_error:
+                    logger.warning("Failed to copy normalized audio for job %s: %s", job_id, copy_error)
+                    prepared_destination = prepared_source
+                prepared_path = str(prepared_destination)
+                was_transcoded = bool(metadata.get("was_transcoded"))
+
+                # Remove metadata file to avoid stale entries
+                with contextlib.suppress(Exception):
+                    (uploads_dir / f"{preprocess_id}.json").unlink()
+                # Remove obsolete preprocess artifacts
+                with contextlib.suppress(Exception):
+                    if prepared_source.exists() and prepared_source != prepared_destination:
+                        prepared_source.unlink()
+                with contextlib.suppress(Exception):
+                    original_meta_path = Path(metadata.get("original_path", ""))
+                    if original_meta_path.exists() and original_meta_path != permanent_file_path:
+                        original_meta_path.unlink()
+            else:
+                try:
+                    prepared_path, was_transcoded = _prepare_audio_for_processing(job_id, str(file_path))
+                except Exception as prep_error:
+                    logger.error("Audio preparation failed for job %s: %s", job_id, prep_error)
+                    return jsonify({"error": f"Failed to prepare audio: {prep_error}"}), 500
+
+                if preprocess_id and metadata:
+                    with contextlib.suppress(Exception):
+                        (uploads_dir / f"{preprocess_id}.json").unlink()
+
+                    prepared_meta_path = Path(metadata.get("prepared_path") or "")
+                    original_meta_path = Path(metadata.get("original_path") or "")
+
+                    with contextlib.suppress(Exception):
+                        if prepared_meta_path.exists() and prepared_meta_path.is_file():
+                            prepared_meta_path.unlink()
+                    with contextlib.suppress(Exception):
+                        if (
+                            original_meta_path.exists()
+                            and original_meta_path.is_file()
+                            and original_meta_path != permanent_file_path
+                        ):
+                            original_meta_path.unlink()
+
+            playback_path = prepared_path
+            playback_size = None
+            with contextlib.suppress(OSError):
+                playback_size = Path(playback_path).stat().st_size
+
+            # Create output directory
+            output_dir = get_transcriptions_dir() / job_id
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            # Prepare job arguments
+            job_args = {
+                'job_id': job_id,
+                'file_path': str(prepared_path),
+                'model_path': model,
+                'language': language,
+                'device': device,
+                'compute_type': compute_type,
+                'vad_filter': vad_filter,
+                'noise_suppression': requested_noise_backend,
+                'output_dir': str(output_dir),
+                'original_filename': filename,
+                'uploaded_audio_path': str(prepared_path),
+                'uploaded_audio_size': playback_size,
+                'prepared_audio_path': str(prepared_path),
+                'audio_was_transcoded': was_transcoded,
+                'original_audio_path': str(permanent_file_path) if permanent_file_path.exists() else None,
+            }
+
+            # Submit job to queue
+            queue = get_queue('default')
+
+            job = queue.enqueue(
+                process_full_pipeline_job,
+                kwargs=job_args,
+                job_id=job_id,
+                timeout='1h',
+                result_ttl=-1
+            )
+
+            logger.info(f"Submitted job {job_id} to queue: {queue.name}")
+
+            try:
+                playback_stat_size = playback_size if playback_size is not None else Path(playback_path).stat().st_size
+                queue.update_job_meta(job_id, {
+                    "original_filename": filename,
+                    "uploaded_audio_path": str(prepared_path),
+                    "audio_file": {
+                        "name": filename,
+                        "path": str(prepared_path),
+                        "size": playback_stat_size,
+                        "was_transcoded": was_transcoded,
+                    },
+                    "language": language,
+                    "device": device,
+                    "model": model,
+                    "message": "Job submitted successfully",
+                    "progress": 0,
+                    "audio_was_transcoded": was_transcoded,
+                })
+            except Exception as meta_error:
+                logger.warning("Failed to persist initial job metadata for %s: %s", job_id, meta_error)
+
+            # Emit initial status
+            emit_update(f"job:{job_id}", 'job_update', {
+                'job_id': job_id,
+                'status': 'queued',
+                'message': 'Job submitted successfully',
+                'progress': 0,
+                'timestamp': time.time()
+            })
+
+            return jsonify({
+                "job_id": job_id,
+                "status": "queued",
+                "message": "Job submitted successfully",
+                "filename": filename,
+                "websocket_channel": f"job:{job_id}",
+                "audio_file": {
+                    "name": filename,
+                    "path": str(prepared_path),
+                    "size": playback_size,
+                    "was_transcoded": was_transcoded,
+                }
+            })
+
+        except Exception as e:
+            logger.error(f"Error submitting job: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return jsonify({"error": "Internal server error", "details": str(e)}), 500
+
+    @app.route('/transcribe_only', methods=['POST'])
+    def transcribe_only():
+        """Alias for /transcribe (kept for compatibility)."""
+        return transcribe_audio()
+
+    @app.route('/download/<job_id>')
+    def download_transcription(job_id):
+        """Download transcription result"""
+        try:
+            transcriptions_dir = get_transcriptions_dir()
+            job_dir = transcriptions_dir / job_id
+
+            # Check for formatted text file first (timestamps per segment)
+            formatted_file = job_dir / f"{job_id}_formatted.txt"
+            if formatted_file.exists():
+                return send_file(
+                    formatted_file,
+                    as_attachment=True,
+                    download_name=f"transcription_{job_id}.txt",
+                    mimetype='text/plain'
+                )
+
+            # Fallback to regular text file
+            text_file = job_dir / f"{job_id}.txt"
+            if text_file.exists():
+                return send_file(
+                    text_file,
+                    as_attachment=True,
+                    download_name=f"transcription_{job_id}.txt",
+                    mimetype='text/plain'
+                )
+
+            # Fallback to JSON file
+            json_file = job_dir / f"{job_id}.json"
+            if json_file.exists():
+                return send_file(
+                    json_file,
+                    as_attachment=True,
+                    download_name=f"transcription_{job_id}.json",
+                    mimetype='application/json'
+                )
+
+            return jsonify({"error": "Transcription file not found"}), 404
+
+        except Exception as e:
+            logger.error(f"Error downloading transcription {job_id}: {e}")
+            return jsonify({"error": "Failed to download transcription"}), 500
+
+    return app
+
+
+# Override update_job_progress in native_job_handlers to emit updates
+def patch_job_handlers():
+    """Patch job handlers to emit WebSocket-style updates"""
+    import native_job_handlers
+
+    original_update = native_job_handlers.update_job_progress
+
+    def new_update_job_progress(job_id: str, progress: int, message: str, extra_data: Dict[str, Any] = None):
+        # Call original update
+        original_update(job_id, progress, message, extra_data)
+
+        # Also emit WebSocket-style update
+        publish_job_update(job_id, 'progress', {
+            'job_id': job_id,
+            'progress': progress,
+            'message': message,
+            'timestamp': time.time(),
+            **(extra_data or {})
+        })
+
+    native_job_handlers.update_job_progress = new_update_job_progress
+
+
+def start_server(app, port=11220, host='127.0.0.1'):
+    """Start the Flask server"""
+    try:
+        logger.info(f"Starting web server on {host}:{port}")
+        logger.info("WebSocket emulation enabled (using HTTP polling)")
+        app.run(host=host, port=port, debug=False, threaded=True)
+    except Exception as e:
+        logger.error(f"Failed to start server: {e}")
+        raise
+
+
+if __name__ == '__main__':
+    # Set up environment
+    setup_environment()
+    setup_ffmpeg_environment()
+
+    # Patch job handlers to emit updates
+    patch_job_handlers()
+
+    # Start worker threads
+    start_worker(num_threads=2)
+
+    # Create and start Flask app
+    app = create_app()
+    port = int(os.environ.get('PORT', 11220))
+
+    logger.info(f"Starting native web server on port {port}...")
+    logger.info("Serving React UI and WebSocket emulation")
+    start_server(app, port=port)
