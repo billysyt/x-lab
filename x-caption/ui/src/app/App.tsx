@@ -505,6 +505,8 @@ export function App() {
   const isGapPlaybackRef = useRef(false);
   const [timelineScrollLeft, setTimelineScrollLeft] = useState(0);
   const [timelineViewportWidth, setTimelineViewportWidth] = useState(0);
+  const timelineScrollIdleRef = useRef<number | null>(null);
+  const timelineUserScrollingRef = useRef(false);
   const dragRegionClass = useCustomDrag ? "stt-drag-region" : "pywebview-drag-region";
   const captionDragRef = useRef<{
     pointerId: number;
@@ -2318,11 +2320,17 @@ export function App() {
   const minZoom = 0.5;
   const maxZoom = 3;
   const minCaptionDuration = 0.05;
-  const minSegmentSec = 10;
-  const maxSegmentSec = 600;
+  const minVisibleDurationSec = 10;
+  const maxVisibleDurationSec = 600;
+  const midVisibleDurationSec = 60;
   const zoomT = clamp((timelineZoom - minZoom) / Math.max(0.001, maxZoom - minZoom), 0, 1);
-  const segmentSec = maxSegmentSec - zoomT * (maxSegmentSec - minSegmentSec);
-  const visibleDuration = segmentSec * (tickCount - 1);
+  const visibleDuration =
+    zoomT <= 0.5
+      ? maxVisibleDurationSec *
+        Math.pow(midVisibleDurationSec / maxVisibleDurationSec, zoomT / 0.5)
+      : midVisibleDurationSec *
+        Math.pow(minVisibleDurationSec / midVisibleDurationSec, (zoomT - 0.5) / 0.5);
+  const segmentSec = visibleDuration / (tickCount - 1);
   const pxPerSec = timelineViewportWidth > 0
     ? timelineViewportWidth / Math.max(visibleDuration, MIN_CLIP_DURATION_SEC)
     : BASE_PX_PER_SEC * timelineZoom;
@@ -2351,6 +2359,23 @@ export function App() {
     },
     [duration, handleScrub, pxPerSec]
   );
+
+  useEffect(() => {
+    const scroller = timelineScrollRef.current;
+    if (!scroller) return;
+    if (timelineUserScrollingRef.current) return;
+    if (scrubStateRef.current || playerScrubRef.current) return;
+    if (!Number.isFinite(playback.currentTime)) return;
+    const viewport = scroller.clientWidth || 0;
+    if (!viewport) return;
+    const margin = Math.max(24, viewport * 0.2);
+    const leftBound = scroller.scrollLeft + margin;
+    const rightBound = scroller.scrollLeft + viewport - margin;
+    if (playheadLeftPx < leftBound || playheadLeftPx > rightBound) {
+      const nextLeft = clamp(playheadLeftPx - viewport * 0.4, 0, Math.max(0, timelineWidth - viewport));
+      scroller.scrollLeft = nextLeft;
+    }
+  }, [playback.currentTime, playheadLeftPx, timelineWidth]);
 
   const computeCaptionTiming = useCallback(
     (drag: NonNullable<typeof captionDragRef.current>, deltaSec: number) => {
@@ -2559,6 +2584,13 @@ export function App() {
 
   const handleTimelineScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     setTimelineScrollLeft(event.currentTarget.scrollLeft);
+    timelineUserScrollingRef.current = true;
+    if (timelineScrollIdleRef.current) {
+      window.clearTimeout(timelineScrollIdleRef.current);
+    }
+    timelineScrollIdleRef.current = window.setTimeout(() => {
+      timelineUserScrollingRef.current = false;
+    }, 1200);
   }, []);
 
   useEffect(() => {
