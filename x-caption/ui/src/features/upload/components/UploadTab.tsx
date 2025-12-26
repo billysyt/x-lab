@@ -12,7 +12,6 @@ import {
 } from "react";
 import { useAppDispatch, useAppSelector } from "../../../app/hooks";
 import { removeJob, startTranscription } from "../../jobs/jobsSlice";
-import { setActiveTab } from "../../ui/uiSlice";
 import type { ToastType } from "../../../shared/components/ToastHost";
 import { AppIcon } from "../../../shared/components/AppIcon";
 import { cn } from "../../../shared/lib/cn";
@@ -41,6 +40,7 @@ type UploadTabProps = {
   notify: (message: string, type?: ToastType) => void;
   onSelectionChange?: (hasFile: boolean, filename?: string | null, file?: File | null) => void;
   onAddToTimeline?: (items: MediaItem[]) => void;
+  onClearSelection?: () => void;
   localMedia?: MediaItem[];
   onLocalMediaChange?: Dispatch<SetStateAction<MediaItem[]>>;
   onRequestFilePicker?: (open: () => void) => void;
@@ -661,7 +661,6 @@ export const UploadTab = forwardRef(function UploadTab(
       setLocalMedia([]);
       setSelectedId(job.id);
       clearSelectedFile();
-      dispatch(setActiveTab("captions"));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       props.notify(`Upload failed: ${message}`, "error");
@@ -670,8 +669,19 @@ export const UploadTab = forwardRef(function UploadTab(
 
   return (
     <>
-      <div className="space-y-3">
-        <div className="flex items-center justify-between gap-2">
+      <div
+        className="flex h-full min-h-0 flex-col space-y-3"
+        onPointerDownCapture={(event) => {
+          const target = event.target as HTMLElement;
+          if (target.closest("[data-media-row]")) return;
+          if (target.closest("[data-media-toolbar]")) return;
+          if (target.closest("[data-media-menu]")) return;
+          setSelectedId(null);
+          setContextMenu(null);
+          props.onClearSelection?.();
+        }}
+      >
+        <div className="flex items-center justify-between gap-2" data-media-toolbar>
           <span className="text-[11px] font-semibold text-slate-400">
             {filteredMediaItems.length} Job{filteredMediaItems.length === 1 ? "" : "s"}
           </span>
@@ -691,7 +701,7 @@ export const UploadTab = forwardRef(function UploadTab(
                 <AppIcon name="sort" />
               </button>
               {sortMenuOpen ? (
-                <div className="absolute right-0 z-50 mt-2 w-32 overflow-hidden rounded-lg border border-slate-800/70 bg-[#151515] text-[11px] text-slate-200 shadow-lg">
+                <div className="absolute right-0 z-50 mt-2 w-32 overflow-hidden rounded-lg border border-slate-800/70 bg-[#151515] text-[11px] text-slate-200 shadow-lg" data-media-menu>
                   {[
                     { id: "recent", label: "Recent" },
                     { id: "name", label: "Name" }
@@ -731,7 +741,7 @@ export const UploadTab = forwardRef(function UploadTab(
                 <AppIcon name="filter" />
               </button>
               {filterMenuOpen ? (
-                <div className="absolute right-0 z-50 mt-2 w-36 overflow-hidden rounded-lg border border-slate-800/70 bg-[#151515] text-[11px] text-slate-200 shadow-lg">
+                <div className="absolute right-0 z-50 mt-2 w-36 overflow-hidden rounded-lg border border-slate-800/70 bg-[#151515] text-[11px] text-slate-200 shadow-lg" data-media-menu>
                   {[
                     { id: "all", label: "All" },
                     { id: "video", label: "Video" },
@@ -762,15 +772,9 @@ export const UploadTab = forwardRef(function UploadTab(
 
         <div
           className={cn(
-            "rounded-xl p-1",
+            "flex-1 rounded-xl p-1",
             isDragOver && "ring-1 ring-primary/70"
           )}
-          onClick={(event) => {
-            const target = event.target as HTMLElement;
-            if (target.closest("[data-media-row]")) return;
-            setSelectedId(null);
-            setContextMenu(null);
-          }}
           onDragOver={(e) => {
             e.preventDefault();
             setIsDragOver(true);

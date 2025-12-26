@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { setActiveTab, setVersion } from "../features/ui/uiSlice";
+import { setVersion } from "../features/ui/uiSlice";
 import { setChineseStyle, setLanguage } from "../features/settings/settingsSlice";
 import { setExportLanguage } from "../features/transcript/transcriptSlice";
 import { useAppDispatch, useAppSelector } from "./hooks";
@@ -171,7 +171,6 @@ const normalizeClips = <T extends { startSec: number; durationSec: number }>(cli
 };
 
 export function App() {
-  const activeTab = useAppSelector((s) => s.app.activeTab);
   const settings = useAppSelector((s) => s.settings);
   const exportLanguage = useAppSelector((s) => s.transcript.exportLanguage);
   const dispatch = useAppDispatch();
@@ -478,6 +477,8 @@ export function App() {
     downloadedBytes: null,
     totalBytes: null
   });
+  const [secondCaptionEnabled, setSecondCaptionEnabled] = useState(false);
+  const [secondCaptionLanguage, setSecondCaptionLanguage] = useState<"yue" | "zh" | "en">("en");
   const [localMedia, setLocalMedia] = useState<MediaItem[]>([]);
   const [timelineZoom, setTimelineZoom] = useState(DEFAULT_TIMELINE_ZOOM);
   const [isCompact, setIsCompact] = useState(false);
@@ -630,6 +631,7 @@ export function App() {
     activeJob?.partialResult?.segments ||
     activeJob?.streamingSegments ||
     [];
+  const showCaptionSetup = segments.length === 0;
   const sortedSegments = useMemo(
     () =>
       [...segments]
@@ -1029,12 +1031,11 @@ export function App() {
   }, [notify, waitlistUrl]);
 
   const handleOpenFiles = useCallback(() => {
-    dispatch(setActiveTab("media"));
     if (isCompact) {
       setIsLeftDrawerOpen(true);
     }
     uploadRef.current?.openFilePicker?.();
-  }, [dispatch, isCompact]);
+  }, [isCompact]);
 
   const setWindowOnTop = useCallback((next: boolean) => {
     const win = typeof window !== "undefined" ? (window as any) : null;
@@ -1270,7 +1271,6 @@ export function App() {
         }
         dispatch(setJobSegments({ jobId, segments: parsed }));
         dispatch(selectJob(jobId));
-        dispatch(setActiveTab("captions"));
         const mergedText = parsed.map((segment) => segment.text || "").join(" ").trim();
         void apiUpsertJobRecord({
           job_id: jobId,
@@ -2426,14 +2426,15 @@ export function App() {
   const timelineScrollWidth = timelineWidth;
   const playheadLeftPx = duration > 0 ? Math.min(timelineWidth, playback.currentTime * pxPerSec) : 0;
   const playheadPct = duration > 0 ? Math.min(100, (playback.currentTime / duration) * 100) : 0;
-  const baseTickCount = duration > 0 && segmentSec > 0
-    ? Math.floor(duration / segmentSec) + 1
+  const rulerDuration = duration > 0 ? duration : visibleDuration;
+  const baseTickCount = rulerDuration > 0 && segmentSec > 0
+    ? Math.floor(rulerDuration / segmentSec) + 1
     : 0;
   const ticks = baseTickCount
     ? Array.from({ length: baseTickCount }, (_, idx) => idx * segmentSec)
     : [];
-  if (duration > 0 && ticks.length && ticks[ticks.length - 1] < duration) {
-    ticks.push(duration);
+  if (rulerDuration > 0 && ticks.length && ticks[ticks.length - 1] < rulerDuration) {
+    ticks.push(rulerDuration);
   }
   const segmentPx = segmentSec * pxPerSec;
   const faintGridStyle = {
@@ -2711,6 +2712,19 @@ export function App() {
     }
   };
 
+  const handleClearSelection = useCallback(() => {
+    dispatch(selectJob(null));
+    setActiveMedia(null);
+    setActiveClipId(null);
+    setTimelineClips([]);
+    setActivePreviewUrl(null);
+    setPreviewPoster(null);
+    setForcedCaptionId(null);
+    pendingSeekRef.current = null;
+    pendingPlayRef.current = false;
+    setPlayback({ currentTime: 0, duration: 0, isPlaying: false });
+  }, [dispatch]);
+
   const handleAddToTimeline = useCallback(
     (items: MediaItem[]) => {
       if (!items.length) return;
@@ -2788,27 +2802,121 @@ export function App() {
     ? "grid min-h-0 overflow-hidden grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto]"
     : "grid min-h-0 overflow-hidden grid-cols-[minmax(160px,240px)_minmax(0,1fr)_minmax(240px,340px)] 2xl:grid-cols-[minmax(200px,280px)_minmax(0,1fr)_minmax(280px,380px)] grid-rows-[minmax(0,1fr)_auto]";
 
-  const leftPanelContent = (
-    <>
-    <div className={cn(dragRegionClass, "flex items-center gap-2 px-4 py-3")}>
-        {([
-          { id: "media", label: "Media" },
-          { id: "captions", label: "Captions" }
-        ] as const).map((tab) => (
+  const captionSetupPanel = (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <label className="text-[11px] font-semibold text-slate-400" htmlFor="languageSelect">
+          Language
+        </label>
+        <Select
+          className="stt-select-dark"
+          id="language"
+          buttonId="languageSelect"
+          value={String(settings.language)}
+          options={[
+            { value: "auto", label: "Auto Detect" },
+            { value: "yue", label: "Cantonese" },
+            { value: "zh", label: "Mandarin" },
+            { value: "en", label: "English" }
+          ]}
+          onChange={(value) => dispatch(setLanguage(value as any))}
+        />
+      </div>
+      <div className="space-y-2">
+        <label className="text-[11px] font-semibold text-slate-400" htmlFor="chineseStyleSelect">
+          Chinese Output Style
+        </label>
+        <Select
+          className="stt-select-dark"
+          id="chineseStyle"
+          buttonId="chineseStyleSelect"
+          value={String(settings.chineseStyle)}
+          options={[
+            { value: "spoken", label: "Spoken (Cantonese)" },
+            { value: "written", label: "Written" }
+          ]}
+          onChange={(value) => dispatch(setChineseStyle(value as any))}
+        />
+      </div>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="text-[11px] font-semibold text-slate-400" htmlFor="secondCaptionLanguageSelect">
+            Second Caption
+          </label>
           <button
-            key={tab.id}
             className={cn(
-              "pywebview-no-drag rounded-md px-3 py-1 text-xs font-semibold",
-              activeTab === tab.id
-                ? "bg-slate-700/40 text-white"
-                : "text-slate-400 hover:bg-slate-800/60"
+              "inline-flex items-center gap-2 text-[10px] font-medium transition",
+              secondCaptionEnabled ? "text-slate-200" : "text-slate-500"
             )}
-            onClick={() => dispatch(setActiveTab(tab.id))}
+            onClick={() => setSecondCaptionEnabled((prev) => !prev)}
             type="button"
           >
-            {tab.label}
+            <span
+              className={cn(
+                "relative inline-flex h-4 w-7 items-center rounded-full border transition",
+                secondCaptionEnabled ? "border-slate-500 bg-[#1b1b22]" : "border-slate-700 bg-[#151515]"
+              )}
+            >
+              <span
+                className={cn(
+                  "absolute h-3 w-3 rounded-full bg-white transition",
+                  secondCaptionEnabled ? "translate-x-3" : "translate-x-1"
+                )}
+              />
+            </span>
           </button>
-        ))}
+        </div>
+        <Select
+          className={cn("stt-select-dark", !secondCaptionEnabled && "opacity-60")}
+          id="secondCaptionLanguage"
+          buttonId="secondCaptionLanguageSelect"
+          value={secondCaptionLanguage}
+          options={[
+            { value: "yue", label: "Cantonese" },
+            { value: "zh", label: "Mandarin" },
+            { value: "en", label: "English" }
+          ]}
+          onChange={(value) => setSecondCaptionLanguage(value as "yue" | "zh" | "en")}
+          disabled={!secondCaptionEnabled}
+        />
+      </div>
+      <div className="pt-2">
+        <button
+          className={cn(
+            "inline-flex w-full items-center justify-center gap-2 rounded-md bg-white px-3 py-2.5 text-[11.5px] font-semibold text-[#0b0b0b] shadow-[0_10px_24px_rgba(37,99,235,0.35)] ring-1 ring-[#93c5fd]/40 transition hover:shadow-[0_16px_32px_rgba(37,99,235,0.45)]",
+            modelDownload.status === "checking" ||
+              modelDownload.status === "downloading" ||
+              isTranscribing
+              ? "cursor-not-allowed opacity-60 hover:shadow-[0_10px_24px_rgba(37,99,235,0.25)]"
+              : ""
+          )}
+          onClick={handleGenerateCaptions}
+          disabled={
+            modelDownload.status === "checking" ||
+            modelDownload.status === "downloading" ||
+            isTranscribing
+          }
+          type="button"
+        >
+          <span className="flex items-center gap-0.5 text-[#2563eb]">
+            <AppIcon name="sparkle" className="text-[10px]" />
+            <AppIcon name="sparkle" className="text-[12px]" />
+            <AppIcon name="sparkle" className="text-[9px]" />
+          </span>
+          {isTranscribing
+            ? "Processing..."
+            : modelDownload.status === "downloading"
+              ? "Downloading model..."
+              : "AI Generate Caption"}
+        </button>
+      </div>
+    </div>
+  );
+
+  const leftPanelContent = (
+    <>
+      <div className={cn(dragRegionClass, "flex items-center justify-between px-4 py-3 text-xs font-semibold text-slate-200")}>
+        <span>Media</span>
         {isCompact ? (
           <button
             className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-800/20 bg-[#151515] text-[10px] text-slate-300 hover:border-slate-600"
@@ -2822,76 +2930,16 @@ export function App() {
         ) : null}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 stt-scrollbar">
-        <div className={cn(activeTab === "media" ? "block" : "hidden")}>
+        <div className="h-full">
           <UploadTab
             ref={uploadRef}
             notify={notify}
             localMedia={localMedia}
             onLocalMediaChange={setLocalMedia}
             onAddToTimeline={handleAddToTimeline}
+            onClearSelection={handleClearSelection}
             onRequestFilePicker={handleRequestFilePicker}
           />
-        </div>
-        <div className={cn(activeTab === "captions" ? "block" : "hidden")}>
-          <div className="space-y-4">
-            <div className="space-y-3">
-              <div>
-                <label className="text-[11px] font-semibold text-slate-400" htmlFor="languageSelect">
-                  Language
-                </label>
-                <Select
-                  className="stt-select-dark"
-                  id="language"
-                  buttonId="languageSelect"
-                  value={String(settings.language)}
-                  options={[
-                    { value: "auto", label: "Auto Detect" },
-                    { value: "yue", label: "Cantonese" },
-                    { value: "zh", label: "Mandarin" },
-                    { value: "en", label: "English" }
-                  ]}
-                  onChange={(value) => dispatch(setLanguage(value as any))}
-                />
-              </div>
-              <div>
-                <label className="text-[11px] font-semibold text-slate-400" htmlFor="chineseStyleSelect">
-                  Chinese Output Style
-                </label>
-                <Select
-                  className="stt-select-dark"
-                  id="chineseStyle"
-                  buttonId="chineseStyleSelect"
-                  value={String(settings.chineseStyle)}
-                  options={[
-                    { value: "spoken", label: "Spoken (Cantonese)" },
-                    { value: "written", label: "Written" }
-                  ]}
-                  onChange={(value) => dispatch(setChineseStyle(value as any))}
-                />
-              </div>
-            </div>
-            <div className="pt-2">
-              <button
-                className={cn(
-                  "inline-flex w-full items-center justify-center rounded-md bg-gradient-to-r from-[#2563eb] via-[#4338ca] to-[#6d28d9] px-3 py-2 text-[12px] font-semibold text-white shadow-[0_10px_24px_rgba(76,29,149,0.35)] transition hover:-translate-y-[1px] hover:brightness-110",
-                  modelDownload.status === "checking" ||
-                    modelDownload.status === "downloading" ||
-                    isTranscribing
-                    ? "cursor-not-allowed opacity-70 hover:translate-y-0 hover:brightness-100"
-                    : ""
-                )}
-                onClick={handleGenerateCaptions}
-                disabled={
-                  modelDownload.status === "checking" ||
-                  modelDownload.status === "downloading" ||
-                  isTranscribing
-                }
-                type="button"
-              >
-                {isTranscribing ? "Processing..." : "AI Generate Caption"}
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </>
@@ -3029,7 +3077,7 @@ export function App() {
                   Export
                 </button>
                 <button
-                  className="pywebview-no-drag inline-flex h-7 items-center justify-center rounded-md bg-gradient-to-r from-[#2563eb] via-[#4338ca] to-[#6d28d9] px-2 text-[11px] font-semibold text-white shadow-[0_10px_24px_rgba(76,29,149,0.35)] transition hover:-translate-y-[1px] hover:brightness-110"
+                  className="pywebview-no-drag inline-flex h-7 items-center justify-center rounded-md bg-gradient-to-r from-[#2563eb] via-[#4338ca] to-[#6d28d9] px-2 text-[11px] font-semibold text-white shadow-[0_10px_24px_rgba(76,29,149,0.35)] transition hover:brightness-110"
                   onClick={handleJoinWaitlist}
                   type="button"
                 >
@@ -3216,7 +3264,7 @@ export function App() {
                       <AppIcon name="captions" />
                     </button>
                   </div>
-                  {compactTab === "captions" ? (
+                  {compactTab === "captions" && segments.length > 0 ? (
                     <button
                       className={cn(
                         "pywebview-no-drag inline-flex items-center gap-2 text-[10px] font-medium transition",
@@ -3249,7 +3297,17 @@ export function App() {
               {isCompact && compactTab === "captions" ? (
                 <div className="flex min-h-0 w-full flex-1">
                   <div className="min-h-0 h-[calc(100vh-320px)] max-h-[calc(100vh-320px)] w-full overflow-hidden">
-                    <TranscriptPanel mediaRef={transcriptMediaRef} notify={notify} editEnabled={isTranscriptEdit} />
+                    <div className="flex h-full min-h-0 flex-col gap-3">
+                      {showCaptionSetup ? captionSetupPanel : null}
+                      <div className="min-h-0 flex-1">
+                        <TranscriptPanel
+                          mediaRef={transcriptMediaRef}
+                          notify={notify}
+                          editEnabled={isTranscriptEdit}
+                          suppressEmptyState={showCaptionSetup}
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -3451,35 +3509,47 @@ export function App() {
           {!isCompact ? (
             <aside className="row-start-1 row-end-2 flex min-h-0 flex-col overflow-hidden bg-[#0b0b0b]">
               <div className={cn(dragRegionClass, "flex items-center justify-between px-4 py-3 text-xs font-semibold text-slate-200")}>
-                <span>Transcription</span>
-                <button
-                  className={cn(
-                    "pywebview-no-drag inline-flex items-center gap-2 text-[10px] font-medium transition",
-                    isTranscriptEdit ? "text-slate-200" : "text-slate-500"
-                  )}
-                  onClick={() => setIsTranscriptEdit((prev) => !prev)}
-                  type="button"
-                >
-                  <AppIcon name="edit" className="text-[11px]" />
-                  Edit
-                  <span
+                <span>Caption</span>
+                {segments.length > 0 ? (
+                  <button
                     className={cn(
-                      "relative inline-flex h-4 w-7 items-center rounded-full border transition",
-                      isTranscriptEdit ? "border-slate-500 bg-[#1b1b22]" : "border-slate-700 bg-[#151515]"
+                      "pywebview-no-drag inline-flex items-center gap-2 text-[10px] font-medium transition",
+                      isTranscriptEdit ? "text-slate-200" : "text-slate-500"
                     )}
+                    onClick={() => setIsTranscriptEdit((prev) => !prev)}
+                    type="button"
                   >
+                    <AppIcon name="edit" className="text-[11px]" />
+                    Edit
                     <span
                       className={cn(
-                        "absolute h-3 w-3 rounded-full bg-white transition",
-                        isTranscriptEdit ? "translate-x-3" : "translate-x-1"
+                        "relative inline-flex h-4 w-7 items-center rounded-full border transition",
+                        isTranscriptEdit ? "border-slate-500 bg-[#1b1b22]" : "border-slate-700 bg-[#151515]"
                       )}
-                    />
-                  </span>
-                </button>
+                    >
+                      <span
+                        className={cn(
+                          "absolute h-3 w-3 rounded-full bg-white transition",
+                          isTranscriptEdit ? "translate-x-3" : "translate-x-1"
+                        )}
+                      />
+                    </span>
+                  </button>
+                ) : null}
               </div>
               <div className="min-h-0 flex-1 px-3 py-3">
                 <div className="min-h-0 h-[calc(100vh-340px)] max-h-[calc(100vh-340px)] overflow-hidden">
-                  <TranscriptPanel mediaRef={transcriptMediaRef} notify={notify} editEnabled={isTranscriptEdit} />
+                  <div className="flex h-full min-h-0 flex-col gap-3">
+                    {showCaptionSetup ? captionSetupPanel : null}
+                    <div className="min-h-0 flex-1">
+                      <TranscriptPanel
+                        mediaRef={transcriptMediaRef}
+                        notify={notify}
+                        editEnabled={isTranscriptEdit}
+                        suppressEmptyState={showCaptionSetup}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             </aside>
@@ -3871,7 +3941,7 @@ export function App() {
               </div>
               <div className="mt-5 flex items-center justify-end gap-2">
                 <button
-                  className="rounded-md border border-slate-700 bg-[#151515] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500"
+                  className="rounded-md bg-transparent px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
                   onClick={() => setShowExportModal(false)}
                   type="button"
                 >
@@ -3987,7 +4057,7 @@ export function App() {
               </div>
               <div className="mt-5 flex items-center justify-end gap-2">
                 <button
-                  className="rounded-md border border-slate-700 bg-[#151515] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500"
+                  className="rounded-md bg-transparent px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
                   onClick={() => setShowImportModal(false)}
                   type="button"
                 >

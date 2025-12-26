@@ -39,6 +39,7 @@ import {
   FaRegSquare,
   FaSpinner,
   FaSortAmountDownAlt,
+  FaStar,
   FaTimes,
   FaTrashAlt,
   FaThumbtack,
@@ -96,7 +97,8 @@ const icons = {
   windowMaximize: FaRegSquare,
   video: FaVideo,
   volume: FaVolumeUp,
-  captions: FaClosedCaptioning
+  captions: FaClosedCaptioning,
+  sparkle: FaStar
 } as const satisfies Record<string, IconType>;
 
 export type AppIconName = keyof typeof icons;

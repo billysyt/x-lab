@@ -53,6 +53,13 @@
 }
 
 @layer components {
+  button.rounded-sm,
+  button.rounded,
+  button.rounded-md,
+  button.rounded-lg {
+    border-radius: 0.75rem;
+  }
+
   .stt-select-dark button {
     background: #111115 !important;
     border-color: #2a2a32 !important;

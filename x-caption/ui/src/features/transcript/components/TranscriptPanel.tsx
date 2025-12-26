@@ -505,6 +505,7 @@ export function TranscriptPanel(props: {
   mediaRef: RefObject<HTMLMediaElement>;
   notify: (message: string, type?: ToastType) => void;
   editEnabled: boolean;
+  suppressEmptyState?: boolean;
 }) {
   const dispatch = useAppDispatch();
   const selectedJobId = useAppSelector((s) => s.jobs.selectedJobId);
@@ -561,7 +562,9 @@ export function TranscriptPanel(props: {
     <div className="flex min-h-0 h-full flex-col" id="contentLayout">
       {!job ? (
         <div className={transcriptContainerClass} id="transcriptContent">
-          <div className={emptyStateClass}>No transcript yet. Use Open in the header to add a file.</div>
+          {props.suppressEmptyState ? null : (
+            <div className={emptyStateClass}>No transcript yet. Use Open in the header to add a file.</div>
+          )}
         </div>
       ) : job.status === "completed" && jobNeedsServerResult(job) ? (
         <div className={transcriptContainerClass} id="transcriptContent">
@@ -618,7 +621,7 @@ export function TranscriptPanel(props: {
         </div>
       ) : (
         <div className={transcriptContainerClass} id="transcriptContent">
-          <div className={emptyStateClass}>No transcript yet</div>
+          {props.suppressEmptyState ? null : <div className={emptyStateClass}>No transcript yet</div>}
         </div>
       )}
     </div>

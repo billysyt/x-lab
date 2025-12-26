@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { useAppDispatch, useAppSelector } from "../../../app/hooks";
 import { removeJob, selectJobsState, selectJob } from "../jobsSlice";
-import { setActiveTab } from "../../ui/uiSlice";
 import { formatElapsedTime, getJobProgressValue } from "../../../shared/lib/utils";
 import type { ToastType } from "../../../shared/components/ToastHost";
 import { AppIcon } from "../../../shared/components/AppIcon";
@@ -85,9 +84,6 @@ export function HistoryTab(props: { notify: (message: string, type?: ToastType) 
   function onSelect(jobId: string) {
     const job = jobsById[jobId];
     dispatch(selectJob(jobId));
-    if (job?.status === "completed") {
-      dispatch(setActiveTab("media"));
-    }
   }
 
   return (
