@@ -66,6 +66,7 @@ export async function apiGetWhisperModelDownload(downloadId: string): Promise<Wh
 }
 
 export async function apiTranscribeAudio(args: {
+  jobId?: string | null;
   file?: File;
   filePath?: string | null;
   filename?: string | null;
@@ -78,6 +79,9 @@ export async function apiTranscribeAudio(args: {
   chineseScript?: "traditional" | "simplified";
 }): Promise<TranscribeResponse> {
   const formData = new FormData();
+  if (args.jobId) {
+    formData.append("job_id", args.jobId);
+  }
   if (args.file) {
     formData.append("file", args.file);
   }

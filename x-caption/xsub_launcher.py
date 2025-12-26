@@ -668,12 +668,75 @@ def open_browser(port: int = 11220, width: int = 1480, height: int = 900) -> str
                     return {"success": False, "error": str(exc)}
                 return {"success": False, "error": "unsupported"}
 
+            def window_zoom(self):
+                if not self._window:
+                    return {"success": False, "error": "window_not_ready"}
+                try:
+                    if sys.platform == "darwin":
+                        ns_window = None
+                        for attr in ("_window", "window", "ns_window", "_ns_window"):
+                            candidate = getattr(self._window, attr, None)
+                            if candidate is not None and hasattr(candidate, "zoom_"):
+                                ns_window = candidate
+                                break
+                        if ns_window is not None:
+                            ns_window.zoom_(None)
+                            return {"success": True}
+                except Exception as exc:  # pragma: no cover - defensive
+                    return {"success": False, "error": str(exc)}
+                return self.window_toggle_maximize()
+
             def window_toggle_fullscreen(self):
                 if not self._window:
                     return {"success": False, "error": "window_not_ready"}
                 try:
                     if hasattr(self._window, "toggle_fullscreen"):
                         self._window.toggle_fullscreen()
+                        return {"success": True}
+                except Exception as exc:  # pragma: no cover - defensive
+                    return {"success": False, "error": str(exc)}
+                return {"success": False, "error": "unsupported"}
+
+            def window_restore(self):
+                if not self._window:
+                    return {"success": False, "error": "window_not_ready"}
+                try:
+                    if hasattr(self._window, "restore"):
+                        self._window.restore()
+                        return {"success": True}
+                except Exception as exc:  # pragma: no cover - defensive
+                    return {"success": False, "error": str(exc)}
+                return {"success": False, "error": "unsupported"}
+
+            def window_get_size(self):
+                if not self._window:
+                    return {"success": False, "error": "window_not_ready"}
+                try:
+                    if hasattr(self._window, "get_size"):
+                        width, height = self._window.get_size()
+                        return {"success": True, "width": width, "height": height}
+                    if hasattr(self._window, "width") and hasattr(self._window, "height"):
+                        return {
+                            "success": True,
+                            "width": getattr(self._window, "width"),
+                            "height": getattr(self._window, "height"),
+                        }
+                except Exception as exc:  # pragma: no cover - defensive
+                    return {"success": False, "error": str(exc)}
+                return {"success": False, "error": "unsupported"}
+
+            def window_set_size(self, width: float, height: float):
+                if not self._window:
+                    return {"success": False, "error": "window_not_ready"}
+                try:
+                    if hasattr(self._window, "resize"):
+                        self._window.resize(int(width), int(height))
+                        return {"success": True}
+                    if hasattr(self._window, "set_size"):
+                        self._window.set_size(int(width), int(height))
+                        return {"success": True}
+                    if hasattr(self._window, "resize_to"):
+                        self._window.resize_to(int(width), int(height))
                         return {"success": True}
                 except Exception as exc:  # pragma: no cover - defensive
                     return {"success": False, "error": str(exc)}

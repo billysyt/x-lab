@@ -131,4 +131,46 @@
   .stt-scrollbar::-webkit-scrollbar-thumb:hover {
     background: var(--primary-color);
   }
+
+  .processing-spinner {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 4px;
+    height: 20px;
+  }
+
+  .processing-bar {
+    width: 4px;
+    height: 18px;
+    background: #ffffff;
+    border-radius: 999px;
+    transform-origin: bottom;
+    animation: processing-bars 0.9s ease-in-out infinite;
+    opacity: 0.6;
+  }
+
+  .processing-bar-2 {
+    animation-delay: 0.12s;
+  }
+
+  .processing-bar-3 {
+    animation-delay: 0.24s;
+  }
+
+  .processing-bar-4 {
+    animation-delay: 0.36s;
+  }
+}
+
+@keyframes processing-bars {
+  0%,
+  100% {
+    transform: scaleY(0.45);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
 }

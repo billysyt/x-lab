@@ -20,7 +20,7 @@ import {
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useAppDispatch, useAppSelector } from "../../../app/hooks";
-import { removeJob, setJobOrder, startTranscription, updateJobDisplayName } from "../../jobs/jobsSlice";
+import { removeJob, setJobOrder, startTranscription, updateJobDisplayName, updateJobUiState } from "../../jobs/jobsSlice";
 import type { ToastType } from "../../../shared/components/ToastHost";
 import { apiRemoveJob, apiUpsertJobRecord } from "../../../shared/api/sttApi";
 import { AppIcon } from "../../../shared/components/AppIcon";
@@ -44,6 +44,7 @@ export type MediaItem = {
   localPath?: string | null;
   previewUrl?: string | null;
   thumbnailUrl?: string | null;
+  thumbnailSource?: "saved" | "captured" | "none";
   createdAt?: number;
   durationSec?: number | null;
   invalid?: boolean;
@@ -113,6 +114,7 @@ export const UploadTab = forwardRef(function UploadTab(
     Record<string, { thumbnailUrl?: string | null; durationSec?: number | null }>
   >({});
   const jobThumbInFlight = useRef<Set<string>>(new Set());
+  const thumbSaveInFlight = useRef<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -132,6 +134,35 @@ export const UploadTab = forwardRef(function UploadTab(
       window.setTimeout(task, 0);
     }
   }, []);
+
+  const persistThumbnail = useCallback(
+    (jobId: string, thumbnail: string | null | undefined) => {
+      if (!jobId || !thumbnail) return;
+      if (thumbSaveInFlight.current.has(jobId)) return;
+      const job = jobsById[jobId];
+      const existingUiState =
+        job?.uiState && typeof job.uiState === "object" ? (job.uiState as Record<string, any>) : {};
+      if (existingUiState?.thumbnail?.data === thumbnail) return;
+      const nextUiState = {
+        ...existingUiState,
+        thumbnail: {
+          data: thumbnail,
+          updatedAt: Date.now()
+        }
+      };
+      dispatch(updateJobUiState({ jobId, uiState: nextUiState }));
+      thumbSaveInFlight.current.add(jobId);
+      void apiUpsertJobRecord({
+        job_id: jobId,
+        ui_state: nextUiState
+      })
+        .catch(() => undefined)
+        .finally(() => {
+          thumbSaveInFlight.current.delete(jobId);
+        });
+    },
+    [dispatch, jobsById]
+  );
 
   const formatTimestamp = useCallback((value?: number | null) => {
     if (!value || !Number.isFinite(value)) return "";
@@ -530,6 +561,9 @@ export const UploadTab = forwardRef(function UploadTab(
                 : m
             )
           );
+          if (item.jobId) {
+            persistThumbnail(item.jobId, meta.thumbnail);
+          }
         })();
       });
     }
@@ -727,7 +761,7 @@ export const UploadTab = forwardRef(function UploadTab(
       (item) => item.source === "job" && item.kind === "video" && item.previewUrl
     );
     videoJobs.forEach((item) => {
-      if (jobPreviewMeta[item.id] || jobThumbInFlight.current.has(item.id)) {
+      if (item.thumbnailUrl || jobPreviewMeta[item.id] || jobThumbInFlight.current.has(item.id)) {
         return;
       }
       jobThumbInFlight.current.add(item.id);
@@ -742,13 +776,14 @@ export const UploadTab = forwardRef(function UploadTab(
                 durationSec: meta.duration || null
               }
             }));
+            persistThumbnail(item.id, meta.thumbnail);
           } finally {
             jobThumbInFlight.current.delete(item.id);
           }
         })();
       });
     });
-  }, [jobPreviewMeta, mediaItems, scheduleIdle]);
+  }, [jobPreviewMeta, mediaItems, persistThumbnail, scheduleIdle]);
 
   async function handleRemoveJob(e: React.MouseEvent | null, id: string) {
     if (e) {
@@ -779,6 +814,15 @@ export const UploadTab = forwardRef(function UploadTab(
     const meta = jobPreviewMeta[id];
     const mediaPath = job.audioFile?.path || job.result?.file_path || null;
     const previewUrl = mediaPath ? toFileUrl(mediaPath) : null;
+    const persistedThumbnail =
+      job.uiState && typeof job.uiState === "object" && typeof (job.uiState as any)?.thumbnail?.data === "string"
+        ? (job.uiState as any).thumbnail.data
+        : null;
+    const thumbnailSource = persistedThumbnail
+      ? "saved"
+      : localMatch?.thumbnailUrl || meta?.thumbnailUrl
+        ? "captured"
+        : "none";
     return {
       id,
       name: job.filename || id,
@@ -791,15 +835,19 @@ export const UploadTab = forwardRef(function UploadTab(
       createdAt: job.startTime || Date.now(),
       durationSec:
         typeof jobDuration === "number" ? jobDuration : meta?.durationSec ?? localMatch?.durationSec ?? null,
-      thumbnailUrl: localMatch?.thumbnailUrl ?? meta?.thumbnailUrl ?? null,
+      thumbnailUrl: localMatch?.thumbnailUrl ?? meta?.thumbnailUrl ?? persistedThumbnail ?? null,
+      thumbnailSource,
       invalid: Boolean(job.mediaInvalid)
     };
   }
 
   async function submitTranscription() {
     const selectedItem = selectedId ? mediaItems.find((item) => item.id === selectedId) : null;
+    const selectedJob =
+      selectedItem?.source === "job" && selectedItem.jobId ? jobsById[selectedItem.jobId] : null;
+    const reuseJobId = selectedJob?.status === "imported" ? selectedJob.id : null;
     const importedJobId =
-      selectedItem?.source === "job" && selectedItem.jobId && jobsById[selectedItem.jobId]?.status === "imported"
+      !reuseJobId && selectedItem?.source === "job" && selectedItem.jobId && jobsById[selectedItem.jobId]?.status === "imported"
         ? selectedItem.jobId
         : null;
     const filePath = selectedItem?.localPath ?? null;
@@ -817,6 +865,7 @@ export const UploadTab = forwardRef(function UploadTab(
       const displayName = selectedItem?.displayName ?? (stripFileExtension(filename) || filename);
       const { job } = await dispatch(
         startTranscription({
+          jobId: reuseJobId,
           file: undefined,
           filePath,
           filename,

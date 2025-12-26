@@ -63,6 +63,7 @@ export type Job = {
   mediaSize?: number | null;
   mediaMtime?: number | null;
   mediaInvalid?: boolean;
+  uiState?: any;
 };
 
 export type HistoryEntry = {

@@ -151,7 +151,8 @@ export function convertHistoryEntry(entry: HistoryEntry): Job | null {
     mediaHash,
     mediaSize,
     mediaMtime,
-    mediaInvalid: Boolean(entry.media_invalid)
+    mediaInvalid: Boolean(entry.media_invalid),
+    uiState: entry.ui_state ?? undefined
   };
 }
 

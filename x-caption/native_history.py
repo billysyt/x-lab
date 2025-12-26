@@ -162,6 +162,10 @@ def _serialize_json(value: Any) -> Optional[str]:
 def _parse_json(value: Optional[str]) -> Optional[Dict[str, Any]]:
     if not value:
         return None
+    try:
+        return json.loads(value)
+    except Exception:
+        return None
 
 
 def _strip_extension(value: Optional[str]) -> Optional[str]:
@@ -174,10 +178,6 @@ def _strip_extension(value: Optional[str]) -> Optional[str]:
     if "." not in name:
         return name
     return name.rsplit(".", 1)[0] or name
-    try:
-        return json.loads(value)
-    except Exception:
-        return None
 
 
 def upsert_job_record(record: Dict[str, Any]) -> None:

@@ -128,6 +128,7 @@ export const removeJob = createAsyncThunk<
 export const startTranscription = createAsyncThunk<
   { job: Job },
   {
+    jobId?: string | null;
     file?: File;
     filePath?: string | null;
     filename: string;
@@ -143,6 +144,7 @@ export const startTranscription = createAsyncThunk<
 >(
   "jobs/startTranscription",
   async ({
+    jobId,
     file,
     filePath,
     filename,
@@ -155,6 +157,7 @@ export const startTranscription = createAsyncThunk<
     chineseScript
   }) => {
     const result = await apiTranscribeAudio({
+      jobId,
       file,
       filePath,
       filename,
@@ -303,6 +306,15 @@ const slice = createSlice({
       state.jobsById = {};
       state.order = [];
       state.selectedJobId = null;
+    },
+    updateJobUiState(state, action: PayloadAction<{ jobId: string; uiState: Record<string, any> }>) {
+      const job = state.jobsById[action.payload.jobId];
+      if (!job) return;
+      const existing = job.uiState && typeof job.uiState === "object" ? job.uiState : {};
+      const incoming = action.payload.uiState && typeof action.payload.uiState === "object"
+        ? action.payload.uiState
+        : {};
+      job.uiState = { ...existing, ...incoming };
     },
     applyJobUpdate(state, action: PayloadAction<ApplyUpdatePayload>) {
       const { jobId, data } = action.payload;
@@ -498,16 +510,17 @@ const slice = createSlice({
     setJobSegments(state, action: PayloadAction<{ jobId: string; segments: TranscriptSegment[] }>) {
       const job = state.jobsById[action.payload.jobId];
       if (!job) return;
-      job.status = "completed";
-      job.progress = 100;
-      job.message = job.message || "Captions loaded";
-      job.completedAt = Date.now();
+      const hasSegments = action.payload.segments.length > 0;
+      job.status = hasSegments ? "completed" : "imported";
+      job.progress = hasSegments ? 100 : 0;
+      job.message = hasSegments ? job.message || "Captions loaded" : "Media imported";
+      job.completedAt = hasSegments ? Date.now() : undefined;
       job.result = {
         ...(job.result ?? {}),
         segments: action.payload.segments
       };
       job.partialResult = null;
-      job.streamingSegments = action.payload.segments;
+      job.streamingSegments = undefined;
       job.lastSyncedAt = Date.now();
     },
     moveJobOrder(
@@ -642,6 +655,7 @@ export const {
   addSegment,
   clearAllJobs,
   updateJobDisplayName,
+  updateJobUiState,
   selectJob,
   setJobSegments,
   setJobOrder,

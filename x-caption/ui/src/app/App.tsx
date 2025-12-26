@@ -11,6 +11,7 @@ import {
   removeSegment,
   selectJob,
   setJobSegments,
+  updateJobUiState,
   updateJobDisplayName,
   updateSegmentText,
   updateSegmentTiming
@@ -390,7 +391,7 @@ export function App() {
   const [activeVideoSlot, setActiveVideoSlot] = useState<0 | 1>(0);
   const previewPosterRef = useRef<string | null>(null);
   const previewPosterModeRef = useRef<"paused" | null>(null);
-  const [subtitleScale, setSubtitleScale] = useState(1.1);
+  const [subtitleScale, setSubtitleScale] = useState(1.4);
   const [subtitleBaseFontSize, setSubtitleBaseFontSize] = useState(14);
   const [subtitleEditor, setSubtitleEditor] = useState<{ segmentId: number; text: string } | null>(null);
   const [subtitleDraft, setSubtitleDraft] = useState("");
@@ -411,6 +412,13 @@ export function App() {
     segmentId: number;
     start: number;
     end: number;
+  } | null>(null);
+  const windowZoomStateRef = useRef<{
+    active: boolean;
+    width?: number;
+    height?: number;
+    x?: number;
+    y?: number;
   } | null>(null);
   const subtitleDragRef = useRef<{
     pointerId: number;
@@ -559,6 +567,7 @@ export function App() {
     y: number;
     segment: TranscriptSegment;
   } | null>(null);
+  const selectedJobUiStateRef = useRef<Record<string, any>>({});
   const activeJob = useMemo(() => {
     if (selectedJob) return selectedJob;
     if (activeMedia?.source === "job" && activeMedia.jobId) {
@@ -606,6 +615,14 @@ export function App() {
       setIsHeaderMenuOpen(false);
     }
   }, [isHeaderCompact]);
+
+  useEffect(() => {
+    if (selectedJob?.uiState && typeof selectedJob.uiState === "object") {
+      selectedJobUiStateRef.current = selectedJob.uiState as Record<string, any>;
+      return;
+    }
+    selectedJobUiStateRef.current = {};
+  }, [selectedJob?.id, selectedJob?.uiState]);
 
   useEffect(() => {
     setForcedCaptionId(null);
@@ -868,20 +885,20 @@ export function App() {
       window.clearTimeout(subtitleUiSaveRef.current);
     }
     const size = subtitleEditSize ?? subtitleBoxSize;
-    const payload = {
-      job_id: selectedJobId,
-      ui_state: {
-        subtitle: {
-          position: subtitlePosition,
-          size,
-          scale: subtitleScale
-        }
+    const existingUiState = selectedJobUiStateRef.current;
+    const nextUiState = {
+      ...existingUiState,
+      subtitle: {
+        position: subtitlePosition,
+        size,
+        scale: subtitleScale
       }
     };
+    dispatch(updateJobUiState({ jobId: selectedJobId, uiState: nextUiState }));
     subtitleUiSaveRef.current = window.setTimeout(() => {
-      void apiUpsertJobRecord(payload).catch(() => undefined);
+      void apiUpsertJobRecord({ job_id: selectedJobId, ui_state: nextUiState }).catch(() => undefined);
     }, 400);
-  }, [selectedJobId, subtitleBoxSize, subtitleEditSize, subtitlePosition, subtitleScale]);
+  }, [dispatch, selectedJobId, subtitleBoxSize, subtitleEditSize, subtitlePosition, subtitleScale]);
 
   useEffect(() => {
     if (!subtitleEditor) return;
@@ -980,7 +997,7 @@ export function App() {
         if (!uiState) {
           setSubtitlePosition({ x: 0.5, y: 0.85 });
           setSubtitleEditSize(null);
-          setSubtitleScale(1.1);
+          setSubtitleScale(1.4);
           return;
         }
         if (uiState.position) {
@@ -1462,7 +1479,7 @@ export function App() {
 
   const handleLoadSrt = useCallback(() => {
     if (!activeMedia) {
-      notify("Open a media file first.", "info");
+      notify("Please select a job to continue", "info");
       return;
     }
     handleRequestFilePicker(() => {
@@ -1496,6 +1513,34 @@ export function App() {
       }
     });
   }, [activeMedia, handleRequestFilePicker, handleSrtSelected, notify]);
+
+  const handleClearCaptions = useCallback(() => {
+    if (!activeJob?.id) {
+      notify("No captions to clear.", "info");
+      return;
+    }
+    dispatch(setJobSegments({ jobId: activeJob.id, segments: [] }));
+    void apiUpsertJobRecord({
+      job_id: activeJob.id,
+      filename: activeJob.filename,
+      display_name: activeJob.displayName ?? activeJob.filename,
+      media_path: (activeMedia as any)?.localPath ?? activeJob.audioFile?.path ?? null,
+      media_kind: activeMedia?.kind ?? null,
+      status: "imported",
+      transcript_json: { job_id: activeJob.id, segments: [], text: "" },
+      transcript_text: "",
+      segment_count: 0
+    }).catch(() => undefined);
+
+  }, [
+    activeJob?.audioFile?.path,
+    activeJob?.displayName,
+    activeJob?.filename,
+    activeJob?.id,
+    activeMedia,
+    dispatch,
+    notify
+  ]);
 
   const ensureWhisperModelReady = useCallback(async () => {
     if (modelDownload.status === "checking" || modelDownload.status === "downloading") {
@@ -1606,14 +1651,92 @@ export function App() {
 
   const canExportCaptions = exportSegments.length > 0;
 
+  const callApiMethod = useCallback((api: any, names: string[], ...args: any[]) => {
+    for (const name of names) {
+      const fn = api?.[name];
+      if (typeof fn === "function") {
+        return fn.call(api, ...args);
+      }
+    }
+    return null;
+  }, []);
+
+  const handleWindowZoomToggle = useCallback(async () => {
+    const win = typeof window !== "undefined" ? (window as any) : null;
+    const api = win?.pywebview?.api;
+    if (!api) return;
+    const zoomNames = ["window_zoom", "windowZoom"];
+    const zoomResult = await Promise.resolve(callApiMethod(api, zoomNames));
+    if (zoomResult && zoomResult.success !== false) {
+      return;
+    }
+    const getSizeNames = ["window_get_size", "windowGetSize", "window_getSize"];
+    const setSizeNames = ["window_set_size", "windowSetSize", "window_setSize"];
+    const getPosNames = ["window_get_position", "windowGetPosition", "window_getPosition"];
+    const moveNames = ["window_move", "windowMove", "window_moveWindow"];
+    const restoreNames = ["window_restore", "windowRestore", "window_restoreWindow"];
+    const toggleMaxNames = ["window_toggle_maximize", "windowToggleMaximize", "window_zoom", "windowZoom"];
+
+    const parseSize = (res: any) => {
+      if (!res || res.success === false) return null;
+      const width = Number(res.width ?? res.w ?? res.size?.width);
+      const height = Number(res.height ?? res.h ?? res.size?.height);
+      if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+      return { width, height };
+    };
+
+    const parsePos = (res: any) => {
+      if (!res || res.success === false) return null;
+      const x = Number(res.x);
+      const y = Number(res.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+      return { x, y };
+    };
+
+    const current = windowZoomStateRef.current;
+    if (!current || !current.active) {
+      const [sizeRes, posRes] = await Promise.all([
+        Promise.resolve(callApiMethod(api, getSizeNames)),
+        Promise.resolve(callApiMethod(api, getPosNames))
+      ]);
+      const size = parseSize(sizeRes);
+      const pos = parsePos(posRes);
+      windowZoomStateRef.current = {
+        active: true,
+        width: size?.width,
+        height: size?.height,
+        x: pos?.x,
+        y: pos?.y
+      };
+      await Promise.resolve(callApiMethod(api, toggleMaxNames));
+      return;
+    }
+
+    windowZoomStateRef.current = { ...current, active: false };
+    const restoreResult = await Promise.resolve(callApiMethod(api, restoreNames));
+    const restoreOk = Boolean(restoreResult && restoreResult.success !== false);
+    if (!restoreOk) {
+      await Promise.resolve(callApiMethod(api, toggleMaxNames));
+      if (typeof current.width === "number" && typeof current.height === "number") {
+        await Promise.resolve(callApiMethod(api, setSizeNames, current.width, current.height));
+      }
+      if (typeof current.x === "number" && typeof current.y === "number") {
+        await Promise.resolve(callApiMethod(api, moveNames, current.x, current.y));
+      }
+    }
+  }, [callApiMethod]);
+
   const handleWindowAction = useCallback((action: "close" | "minimize" | "zoom" | "fullscreen") => {
+    if (action === "zoom") {
+      void handleWindowZoomToggle();
+      return;
+    }
     const win = typeof window !== "undefined" ? (window as any) : null;
     const api = win?.pywebview?.api;
     if (!api) return;
     const map: Record<typeof action, string[]> = {
       close: ["window_close", "windowClose", "closeWindow"],
       minimize: ["window_minimize", "windowMinimize", "minimizeWindow"],
-      zoom: ["window_toggle_maximize", "windowToggleMaximize", "window_zoom", "windowZoom"],
       fullscreen: ["window_toggle_fullscreen", "windowToggleFullscreen", "toggleFullscreen"]
     };
     for (const method of map[action]) {
@@ -1622,7 +1745,26 @@ export function App() {
         break;
       }
     }
-  }, []);
+  }, [handleWindowZoomToggle]);
+
+  const handleHeaderDoubleClick = useCallback(
+    (event: React.MouseEvent<HTMLElement>) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest(".pywebview-no-drag")) return;
+      if (target.closest("button, a, input, select, textarea, [role='button']")) return;
+      handleWindowAction("zoom");
+    },
+    [handleWindowAction]
+  );
+
+  const getHeaderDragProps = useCallback(
+    (baseClass: string) => ({
+      className: cn(dragRegionClass, baseClass),
+      onDoubleClick: handleHeaderDoubleClick
+    }),
+    [dragRegionClass, handleHeaderDoubleClick]
+  );
 
 
 
@@ -2493,6 +2635,13 @@ export function App() {
     }
   };
 
+  const handlePreviewClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented) return;
+    const target = event.target as HTMLElement;
+    if (target.closest("button, input, textarea, select, [data-no-toggle]")) return;
+    togglePlayback();
+  };
+
   const handleScrub = (value: number) => {
     if (!Number.isFinite(duration) || duration <= 0) return;
     const scrubState = playerScrubRef.current;
@@ -3202,13 +3351,20 @@ export function App() {
               className="relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden"
               ref={previewContainerRef}
             >
-              <div className="relative h-full w-full overflow-hidden rounded-xl bg-black">
+              <div
+                className="relative h-full w-full overflow-hidden rounded-xl bg-black"
+                onClick={handlePreviewClick}
+              >
                 {activeMedia ? (
-                  <div className="pointer-events-auto absolute left-1/2 top-3 z-20 -translate-x-1/2">
+                  <div
+                    className="pointer-events-auto absolute left-1/2 top-3 z-20 -translate-x-1/2"
+                    data-no-toggle
+                  >
                     {isDisplayNameEditing ? (
                       <input
                         className="w-[min(70vw,420px)] rounded-md border border-white/15 bg-black/70 px-3 py-1 text-center text-[12px] font-medium text-white outline-none focus:border-primary/70"
                         value={displayNameDraft}
+                        placeholder={activeMediaDisplayName || activeMedia.displayName || activeMedia.name || "Display name"}
                         onChange={(e) => setDisplayNameDraft(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
@@ -3303,19 +3459,21 @@ export function App() {
                 )}
                 {showActiveJobOverlay ? (
                   <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center p-4">
-                    <div className="w-full max-w-[360px] rounded-2xl border border-white/10 bg-black/70 p-5 text-center shadow-[0_24px_60px_rgba(0,0,0,0.55)] backdrop-blur-md">
-                      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-[#2563eb] via-[#4f46e5] to-[#22d3ee] p-[1px]">
-                        <div className="flex h-full w-full items-center justify-center rounded-full bg-[#0b0b0b]/80 text-white">
-                          <AppIcon name="cog" spin className="text-[16px]" />
+                    <div className="w-full max-w-[360px] rounded-2xl border border-white/10 bg-black/65 p-6 text-center shadow-[0_24px_60px_rgba(0,0,0,0.55)] backdrop-blur-md">
+                      <div className="mx-auto flex items-center justify-center">
+                        <div className="processing-spinner" aria-hidden>
+                          <span className="processing-bar processing-bar-1" />
+                          <span className="processing-bar processing-bar-2" />
+                          <span className="processing-bar processing-bar-3" />
+                          <span className="processing-bar processing-bar-4" />
                         </div>
                       </div>
-                      <div className="mt-3 text-sm font-semibold text-slate-100">{activeJobLabel}</div>
-                      <div className="mt-1 text-[11px] text-slate-400">{activeJobStatusMessage}</div>
+                      <div className="mt-4 text-sm font-semibold text-slate-100">{activeJobLabel}</div>
                       <div className="mt-4">
-                        <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+                        <div className="h-2 w-full overflow-hidden rounded-full bg-white/15">
                           <div
                             className={cn(
-                              "h-full rounded-full bg-gradient-to-r from-[#60a5fa] via-[#2563eb] to-[#22d3ee] transition-[width] duration-200",
+                              "h-full rounded-full bg-white transition-[width] duration-200",
                               activeJobProgress === null && "animate-pulse"
                             )}
                             style={{
@@ -3323,11 +3481,8 @@ export function App() {
                             }}
                           />
                         </div>
-                        <div className="mt-2 flex items-center justify-center gap-2 text-[11px] text-slate-300">
-                          <span className="rounded-full bg-white/10 px-2 py-0.5 font-semibold text-slate-100">
-                            {activeJobProgress !== null ? `${activeJobProgress}%` : "Preparing..."}
-                          </span>
-                          <span className="text-slate-400">AI Generate</span>
+                        <div className="mt-2 text-[11px] font-semibold text-white/90">
+                          {activeJobProgress !== null ? `${activeJobProgress}%` : "Preparing..."}
                         </div>
                       </div>
                     </div>
@@ -3342,6 +3497,7 @@ export function App() {
                         ? "cursor-move border border-white/35 resize overflow-hidden"
                         : "cursor-move"
                     )}
+                    data-no-toggle
                     style={{
                       left: `${subtitlePosition.x * 100}%`,
                       top: `${subtitlePosition.y * 100}%`,
@@ -3382,7 +3538,7 @@ export function App() {
                       />
                     ) : (
                       <div
-                        className="whitespace-pre-wrap break-words text-[13px] font-medium text-white pointer-events-none text-center"
+                        className="whitespace-normal break-words text-[13px] font-medium text-white pointer-events-none text-center"
                         style={subtitleTextStyle}
                       >
                         {currentSubtitle}
@@ -3392,7 +3548,7 @@ export function App() {
                 ) : null}
                 <span
                   ref={subtitleMeasureRef}
-                  className="pointer-events-none absolute -z-10 opacity-0 whitespace-pre-wrap break-words"
+                  className="pointer-events-none absolute -z-10 opacity-0 whitespace-normal break-words"
                   style={{
                     fontSize: `${subtitleFontSize}px`,
                     fontWeight: 500,
@@ -3505,8 +3661,7 @@ export function App() {
     <>
       <div className="flex h-full w-full flex-col bg-[#0b0b0b] text-slate-100">
         <div
-          className={cn(
-            dragRegionClass,
+          {...getHeaderDragProps(
             "relative grid h-10 select-none grid-cols-[1fr_auto_1fr] items-center bg-[#0b0b0b] px-3 text-xs text-slate-300"
           )}
         >
@@ -3911,16 +4066,29 @@ export function App() {
           >
             <div className="flex items-center justify-between px-4 py-2 text-xs text-slate-400">
               <div className="flex items-center gap-2">
-                <button
-                  className="inline-flex h-7 items-center gap-1.5 rounded-md bg-[#1b1b22] px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-[#26262f]"
-                  onClick={handleLoadSrt}
-                  type="button"
-                  aria-label="Load SRT"
-                  title="Load SRT"
-                >
-                  <AppIcon name="fileImport" className="text-[10px]" />
-                  Load SRT
-                </button>
+                {segments.length > 0 ? (
+                  <button
+                    className="inline-flex h-7 items-center gap-1.5 rounded-md bg-[#1b1b22] px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-[#26262f]"
+                    onClick={handleClearCaptions}
+                    type="button"
+                    aria-label="Clear captions"
+                    title="Clear captions"
+                  >
+                    <AppIcon name="trashAlt" className="text-[10px]" />
+                    Clear captions
+                  </button>
+                ) : (
+                  <button
+                    className="inline-flex h-7 items-center gap-1.5 rounded-md bg-[#1b1b22] px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-[#26262f]"
+                    onClick={handleLoadSrt}
+                    type="button"
+                    aria-label="Load Caption File"
+                    title="Load Caption File"
+                  >
+                    <AppIcon name="fileImport" className="text-[10px]" />
+                    Load Caption File
+                  </button>
+                )}
                 <button
                   className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[14px] font-bold text-slate-200 transition hover:bg-white/10"
                   onClick={handleToggleChineseVariant}
@@ -4146,7 +4314,7 @@ export function App() {
 
       {isPlayerModalOpen ? (
         <div className="fixed inset-0 z-[140] flex flex-col bg-[#0b0b0b]">
-          <div className="flex items-center justify-between border-b border-slate-800/60 px-4 py-3">
+          <div {...getHeaderDragProps("flex items-center justify-between border-b border-slate-800/60 px-4 py-3")}>
             <div className="text-xs font-semibold text-slate-200">Player Focus</div>
             <button
               className="pywebview-no-drag inline-flex h-7 items-center gap-1.5 rounded-md border border-slate-700 bg-[#151515] px-2 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500"

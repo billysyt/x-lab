@@ -1435,8 +1435,13 @@ def create_app():
                     )
                 }), 400
 
-            # Create unique job ID
-            job_id = str(uuid.uuid4())
+            # Create or reuse job ID
+            requested_job_id = request.form.get('job_id')
+            job_id = requested_job_id or str(uuid.uuid4())
+            if requested_job_id:
+                room_name = f"job:{job_id}"
+                with job_update_lock:
+                    job_update_queues.pop(room_name, None)
 
             if not filename:
                 filename = secure_filename(file.filename) if file else None
