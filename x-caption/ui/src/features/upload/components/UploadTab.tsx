@@ -1,4 +1,5 @@
 import {
+  memo,
   forwardRef,
   useCallback,
   useEffect,
@@ -87,7 +88,7 @@ function buildImportedJobId(path: string, size?: number | null) {
   return `media-${hashStableId(`${path}::${size ?? ""}`)}`;
 }
 
-export const UploadTab = forwardRef(function UploadTab(
+export const UploadTab = memo(forwardRef(function UploadTab(
   props: UploadTabProps,
   ref: ForwardedRef<UploadTabHandle>
 ) {
@@ -1099,4 +1100,4 @@ export const UploadTab = forwardRef(function UploadTab(
       </div>
     </>
   );
-});
+}));

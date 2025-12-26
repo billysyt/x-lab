@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { apiConvertChinese, apiEditSegment } from "../../../shared/api/sttApi";
 import { fetchJobDetails, selectJobById, updateSegmentText } from "../../jobs/jobsSlice";
 import { useAppDispatch, useAppSelector } from "../../../app/hooks";
@@ -189,40 +189,102 @@ function TranscriptSegments(props: {
       }),
     [props.segments]
   );
+  const searchableSegments = useMemo(
+    () =>
+      visibleSegments
+        .map((segment) => ({
+          ...segment,
+          start: Number.isFinite(Number(segment.start)) ? Number(segment.start) : 0,
+          end: Number.isFinite(Number(segment.end)) ? Number(segment.end) : 0
+        }))
+        .sort((a, b) => a.start - b.start),
+    [visibleSegments]
+  );
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const segmentRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const segmentRefCallbacks = useRef<Record<number, (el: HTMLDivElement | null) => void>>({});
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [playingSegmentId, setPlayingSegmentId] = useState<number | null>(null);
+  const playingSegmentIdRef = useRef<number | null>(null);
+  const playingSegmentRangeRef = useRef<{ id: number; start: number; end: number } | null>(null);
 
-  // Track current playing segment.
+  const getSegmentRef = useCallback((id: number) => {
+    const existing = segmentRefCallbacks.current[id];
+    if (existing) return existing;
+    const next = (el: HTMLDivElement | null) => {
+      segmentRefs.current[id] = el;
+    };
+    segmentRefCallbacks.current[id] = next;
+    return next;
+  }, []);
+
+  const findSegmentAtTime = useCallback(
+    (time: number) => {
+      if (!searchableSegments.length || !Number.isFinite(time)) return null;
+      let lo = 0;
+      let hi = searchableSegments.length - 1;
+      let idx = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (searchableSegments[mid].start <= time) {
+          idx = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      if (idx < 0) return null;
+      const segment = searchableSegments[idx];
+      if (time >= segment.start && time <= segment.end) return segment;
+      return null;
+    },
+    [searchableSegments]
+  );
+
+  // Track current playing segment (coalesced to animation frames).
   useEffect(() => {
     const mediaEl = props.mediaRef.current;
     if (!mediaEl) return;
+    let rafId: number | null = null;
+    playingSegmentRangeRef.current = null;
+    playingSegmentIdRef.current = null;
 
-    const onTimeUpdate = () => {
-      const currentTime = mediaEl.currentTime;
-
-      let next: number | null = null;
-      for (const segment of visibleSegments) {
-        const segmentStart = Number(segment.start);
-        const segmentEnd = Number(segment.end);
-        if (!Number.isFinite(segmentStart) || !Number.isFinite(segmentEnd)) {
-          continue;
-        }
-        const adjustedStart = segmentStart + props.timestampOffsetSeconds;
-        const adjustedEnd = segmentEnd + props.timestampOffsetSeconds;
-        if (currentTime >= adjustedStart && currentTime <= adjustedEnd) {
-          next = segment.id;
-          break;
-        }
+    const update = () => {
+      const currentTime = Number.isFinite(mediaEl.currentTime) ? mediaEl.currentTime : 0;
+      const adjustedTime = currentTime - props.timestampOffsetSeconds;
+      const currentRange = playingSegmentRangeRef.current;
+      if (currentRange && adjustedTime >= currentRange.start && adjustedTime <= currentRange.end) {
+        return;
       }
-      setPlayingSegmentId(next);
+      const nextSegment = findSegmentAtTime(adjustedTime);
+      const nextId = nextSegment ? nextSegment.id : null;
+      playingSegmentRangeRef.current = nextSegment
+        ? { id: nextSegment.id, start: nextSegment.start, end: nextSegment.end }
+        : null;
+      if (nextId !== playingSegmentIdRef.current) {
+        playingSegmentIdRef.current = nextId;
+        setPlayingSegmentId(nextId);
+      }
     };
 
+    const onTimeUpdate = () => {
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        update();
+      });
+    };
+
+    update();
     mediaEl.addEventListener("timeupdate", onTimeUpdate);
-    return () => mediaEl.removeEventListener("timeupdate", onTimeUpdate);
-  }, [props.mediaRef, props.timestampOffsetSeconds, visibleSegments]);
+    return () => {
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId);
+      }
+      mediaEl.removeEventListener("timeupdate", onTimeUpdate);
+    };
+  }, [findSegmentAtTime, props.mediaRef, props.timestampOffsetSeconds]);
 
   useEffect(() => {
     const mediaEl = props.mediaRef.current;
@@ -260,7 +322,7 @@ function TranscriptSegments(props: {
     }
   }, [isAudioPlaying, playingSegmentId, props.isUserScrolling]);
 
-  function seekToSegment(startTime: number) {
+  const seekToSegment = useCallback((startTime: number) => {
     const mediaEl = props.mediaRef.current;
     if (!mediaEl) return;
     const numericStart = Number(startTime);
@@ -292,7 +354,7 @@ function TranscriptSegments(props: {
         });
       }
     }
-  }
+  }, [props.mediaRef, props.timestampOffsetSeconds]);
 
   const transcriptContainerClass = cn("min-h-0 flex-1 overflow-y-auto pl-0 pr-2 py-1", "stt-scrollbar");
 
@@ -331,15 +393,13 @@ function TranscriptSegments(props: {
             isCurrentPlaying={isCurrentPlaying}
             timeStr={timeStr}
             displayText={displayText}
-            onSeek={() => seekToSegment(segment.start)}
+            onSeek={seekToSegment}
             mediaRef={props.mediaRef}
             notify={props.notify}
             editEnabled={props.editEnabled}
             jobIdForEdits={props.jobIdForEdits}
             onSavedEdit={props.onSavedEdit}
-            rowRef={(el) => {
-              segmentRefs.current[segment.id] = el;
-            }}
+            rowRef={getSegmentRef(segment.id)}
           />
         );
       })}
@@ -347,172 +407,181 @@ function TranscriptSegments(props: {
   );
 }
 
-const TranscriptSegmentRow = (function () {
-  type Props = {
-    segment: TranscriptSegment;
-    segmentClass: string;
-    isCurrentPlaying: boolean;
-    timeStr: string;
-    displayText: string;
-    onSeek: () => void;
-    mediaRef: RefObject<HTMLMediaElement>;
-    notify: (message: string, type?: ToastType) => void;
-    editEnabled: boolean;
-    jobIdForEdits: string | null;
-    onSavedEdit: (segmentId: number, newText: string) => void;
-    rowRef?: React.Ref<HTMLDivElement>;
-  };
+const TranscriptSegmentRow = memo(function TranscriptSegmentRow({
+  segment,
+  segmentClass,
+  isCurrentPlaying,
+  timeStr,
+  displayText,
+  onSeek,
+  mediaRef,
+  notify,
+  editEnabled,
+  jobIdForEdits,
+  onSavedEdit,
+  rowRef
+}: {
+  segment: TranscriptSegment;
+  segmentClass: string;
+  isCurrentPlaying: boolean;
+  timeStr: string;
+  displayText: string;
+  onSeek: (startTime: number) => void;
+  mediaRef: RefObject<HTMLMediaElement>;
+  notify: (message: string, type?: ToastType) => void;
+  editEnabled: boolean;
+  jobIdForEdits: string | null;
+  onSavedEdit: (segmentId: number, newText: string) => void;
+  rowRef?: React.Ref<HTMLDivElement>;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(segment.originalText ?? segment.text);
+  const [isSaving, setIsSaving] = useState(false);
+  const autosaveRef = useRef<number | null>(null);
+  const lastSavedRef = useRef(segment.originalText ?? segment.text);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  return function TranscriptSegmentRowImpl(props: Props) {
-    const [isEditing, setIsEditing] = useState(false);
-    const [draft, setDraft] = useState(props.segment.originalText ?? props.segment.text);
-    const [isSaving, setIsSaving] = useState(false);
-    const autosaveRef = useRef<number | null>(null);
-    const lastSavedRef = useRef(props.segment.originalText ?? props.segment.text);
-    const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    if (!isEditing) {
+      setDraft(segment.originalText ?? segment.text);
+      lastSavedRef.current = segment.originalText ?? segment.text;
+    }
+  }, [segment.originalText, segment.text, isEditing]);
 
-    useEffect(() => {
-      if (!isEditing) {
-        setDraft(props.segment.originalText ?? props.segment.text);
-        lastSavedRef.current = props.segment.originalText ?? props.segment.text;
+  useEffect(() => {
+    if (!editEnabled && isEditing) {
+      setIsEditing(false);
+    }
+  }, [editEnabled, isEditing]);
+
+  const saveEdit = useCallback(
+    async (nextValue: string) => {
+      const jobId = jobIdForEdits;
+      if (!jobId) {
+        notify("No active job found", "error");
+        return;
       }
-    }, [props.segment.originalText, props.segment.text, isEditing]);
-
-    useEffect(() => {
-      if (!props.editEnabled && isEditing) {
-        setIsEditing(false);
+      const newText = nextValue.trim();
+      if (!newText || newText === lastSavedRef.current.trim()) {
+        return;
       }
-    }, [props.editEnabled, isEditing]);
+      setIsSaving(true);
+      try {
+        await apiEditSegment({ jobId, segmentId: segment.id, newText });
+        onSavedEdit(segment.id, newText);
+        lastSavedRef.current = newText;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        notify(`Failed to save changes: ${message}`, "error");
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [jobIdForEdits, notify, onSavedEdit, segment.id]
+  );
 
-    const saveEdit = useCallback(
-      async (nextValue: string) => {
-        const jobId = props.jobIdForEdits;
-        if (!jobId) {
-          props.notify("No active job found", "error");
-          return;
-        }
-        const newText = nextValue.trim();
-        if (!newText || newText === lastSavedRef.current.trim()) {
-          return;
-        }
-        setIsSaving(true);
-        try {
-          await apiEditSegment({ jobId, segmentId: props.segment.id, newText });
-          props.onSavedEdit(props.segment.id, newText);
-          lastSavedRef.current = newText;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          props.notify(`Failed to save changes: ${message}`, "error");
-        } finally {
-          setIsSaving(false);
-        }
-      },
-      [props.jobIdForEdits, props.notify, props.onSavedEdit, props.segment.id]
-    );
-
-    useEffect(() => {
-      if (!props.editEnabled || !isEditing) return;
+  useEffect(() => {
+    if (!editEnabled || !isEditing) return;
+    if (autosaveRef.current) {
+      window.clearTimeout(autosaveRef.current);
+    }
+    const nextValue = draft;
+    autosaveRef.current = window.setTimeout(() => {
+      void saveEdit(nextValue);
+    }, 650);
+    return () => {
       if (autosaveRef.current) {
         window.clearTimeout(autosaveRef.current);
       }
-      const nextValue = draft;
-      autosaveRef.current = window.setTimeout(() => {
-        void saveEdit(nextValue);
-      }, 650);
-      return () => {
-        if (autosaveRef.current) {
-          window.clearTimeout(autosaveRef.current);
-        }
-      };
-    }, [draft, isEditing, props.editEnabled, saveEdit]);
+    };
+  }, [draft, isEditing, editEnabled, saveEdit]);
 
-    useEffect(() => {
-      if (!isEditing) return;
-      const el = textareaRef.current;
-      if (!el) return;
-      el.style.height = "auto";
-      el.style.height = `${el.scrollHeight}px`;
-    }, [draft, isEditing]);
+  useEffect(() => {
+    if (!isEditing) return;
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [draft, isEditing]);
 
-    return (
-      <div
-        className={cn(props.segmentClass, isEditing && "cursor-default")}
-        data-start={props.segment.start}
-        data-end={props.segment.end}
-        data-segment-id={props.segment.id}
-        onClick={(e) => {
-          if (isEditing) return;
-          if (props.editEnabled) {
-            const mediaEl = props.mediaRef.current;
-            if (mediaEl && !mediaEl.paused) {
-              mediaEl.pause();
-            }
-            setIsEditing(true);
-            return;
+  return (
+    <div
+      className={cn(segmentClass, isEditing && "cursor-default")}
+      data-start={segment.start}
+      data-end={segment.end}
+      data-segment-id={segment.id}
+      onClick={(e) => {
+        if (isEditing) return;
+        if (editEnabled) {
+          const mediaEl = mediaRef.current;
+          if (mediaEl && !mediaEl.paused) {
+            mediaEl.pause();
           }
-          props.onSeek();
-        }}
-        ref={props.rowRef}
+          setIsEditing(true);
+          return;
+        }
+        onSeek(segment.start);
+      }}
+      ref={rowRef}
+    >
+      <div
+        className="w-24 flex-shrink-0 whitespace-nowrap pt-[1px] pl-1.5 font-medium tabular-nums text-text-secondary"
+        style={{ fontSize: "11px" }}
       >
-        <div
-          className="w-24 flex-shrink-0 whitespace-nowrap pt-[1px] pl-1.5 font-medium tabular-nums text-text-secondary"
-          style={{ fontSize: "11px" }}
-        >
-          [{props.timeStr}]
-        </div>
+        [{timeStr}]
+      </div>
 
-        <div className="min-w-0 flex-1">
-          {isEditing ? (
-            <textarea
-              className={cn(
-                "w-full overflow-hidden rounded-lg border-0 bg-transparent px-0 py-0 text-[13px] leading-[1.45] text-text-primary",
-                "focus:outline-none focus:ring-0"
-              )}
-              ref={textareaRef}
-              rows={1}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  if (autosaveRef.current) {
-                    window.clearTimeout(autosaveRef.current);
-                    autosaveRef.current = null;
-                  }
-                  void saveEdit(draft);
-                  setIsEditing(false);
-                }
-              }}
-              onBlur={() => {
+      <div className="min-w-0 flex-1">
+        {isEditing ? (
+          <textarea
+            className={cn(
+              "w-full overflow-hidden rounded-lg border-0 bg-transparent px-0 py-0 text-[13px] leading-[1.45] text-text-primary",
+              "focus:outline-none focus:ring-0"
+            )}
+            ref={textareaRef}
+            rows={1}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
                 if (autosaveRef.current) {
                   window.clearTimeout(autosaveRef.current);
                   autosaveRef.current = null;
                 }
                 void saveEdit(draft);
                 setIsEditing(false);
-              }}
-              autoFocus
-            />
-          ) : (
-            <div
-              className={cn(
-                "whitespace-pre-wrap break-words text-[13px] leading-[1.45] text-text-primary",
-                props.isCurrentPlaying && "font-semibold"
-              )}
-            >
-              {props.displayText}
-            </div>
-          )}
-        </div>
-        {isSaving ? (
-          <div className="ml-2 flex items-start pt-[2px] text-[10px] text-slate-500">Saving...</div>
-        ) : null}
+              }
+            }}
+            onBlur={() => {
+              if (autosaveRef.current) {
+                window.clearTimeout(autosaveRef.current);
+                autosaveRef.current = null;
+              }
+              void saveEdit(draft);
+              setIsEditing(false);
+            }}
+            autoFocus
+          />
+        ) : (
+          <div
+            className={cn(
+              "whitespace-pre-wrap break-words text-[13px] leading-[1.45] text-text-primary",
+              isCurrentPlaying && "font-semibold"
+            )}
+          >
+            {displayText}
+          </div>
+        )}
       </div>
-    );
-  };
-})();
+      {isSaving ? (
+        <div className="ml-2 flex items-start pt-[2px] text-[10px] text-slate-500">Saving...</div>
+      ) : null}
+    </div>
+  );
+});
 
-export function TranscriptPanel(props: {
+export const TranscriptPanel = memo(function TranscriptPanel(props: {
   mediaRef: RefObject<HTMLMediaElement>;
   notify: (message: string, type?: ToastType) => void;
   editEnabled: boolean;
@@ -629,4 +698,4 @@ export function TranscriptPanel(props: {
       )}
     </div>
   );
-}
+});

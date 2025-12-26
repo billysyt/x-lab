@@ -158,6 +158,26 @@ function baseFilename(value: string | null | undefined) {
   return safe || "transcript";
 }
 
+function findSegmentAtTime<T extends { start: number; end: number }>(segments: T[], time: number): T | null {
+  if (!segments.length || !Number.isFinite(time)) return null;
+  let lo = 0;
+  let hi = segments.length - 1;
+  let idx = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (segments[mid].start <= time) {
+      idx = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  if (idx < 0) return null;
+  const segment = segments[idx];
+  if (time >= segment.start && time < segment.end) return segment;
+  return null;
+}
+
 const BASE_PX_PER_SEC = 20;
 const MIN_CLIP_DURATION_SEC = 0.5;
 const DEFAULT_TIMELINE_ZOOM = 1.75;
@@ -741,12 +761,19 @@ export function App() {
       [...displaySegments]
         .map((seg) => ({
           ...seg,
-          start: Number(seg.start) || 0,
-          end: Number(seg.end) || 0
+          start: Number.isFinite(Number(seg.start)) ? Number(seg.start) : 0,
+          end: Number.isFinite(Number(seg.end)) ? Number(seg.end) : 0
         }))
         .sort((a, b) => a.start - b.start),
     [displaySegments]
   );
+  const displaySegmentById = useMemo(() => {
+    const map = new Map<number, TranscriptSegment>();
+    sortedDisplaySegments.forEach((segment) => {
+      map.set(Number(segment.id), segment);
+    });
+    return map;
+  }, [sortedDisplaySegments]);
   const exportSegments = useMemo(
     () =>
       deriveJobSegments(activeJob ?? undefined).filter((segment) => {
@@ -756,37 +783,16 @@ export function App() {
     [activeJob]
   );
   const openCcConverter = useMemo(() => safeOpenCcConverter(exportLanguage), [exportLanguage]);
-  const currentSubtitleMatch = useMemo(() => {
+  const activeSubtitleSegment = useMemo(() => {
     if (!sortedDisplaySegments.length) return null;
-    const time = playback.currentTime;
     if (forcedCaptionId !== null) {
-      const forced = sortedDisplaySegments.find((segment) => Number(segment.id) === forcedCaptionId);
-      if (forced) {
-        const rawText = forced.originalText ?? forced.text ?? "";
-        let text = rawText;
-        if (openCcConverter) {
-          try {
-            text = openCcConverter(rawText);
-          } catch {
-            text = rawText;
-          }
-        }
-        return { segment: forced, text: text.trim() };
-      }
+      return displaySegmentById.get(Number(forcedCaptionId)) ?? null;
     }
-    let match: TranscriptSegment | null = null;
-    for (const segment of sortedDisplaySegments) {
-      const start = Number(segment.start ?? 0);
-      const end = Number(segment.end ?? 0);
-      if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
-      if (time >= start && time < end) {
-        match = segment;
-      } else if (start > time) {
-        break;
-      }
-    }
-    if (!match) return null;
-    const rawText = match.originalText ?? match.text ?? "";
+    return findSegmentAtTime(sortedDisplaySegments, playback.currentTime);
+  }, [displaySegmentById, forcedCaptionId, playback.currentTime, sortedDisplaySegments]);
+  const currentSubtitleMatch = useMemo(() => {
+    if (!activeSubtitleSegment) return null;
+    const rawText = activeSubtitleSegment.originalText ?? activeSubtitleSegment.text ?? "";
     let text = rawText;
     if (openCcConverter) {
       try {
@@ -795,8 +801,9 @@ export function App() {
         text = rawText;
       }
     }
-    return { segment: match, text: text.trim() };
-  }, [forcedCaptionId, openCcConverter, playback.currentTime, sortedDisplaySegments]);
+    return { segment: activeSubtitleSegment, text: text.trim() };
+  }, [activeSubtitleSegment, openCcConverter]);
+  const activeTimelineSegmentId = activeSubtitleSegment ? Number(activeSubtitleSegment.id) : null;
   const currentSubtitle = currentSubtitleMatch?.text ?? "";
 
   const subtitleFontSize = Math.max(10, subtitleBaseFontSize * subtitleScale);
@@ -812,7 +819,7 @@ export function App() {
 
   useEffect(() => {
     if (forcedCaptionId === null) return;
-    const forced = sortedDisplaySegments.find((segment) => Number(segment.id) === forcedCaptionId);
+    const forced = displaySegmentById.get(Number(forcedCaptionId)) ?? null;
     if (!forced) {
       setForcedCaptionId(null);
       return;
@@ -827,7 +834,7 @@ export function App() {
       setForcedCaptionId((current) => (current === forcedCaptionId ? null : current));
     }, 1500);
     return () => window.clearTimeout(timer);
-  }, [forcedCaptionId, playback.currentTime, sortedDisplaySegments]);
+  }, [displaySegmentById, forcedCaptionId, playback.currentTime]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -2765,20 +2772,22 @@ export function App() {
   const playheadLeftPx = duration > 0 ? Math.min(timelineWidth, playback.currentTime * pxPerSec) : 0;
   const playheadPct = duration > 0 ? Math.min(100, (playback.currentTime / duration) * 100) : 0;
   const rulerDuration = duration > 0 ? duration : visibleDuration;
-  const baseTickCount = rulerDuration > 0 && segmentSec > 0
-    ? Math.floor(rulerDuration / segmentSec) + 1
-    : 0;
-  const ticks = baseTickCount
-    ? Array.from({ length: baseTickCount }, (_, idx) => idx * segmentSec)
-    : [];
-  if (rulerDuration > 0 && ticks.length && ticks[ticks.length - 1] < rulerDuration) {
-    ticks.push(rulerDuration);
-  }
+  const ticks = useMemo(() => {
+    const baseTickCount =
+      rulerDuration > 0 && segmentSec > 0 ? Math.floor(rulerDuration / segmentSec) + 1 : 0;
+    const nextTicks = baseTickCount
+      ? Array.from({ length: baseTickCount }, (_, idx) => idx * segmentSec)
+      : [];
+    if (rulerDuration > 0 && nextTicks.length && nextTicks[nextTicks.length - 1] < rulerDuration) {
+      nextTicks.push(rulerDuration);
+    }
+    return nextTicks;
+  }, [rulerDuration, segmentSec]);
   const segmentPx = segmentSec * pxPerSec;
-  const faintGridStyle = {
+  const faintGridStyle = useMemo(() => ({
     backgroundImage: "linear-gradient(to right, rgba(15,23,42,0.3) 1px, transparent 1px)",
     backgroundSize: `${segmentPx}px 100%`
-  };
+  }), [segmentPx]);
 
   const seekFromPointer = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -3209,6 +3218,80 @@ export function App() {
       setTimelineScrollLeft(next);
     }
   }, []);
+
+  const timelineSegments = useMemo(
+    () =>
+      sortedDisplaySegments.map((segment) => {
+        const start = Number.isFinite(Number(segment.start)) ? Number(segment.start) : 0;
+        const end = Number.isFinite(Number(segment.end)) ? Number(segment.end) : 0;
+        const rawText = segment.originalText ?? segment.text ?? "";
+        let text = rawText;
+        if (openCcConverter) {
+          try {
+            text = openCcConverter(rawText);
+          } catch {
+            text = rawText;
+          }
+        }
+        return {
+          segment,
+          start,
+          end,
+          left: Math.max(0, start * pxPerSec),
+          width: Math.max(2, (end - start) * pxPerSec),
+          text
+        };
+      }),
+    [openCcConverter, pxPerSec, sortedDisplaySegments]
+  );
+
+  const timelineSegmentEls = useMemo(
+    () =>
+      timelineSegments.map((item) => {
+        const isActive = activeTimelineSegmentId !== null && Number(item.segment.id) === activeTimelineSegmentId;
+        return (
+          <div
+            key={`timeline-${item.segment.id}`}
+            className={cn(
+              "absolute top-0 flex h-full cursor-grab items-center rounded-lg px-2 text-[10px] transition active:cursor-grabbing",
+              isActive ? "bg-[#dbeafe] text-[#0b0b0b]" : "bg-[#151515] text-slate-200"
+            )}
+            style={{ left: `${item.left}px`, width: `${item.width}px` }}
+            onPointerDown={(event) => handleCaptionPointerDown(event, item.segment)}
+            onPointerMove={handleCaptionPointerMove}
+            onPointerUp={handleCaptionPointerUp}
+            onPointerCancel={handleCaptionPointerUp}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setCaptionMenu({
+                x: event.clientX,
+                y: event.clientY,
+                segment: item.segment
+              });
+            }}
+          >
+            <span className="block truncate leading-6">{item.text}</span>
+            <span
+              data-handle="start"
+              className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize"
+            />
+            <span
+              data-handle="end"
+              className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize"
+            />
+          </div>
+        );
+      }),
+    [
+      activeTimelineSegmentId,
+      handleCaptionPointerDown,
+      handleCaptionPointerMove,
+      handleCaptionPointerUp,
+      setCaptionMenu,
+      timelineSegments
+    ]
+  );
 
   const layoutClass = isCompact
     ? "grid min-h-0 overflow-hidden grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto]"
@@ -4209,57 +4292,7 @@ export function App() {
                           onMouseMove={handleCaptionHoverMove}
                           onMouseLeave={() => setCaptionHover(null)}
                         >
-                          {sortedDisplaySegments.map((segment: any) => {
-                            const start = Number(segment.start ?? 0);
-                            const end = Number(segment.end ?? 0);
-                            const width = Math.max(2, (end - start) * pxPerSec);
-                            const left = Math.max(0, start * pxPerSec);
-                            const isActive = currentSubtitleMatch
-                              ? Number(currentSubtitleMatch.segment?.id) === Number(segment.id)
-                              : playback.currentTime >= start && playback.currentTime < end;
-                            const rawText = segment.originalText ?? segment.text ?? "";
-                            let text = rawText;
-                            if (openCcConverter) {
-                              try {
-                                text = openCcConverter(rawText);
-                              } catch {
-                                text = rawText;
-                              }
-                            }
-                            return (
-                              <div
-                                key={`timeline-${segment.id}`}
-                                className={cn(
-                                  "absolute top-0 flex h-full cursor-grab items-center rounded-lg px-2 text-[10px] transition active:cursor-grabbing",
-                                  isActive ? "bg-[#dbeafe] text-[#0b0b0b]" : "bg-[#151515] text-slate-200"
-                                )}
-                                style={{ left: `${left}px`, width: `${width}px` }}
-                                onPointerDown={(event) => handleCaptionPointerDown(event, segment)}
-                                onPointerMove={handleCaptionPointerMove}
-                                onPointerUp={handleCaptionPointerUp}
-                                onPointerCancel={handleCaptionPointerUp}
-                                onContextMenu={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  setCaptionMenu({
-                                    x: event.clientX,
-                                    y: event.clientY,
-                                    segment
-                                  });
-                                }}
-                              >
-                                <span className="block truncate leading-6">{text}</span>
-                                <span
-                                  data-handle="start"
-                                  className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize"
-                                />
-                                <span
-                                  data-handle="end"
-                                  className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize"
-                                />
-                              </div>
-                            );
-                          })}
+                          {timelineSegmentEls}
                           {captionHover ? (
                             <div
                               className="pointer-events-none absolute top-0 flex h-full items-center justify-center rounded-lg border border-dashed border-slate-500/40 bg-white/5 text-[10px] text-slate-200"
