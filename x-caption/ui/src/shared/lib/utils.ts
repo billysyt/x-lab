@@ -158,6 +158,7 @@ export function convertHistoryEntry(entry: HistoryEntry): Job | null {
 export function jobNeedsServerResult(job: Job | null | undefined): boolean {
   if (!job) return false;
   if (job.status !== "completed") return false;
+  if (job.lastSyncedAt) return false;
   if (!job.result || !Array.isArray(job.result.segments) || job.result.segments.length === 0) {
     return true;
   }

@@ -374,7 +374,11 @@ def process_transcription_job(
             model_label = f"Whisper.cpp ({model_candidate.name})"
 
         def whisper_progress(percent: int, message: str) -> None:
-            capped = max(0, min(int(percent), 95))
+            try:
+                numeric = int(percent)
+            except (TypeError, ValueError):
+                numeric = 0
+            capped = max(10, min(numeric, 95))
             update_job_progress(job_id, capped, message, {"stage": "transcription"})
 
         update_job_progress(job_id, 10, "Running Whisper transcription...", {"stage": "transcription"})
@@ -562,6 +566,10 @@ def process_full_pipeline_job(
             backend=noise_suppression,
             progress_callback=noise_update,
         ) as processing_audio:
+            processing_audio_path = Path(processing_audio).resolve()
+            inference_audio_path = None
+            if processing_audio_path != processing_source.resolve():
+                inference_audio_path = str(processing_audio_path)
             transcription_result = process_transcription_job(
                 job_id=job_id,
                 file_path=file_path,
@@ -573,7 +581,7 @@ def process_full_pipeline_job(
                 batch_size=8,
                 send_completion=False,
                 prepared_audio_path=prepared_audio_path,
-                inference_audio_path=str(processing_audio),
+                inference_audio_path=inference_audio_path,
                 audio_was_transcoded=audio_was_transcoded,
                 original_audio_path=original_audio_path or file_path,
                 cleanup_paths=cleanup_paths,

@@ -21,7 +21,7 @@ import type { ToastType } from "../shared/components/ToastHost";
 import { AppIcon } from "../shared/components/AppIcon";
 import { Select } from "../shared/components/Select";
 import { cn } from "../shared/lib/cn";
-import { stripFileExtension } from "../shared/lib/utils";
+import { sanitizeProgressValue, stripFileExtension } from "../shared/lib/utils";
 import { fileFromBase64 } from "../shared/lib/file";
 import {
   apiConvertChinese,
@@ -540,6 +540,21 @@ export function App() {
     }
     return null;
   }, [activeMedia?.jobId, activeMedia?.source, jobsById, selectedJob]);
+  const activeJobProgress = useMemo(() => {
+    const value = sanitizeProgressValue(activeJob?.progress);
+    return value !== null ? Math.round(value) : null;
+  }, [activeJob?.progress]);
+  const showActiveJobOverlay =
+    Boolean(activeJob) && (activeJob?.status === "queued" || activeJob?.status === "processing");
+  const activeJobStatusMessage = useMemo(() => {
+    if (!activeJob) return "Generating captions...";
+    if (activeJob.status === "queued") return "Job queued, preparing to start...";
+    return activeJob.message || "Generating captions...";
+  }, [activeJob]);
+  const activeJobLabel = useMemo(() => {
+    if (!activeJob) return "Generating captions";
+    return (activeJob.displayName ?? activeJob.filename) || "Generating captions";
+  }, [activeJob]);
   const activeMediaDisplayName = useMemo(() => {
     if (!activeMedia) return "";
     if (activeMedia.source === "job" && activeMedia.jobId) {
@@ -3511,6 +3526,38 @@ export function App() {
                       ) : (
                         <div className="h-full w-full bg-black" />
                       )}
+                      {showActiveJobOverlay ? (
+                        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center p-4">
+                          <div className="w-full max-w-[360px] rounded-2xl border border-white/10 bg-black/70 p-5 text-center shadow-[0_24px_60px_rgba(0,0,0,0.55)] backdrop-blur-md">
+                            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-[#2563eb] via-[#4f46e5] to-[#22d3ee] p-[1px]">
+                              <div className="flex h-full w-full items-center justify-center rounded-full bg-[#0b0b0b]/80 text-white">
+                                <AppIcon name="cog" spin className="text-[16px]" />
+                              </div>
+                            </div>
+                            <div className="mt-3 text-sm font-semibold text-slate-100">{activeJobLabel}</div>
+                            <div className="mt-1 text-[11px] text-slate-400">{activeJobStatusMessage}</div>
+                            <div className="mt-4">
+                              <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+                                <div
+                                  className={cn(
+                                    "h-full rounded-full bg-gradient-to-r from-[#60a5fa] via-[#2563eb] to-[#22d3ee] transition-[width] duration-200",
+                                    activeJobProgress === null && "animate-pulse"
+                                  )}
+                                  style={{
+                                    width: `${Math.max(4, Math.min(100, activeJobProgress ?? 18))}%`
+                                  }}
+                                />
+                              </div>
+                              <div className="mt-2 flex items-center justify-center gap-2 text-[11px] text-slate-300">
+                                <span className="rounded-full bg-white/10 px-2 py-0.5 font-semibold text-slate-100">
+                                  {activeJobProgress !== null ? `${activeJobProgress}%` : "Preparing..."}
+                                </span>
+                                <span className="text-slate-400">AI Generate</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
                       {subtitleEditor || currentSubtitle ? (
                         <div
                           ref={subtitleBoxRef}

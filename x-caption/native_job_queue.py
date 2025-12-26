@@ -9,6 +9,7 @@ import time
 import json
 import uuid
 import traceback
+import importlib
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable
 from datetime import datetime
@@ -78,6 +79,99 @@ class NativeJobQueue:
         self.worker_threads = []
         self.job_queue = queue.Queue()
         self.running = False
+        self._recover_pending_jobs()
+
+    def _resolve_callable(self, func_name: str) -> Optional[Callable]:
+        if not func_name or "." not in func_name:
+            return None
+        module_name, attr_name = func_name.rsplit(".", 1)
+        try:
+            module = importlib.import_module(module_name)
+            return getattr(module, attr_name, None)
+        except Exception:
+            return None
+
+    def _recover_pending_jobs(self) -> None:
+        """Recover queued/started jobs from the last session."""
+        try:
+            with self.lock:
+                rows = self.conn.execute(
+                    """
+                    SELECT job_id, func_name, kwargs, status, created_at, meta
+                    FROM jobs
+                    WHERE queue_name = ? AND status IN ('queued', 'started')
+                    """,
+                    (self.name,),
+                ).fetchall()
+        except Exception as exc:
+            logger.warning("Failed to load pending jobs for recovery: %s", exc)
+            return
+
+        recovered = 0
+        failed = 0
+
+        for row in rows:
+            job_id, func_name, kwargs_raw, status, created_at, meta_raw = row
+            func = self._resolve_callable(func_name)
+            if func is None:
+                failed += 1
+                error_message = "Failed to recover job after restart (handler not available)."
+                self.update_job_status(job_id, 'failed', error=error_message)
+                try:
+                    from native_history import upsert_job_record
+
+                    upsert_job_record({
+                        "job_id": job_id,
+                        "filename": job_id,
+                        "status": "failed",
+                        "summary": error_message,
+                    })
+                except Exception:
+                    pass
+                continue
+
+            try:
+                kwargs = json.loads(kwargs_raw) if kwargs_raw else {}
+            except Exception:
+                kwargs = {}
+
+            try:
+                meta = json.loads(meta_raw) if meta_raw else {}
+            except Exception:
+                meta = {}
+
+            # Reset status to queued so worker can pick it up again.
+            with self.lock:
+                self.conn.execute(
+                    "UPDATE jobs SET status = ?, started_at = NULL, ended_at = NULL, error = NULL WHERE job_id = ?",
+                    ('queued', job_id),
+                )
+                self.conn.commit()
+
+            job = Job(job_id=job_id, func=func, kwargs=kwargs, queue_name=self.name)
+            job.func_name = func_name
+            job._status = 'queued'
+            job.created_at = datetime.fromtimestamp(created_at) if created_at else datetime.now()
+            job.meta = meta or {}
+            self.active_jobs[job_id] = job
+
+            self.job_queue.put((job, func, kwargs))
+            self.update_job_meta(
+                job_id,
+                {
+                    "message": "Recovered job after restart. Restarting transcription...",
+                    "progress": 0,
+                },
+            )
+            recovered += 1
+
+        if recovered or failed:
+            logger.info(
+                "Job recovery complete for queue '%s': recovered=%s failed=%s",
+                self.name,
+                recovered,
+                failed,
+            )
 
     def _init_db(self):
         """Initialize SQLite database"""

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -11,6 +12,78 @@ from native_config import get_models_dir, get_bundle_dir
 from model_manager import get_whisper_model_info
 
 logger = logging.getLogger(__name__)
+
+_PROGRESS_MARKER = "__XCAPTION_PROGRESS__"
+_JSON_MARKER = "__XCAPTION_JSON__"
+_LEGACY_JSON_MARKER = "__XSUB_JSON__"
+_PROGRESS_REGEX = re.compile(r"(?i)progress[^0-9]{0,20}([0-9]{1,3}(?:\.[0-9]+)?)")
+_PERCENT_REGEX = re.compile(r"([0-9]{1,3}(?:\.[0-9]+)?)%")
+
+
+def _coerce_progress(value: str | float | int | None) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not (0 <= numeric <= 100):
+        return None
+    return int(round(numeric))
+
+
+def _extract_progress(line: str) -> Optional[int]:
+    if _PROGRESS_MARKER in line:
+        marker_value = line.split(_PROGRESS_MARKER, 1)[-1].strip()
+        return _coerce_progress(marker_value)
+
+    lower = line.lower()
+    if "progress" in lower:
+        match = _PERCENT_REGEX.search(line)
+        if match:
+            return _coerce_progress(match.group(1))
+        match = _PROGRESS_REGEX.search(line)
+        if match:
+            return _coerce_progress(match.group(1))
+    return None
+
+
+def _stream_process_output(
+    cmd: list[str],
+    *,
+    progress_callback=None,
+    progress_message: str = "Transcribing audio...",
+    json_marker: Optional[str] = None,
+) -> tuple[int, str, Optional[str]]:
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    output_lines: list[str] = []
+    json_payload: Optional[str] = None
+    last_progress: Optional[int] = None
+
+    if proc.stdout:
+        for raw in iter(proc.stdout.readline, ""):
+            if raw == "":
+                break
+            for line in raw.splitlines():
+                if not line:
+                    continue
+                output_lines.append(line)
+                if json_marker and json_marker in line:
+                    json_payload = line.split(json_marker, 1)[-1].strip()
+                    continue
+                progress = _extract_progress(line)
+                if progress_callback and progress is not None:
+                    if last_progress is None or progress > last_progress:
+                        last_progress = progress
+                        progress_callback(progress, progress_message)
+    return_code = proc.wait()
+    return return_code, "\n".join(output_lines), json_payload
 
 
 def _platform_exe_name(base: str) -> str:
@@ -179,40 +252,57 @@ def transcribe_whisper_cpp(
     txt_path = output_prefix.with_suffix(".txt")
 
     if progress_callback:
-        progress_callback(15, "Starting Whisper transcription")
+        progress_callback(10, "Starting Whisper transcription")
 
     if engine.suffix.lower() == ".mjs":
-        json_marker = "__XCAPTION_JSON__"
-        legacy_marker = "__XSUB_JSON__"
+        progress_marker = _PROGRESS_MARKER
+        json_marker = _JSON_MARKER
         node_script = f"""
 import {{ pathToFileURL }} from 'url';
 const moduleUrl = pathToFileURL({json.dumps(str(engine))}).href;
 const {{ transcribeAudio }} = await import(moduleUrl);
+const progressMarker = {json.dumps(progress_marker)};
+const progressCallback = (progress) => {{
+  if (typeof progress === 'number' && Number.isFinite(progress)) {{
+    const rounded = Math.round(progress);
+    console.log(`${{progressMarker}}${{rounded}}`);
+  }}
+}};
 const result = await transcribeAudio({json.dumps(str(audio_path))}, {{
   model: {json.dumps(str(model_file))},
-  language: {json.dumps(language or 'auto')}
+  language: {json.dumps(language or 'auto')},
+  progress_callback: progressCallback
 }});
 console.log('{json_marker}' + JSON.stringify(result));
 """.strip()
         cmd = ["node", "--input-type=module", "-e", node_script]
         logger.info("Running whisper node runner: %s", " ".join(cmd))
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            stderr = (result.stderr or "").strip()
-            stdout = (result.stdout or "").strip()
-            details = stderr or stdout or "Unknown error"
+        return_code, output, json_payload = _stream_process_output(
+            cmd,
+            progress_callback=progress_callback,
+            progress_message="Transcribing audio...",
+            json_marker=_JSON_MARKER,
+        )
+        if return_code != 0:
+            details = output.strip() or "Unknown error"
             raise RuntimeError(f"Whisper node runner failed: {details}")
 
         parsed = None
-        for line in (result.stdout or "").splitlines()[::-1]:
-            if json_marker in line or legacy_marker in line:
-                marker = json_marker if json_marker in line else legacy_marker
-                payload = line.split(marker, 1)[-1].strip()
-                try:
-                    parsed = json.loads(payload)
-                    break
-                except Exception:
-                    continue
+        if json_payload:
+            try:
+                parsed = json.loads(json_payload)
+            except Exception:
+                parsed = None
+        if parsed is None:
+            for line in output.splitlines()[::-1]:
+                if _JSON_MARKER in line or _LEGACY_JSON_MARKER in line:
+                    marker = _JSON_MARKER if _JSON_MARKER in line else _LEGACY_JSON_MARKER
+                    payload = line.split(marker, 1)[-1].strip()
+                    try:
+                        parsed = json.loads(payload)
+                        break
+                    except Exception:
+                        continue
         if parsed is None:
             raise RuntimeError("Whisper node runner returned no JSON output")
 
@@ -297,15 +387,21 @@ console.log('{json_marker}' + JSON.stringify(result));
         cmd.extend(["-l", language])
 
     logger.info("Running whisper.cpp: %s", " ".join(cmd))
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0 and "-oj" in cmd:
+    return_code, output, _ = _stream_process_output(
+        cmd,
+        progress_callback=progress_callback,
+        progress_message="Transcribing audio...",
+    )
+    if return_code != 0 and "-oj" in cmd:
         fallback_cmd = [arg for arg in cmd if arg != "-oj"]
-        result = subprocess.run(fallback_cmd, capture_output=True, text=True)
+        return_code, output, _ = _stream_process_output(
+            fallback_cmd,
+            progress_callback=progress_callback,
+            progress_message="Transcribing audio...",
+        )
 
-    if result.returncode != 0:
-        stderr = (result.stderr or "").strip()
-        stdout = (result.stdout or "").strip()
-        details = stderr or stdout or "Unknown error"
+    if return_code != 0:
+        details = output.strip() or "Unknown error"
         raise RuntimeError(f"Whisper engine failed: {details}")
 
     segments: List[Dict[str, Any]] = []

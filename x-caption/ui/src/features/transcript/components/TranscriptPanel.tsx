@@ -3,7 +3,7 @@ import { apiConvertChinese, apiEditSegment } from "../../../shared/api/sttApi";
 import { fetchJobDetails, selectJobById, updateSegmentText } from "../../jobs/jobsSlice";
 import { useAppDispatch, useAppSelector } from "../../../app/hooks";
 import type { ExportLanguage, Job, TranscriptSegment } from "../../../shared/types";
-import { jobNeedsServerResult, sanitizeProgressValue } from "../../../shared/lib/utils";
+import { jobNeedsServerResult } from "../../../shared/lib/utils";
 import type { ToastType } from "../../../shared/components/ToastHost";
 import { AppIcon, type AppIconName } from "../../../shared/components/AppIcon";
 import { cn } from "../../../shared/lib/cn";
@@ -619,20 +619,6 @@ export function TranscriptPanel(props: {
                 {(job.displayName ?? job.filename) || "Processing job"}
               </p>
               <p className="mt-1 text-xs text-text-secondary">{statusView.statusMessage}</p>
-              {job.status !== "completed"
-                ? (() => {
-                    const progressValue = sanitizeProgressValue(job.progress);
-                    const progressPercent = progressValue !== null ? Math.round(progressValue) : null;
-                    return progressPercent !== null ? (
-                      <>
-                        <div className="mt-3 w-full max-w-[240px] overflow-hidden rounded bg-border">
-                          <div className="h-1.5 bg-primary" style={{ width: `${progressPercent}%` }}></div>
-                        </div>
-                        <p className="mt-1 text-xs text-text-secondary">{progressPercent}% complete</p>
-                      </>
-                    ) : null;
-                  })()
-                : null}
             </div>
           </div>
         </div>
