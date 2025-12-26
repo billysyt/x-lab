@@ -500,7 +500,7 @@ export function App() {
   const [activeClipId, setActiveClipId] = useState<string | null>(null);
   const pendingPlayRef = useRef(false);
   const pendingSeekRef = useRef<number | null>(null);
-  const scrubStateRef = useRef<{ pointerId: number } | null>(null);
+  const scrubStateRef = useRef<{ pointerId: number; useScrollOffset: boolean } | null>(null);
   const playerScrubRef = useRef<{ wasPlaying: boolean } | null>(null);
   const mediaRafActiveRef = useRef(false);
   const pendingSwapRef = useRef<string | null>(null);
@@ -665,14 +665,19 @@ export function App() {
   );
   const openCcConverter = useMemo(() => safeOpenCcConverter(exportLanguage), [exportLanguage]);
   const currentSubtitleMatch = useMemo(() => {
-    if (!displaySegments.length) return null;
+    if (!sortedDisplaySegments.length) return null;
     const time = playback.currentTime;
-    const match = displaySegments.find((segment: any) => {
+    let match: TranscriptSegment | null = null;
+    for (const segment of sortedDisplaySegments) {
       const start = Number(segment.start ?? 0);
       const end = Number(segment.end ?? 0);
-      if (!Number.isFinite(start) || !Number.isFinite(end)) return false;
-      return time >= start && time <= end;
-    });
+      if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+      if (time >= start && time < end) {
+        match = segment;
+      } else if (start > time) {
+        break;
+      }
+    }
     if (!match) return null;
     const rawText = match.originalText ?? match.text ?? "";
     let text = rawText;
@@ -684,7 +689,7 @@ export function App() {
       }
     }
     return { segment: match, text: text.trim() };
-  }, [displaySegments, openCcConverter, playback.currentTime]);
+  }, [openCcConverter, playback.currentTime, sortedDisplaySegments]);
   const currentSubtitle = currentSubtitleMatch?.text ?? "";
 
   useEffect(() => {
@@ -2391,13 +2396,13 @@ export function App() {
   };
 
   const seekFromPointer = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      const track = timelineTrackRef.current;
+    (event: React.PointerEvent<HTMLDivElement>, useScrollOffset: boolean) => {
+      if (duration <= 0) return;
+      const rect = event.currentTarget.getBoundingClientRect();
+      const x = clamp(event.clientX - rect.left, 0, rect.width);
       const scrollEl = timelineScrollRef.current;
-      if (!track || !scrollEl || duration <= 0) return;
-      const rect = track.getBoundingClientRect();
-      const x = Math.max(0, event.clientX - rect.left);
-      const time = clamp((scrollEl.scrollLeft + x) / Math.max(pxPerSec, 0.001), 0, duration);
+      const offset = useScrollOffset && scrollEl ? scrollEl.scrollLeft : 0;
+      const time = clamp((offset + x) / Math.max(pxPerSec, 0.001), 0, duration);
       handleScrub(time);
     },
     [duration, handleScrub, pxPerSec]
@@ -2495,13 +2500,24 @@ export function App() {
       };
       event.currentTarget.setPointerCapture(event.pointerId);
       const startSec = Number(segment.start) || 0;
-      handleScrub(startSec);
-      const mediaEl = getActiveMediaEl();
-      if (mediaEl && mediaEl.paused) {
-        void safePlay(mediaEl);
+      const endSec = Number(segment.end) || 0;
+      const span = Math.max(0, endSec - startSec);
+      let focusTime = startSec;
+      if (span > 0) {
+        const pad = Math.min(0.02, span * 0.1);
+        const candidate = startSec + Math.max(0.001, pad);
+        focusTime = candidate < endSec ? candidate : startSec + span * 0.5;
+      }
+      handleScrub(focusTime);
+      setPlayback((prev) => ({ ...prev, currentTime: focusTime }));
+      if (playback.isPlaying) {
+        const mediaEl = getActiveMediaEl();
+        if (mediaEl && mediaEl.paused) {
+          void safePlay(mediaEl);
+        }
       }
     },
-    [activeJob?.id, getActiveMediaEl, handleScrub, safePlay]
+    [activeJob?.id, getActiveMediaEl, handleScrub, playback.isPlaying, safePlay]
   );
 
   const handleCaptionPointerMove = useCallback(
@@ -2579,11 +2595,10 @@ export function App() {
       if (duration <= 0) return;
       if (!activeJob?.id) return;
       const track = timelineTrackRef.current;
-      const scrollEl = timelineScrollRef.current;
-      if (!track || !scrollEl) return;
+      if (!track) return;
       const rect = track.getBoundingClientRect();
-      const x = Math.max(0, event.clientX - rect.left);
-      const time = clamp((scrollEl.scrollLeft + x) / Math.max(pxPerSec, 0.001), 0, duration);
+      const x = clamp(event.clientX - rect.left, 0, rect.width);
+      const time = clamp(x / Math.max(pxPerSec, 0.001), 0, duration);
       for (const seg of sortedDisplaySegments) {
         if (time >= seg.start && time <= seg.end) {
           setCaptionHover(null);
@@ -2611,19 +2626,20 @@ export function App() {
     [activeJob?.id, duration, minCaptionDuration, pxPerSec, sortedDisplaySegments]
   );
 
-  const onTrackPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+  const onTrackPointerDown = (event: React.PointerEvent<HTMLDivElement>, useScrollOffset: boolean) => {
     if (event.button !== 0) return;
     const target = event.target as HTMLElement;
     if (target.closest("[data-clip-id]")) return;
-    scrubStateRef.current = { pointerId: event.pointerId };
+    scrubStateRef.current = { pointerId: event.pointerId, useScrollOffset };
     event.currentTarget.setPointerCapture(event.pointerId);
     startPlayerScrub();
-    seekFromPointer(event);
+    seekFromPointer(event, useScrollOffset);
   };
 
   const onTrackPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!scrubStateRef.current) return;
-    seekFromPointer(event);
+    const scrub = scrubStateRef.current;
+    if (!scrub) return;
+    seekFromPointer(event, scrub.useScrollOffset);
   };
 
   const onTrackPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -3518,7 +3534,7 @@ export function App() {
                       <div
                         className="sticky left-0 z-10 flex h-10 items-center justify-between bg-[#0b0b0b] text-[10px] text-slate-500"
                         style={{ width: `${Math.max(1, timelineViewportWidth)}px` }}
-                        onPointerDown={onTrackPointerDown}
+                        onPointerDown={(event) => onTrackPointerDown(event, true)}
                         onPointerMove={onTrackPointerMove}
                         onPointerUp={onTrackPointerUp}
                       >
@@ -3531,7 +3547,7 @@ export function App() {
                       <div className="relative mt-2 space-y-1 pb-1" style={{ width: `${timelineWidth}px` }}>
                         <div
                           className="absolute -top-3 left-0 right-0 h-5 cursor-ew-resize"
-                          onPointerDown={onTrackPointerDown}
+                          onPointerDown={(event) => onTrackPointerDown(event, false)}
                           onPointerMove={onTrackPointerMove}
                           onPointerUp={onTrackPointerUp}
                         />
@@ -3540,18 +3556,20 @@ export function App() {
                           className="relative h-10 overflow-hidden rounded-md bg-transparent"
                           style={{ width: `${timelineWidth}px` }}
                           ref={timelineTrackRef}
-                          onPointerDown={onTrackPointerDown}
+                          onPointerDown={(event) => onTrackPointerDown(event, false)}
                           onPointerMove={onTrackPointerMove}
                           onPointerUp={onTrackPointerUp}
                           onMouseMove={handleCaptionHoverMove}
                           onMouseLeave={() => setCaptionHover(null)}
                         >
-                          {displaySegments.map((segment: any) => {
+                          {sortedDisplaySegments.map((segment: any) => {
                             const start = Number(segment.start ?? 0);
                             const end = Number(segment.end ?? 0);
                             const width = Math.max(2, (end - start) * pxPerSec);
                             const left = Math.max(0, start * pxPerSec);
-                            const isActive = playback.currentTime >= start && playback.currentTime <= end;
+                            const isActive = currentSubtitleMatch
+                              ? Number(currentSubtitleMatch.segment?.id) === Number(segment.id)
+                              : playback.currentTime >= start && playback.currentTime < end;
                             const rawText = segment.originalText ?? segment.text ?? "";
                             let text = rawText;
                             if (openCcConverter) {
@@ -3597,19 +3615,23 @@ export function App() {
                           })}
                           {captionHover ? (
                             <div
-                              className="absolute top-0 flex h-full items-center justify-center rounded-lg border border-dashed border-slate-500/40 bg-white/5 text-[10px] text-slate-200"
+                              className="pointer-events-none absolute top-0 flex h-full items-center justify-center rounded-lg border border-dashed border-slate-500/40 bg-white/5 text-[10px] text-slate-200"
                               style={{
                                 left: `${Math.max(0, captionHover.start * pxPerSec)}px`,
                                 width: `${Math.max(2, (captionHover.end - captionHover.start) * pxPerSec)}px`
                               }}
-                              onPointerDown={(event) => event.stopPropagation()}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                handleAddCaption(captionHover.start, captionHover.end);
-                                setCaptionHover(null);
-                              }}
                             >
-                              <span className="text-[12px] font-semibold text-white/90">+</span>
+                              <button
+                                className="pointer-events-auto text-[12px] font-semibold text-white/90"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleAddCaption(captionHover.start, captionHover.end);
+                                  setCaptionHover(null);
+                                }}
+                                type="button"
+                              >
+                                +
+                              </button>
                             </div>
                           ) : null}
                         </div>
