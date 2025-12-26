@@ -419,6 +419,9 @@ export function App() {
   const [subtitleMaxWidth, setSubtitleMaxWidth] = useState(520);
   const [subtitleBoxSize, setSubtitleBoxSize] = useState({ width: 0, height: 0 });
   const [subtitleEditSize, setSubtitleEditSize] = useState<{ width: number; height: number } | null>(null);
+  const subtitlePositionRef = useRef(subtitlePosition);
+  const subtitleDragRafRef = useRef<number | null>(null);
+  const pendingSubtitlePosRef = useRef<{ x: number; y: number } | null>(null);
   const subtitleBoxRef = useRef<HTMLDivElement | null>(null);
   const subtitleMeasureRef = useRef<HTMLSpanElement | null>(null);
   const subtitleUiSaveRef = useRef<number | null>(null);
@@ -453,6 +456,18 @@ export function App() {
   } | null>(null);
 
   const [isTranscriptEdit, setIsTranscriptEdit] = useState(false);
+
+  useEffect(() => {
+    subtitlePositionRef.current = subtitlePosition;
+  }, [subtitlePosition]);
+
+  useEffect(() => {
+    return () => {
+      if (subtitleDragRafRef.current !== null) {
+        window.cancelAnimationFrame(subtitleDragRafRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     playbackRef.current = playback;
@@ -559,8 +574,11 @@ export function App() {
   const [activeClipId, setActiveClipId] = useState<string | null>(null);
   const pendingPlayRef = useRef(false);
   const pendingSeekRef = useRef<number | null>(null);
-  const scrubStateRef = useRef<{ pointerId: number } | null>(null);
+  const scrubStateRef = useRef<{ pointerId: number; rect?: DOMRect } | null>(null);
   const playerScrubRef = useRef<{ wasPlaying: boolean } | null>(null);
+  const scrubRafRef = useRef<number | null>(null);
+  const pendingScrubRef = useRef<number | null>(null);
+  const lastScrubValueRef = useRef<number | null>(null);
   const mediaRafActiveRef = useRef(false);
   const pendingSwapRef = useRef<string | null>(null);
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);
@@ -2493,6 +2511,13 @@ export function App() {
     }
   }, [activeMedia?.jobId, activeMedia?.source, dispatch, notify, selectedJobId, subtitleDraft, subtitleEditor]);
 
+  const applySubtitlePosition = useCallback((pos: { x: number; y: number }) => {
+    const el = subtitleBoxRef.current;
+    if (!el) return;
+    el.style.left = `${pos.x * 100}%`;
+    el.style.top = `${pos.y * 100}%`;
+  }, []);
+
   const handleSubtitlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (!currentSubtitle && !subtitleEditor) return;
@@ -2509,8 +2534,8 @@ export function App() {
         pointerId: event.pointerId,
         startX: event.clientX,
         startY: event.clientY,
-        originX: subtitlePosition.x,
-        originY: subtitlePosition.y,
+        originX: subtitlePositionRef.current.x,
+        originY: subtitlePositionRef.current.y,
         moved: false,
         container,
         box,
@@ -2519,7 +2544,7 @@ export function App() {
       event.currentTarget.setPointerCapture(event.pointerId);
       event.preventDefault();
     },
-    [currentSubtitle, subtitleEditor, subtitlePosition.x, subtitlePosition.y]
+    [currentSubtitle, subtitleEditor]
   );
 
   const handleSubtitlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
@@ -2536,8 +2561,22 @@ export function App() {
     const halfH = drag.box.height / 2 / drag.container.height;
     const clampedX = clamp(nextX, halfW, 1 - halfW);
     const clampedY = clamp(nextY, halfH, 1 - halfH);
-    setSubtitlePosition({ x: clampedX, y: clampedY });
-  }, []);
+    pendingSubtitlePosRef.current = { x: clampedX, y: clampedY };
+    if (subtitleDragRafRef.current !== null) return;
+    subtitleDragRafRef.current = window.requestAnimationFrame(() => {
+      subtitleDragRafRef.current = null;
+      const next = pendingSubtitlePosRef.current;
+      if (!next) return;
+      subtitlePositionRef.current = next;
+      applySubtitlePosition(next);
+      setSubtitlePosition((prev) => {
+        if (Math.abs(prev.x - next.x) < 0.001 && Math.abs(prev.y - next.y) < 0.001) {
+          return prev;
+        }
+        return next;
+      });
+    });
+  }, [applySubtitlePosition]);
 
   const handleSubtitlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const drag = subtitleDragRef.current;
@@ -2548,13 +2587,24 @@ export function App() {
     } catch {
       // Ignore.
     }
+    if (subtitleDragRafRef.current !== null) {
+      window.cancelAnimationFrame(subtitleDragRafRef.current);
+      subtitleDragRafRef.current = null;
+    }
+    const next = pendingSubtitlePosRef.current;
+    pendingSubtitlePosRef.current = null;
+    if (next) {
+      subtitlePositionRef.current = next;
+      applySubtitlePosition(next);
+      setSubtitlePosition(next);
+    }
     if (drag.moved) {
       scheduleSubtitleUiSave();
     }
     if (drag.allowEdit && !drag.moved) {
       handleOpenSubtitleEditor();
     }
-  }, [handleOpenSubtitleEditor, scheduleSubtitleUiSave]);
+  }, [applySubtitlePosition, handleOpenSubtitleEditor, scheduleSubtitleUiSave]);
 
 
   const togglePlayback = () => {
@@ -2649,10 +2699,11 @@ export function App() {
     togglePlayback();
   };
 
-  const handleScrub = (value: number) => {
+  const applyScrub = useCallback((value: number) => {
     if (!Number.isFinite(duration) || duration <= 0) return;
+    const currentPlayback = playbackRef.current;
     const scrubState = playerScrubRef.current;
-    const wasPlaying = scrubState?.wasPlaying ?? playback.isPlaying;
+    const wasPlaying = scrubState?.wasPlaying ?? currentPlayback.isPlaying;
     const shouldResume = scrubState ? false : wasPlaying;
     if (clipTimeline.length) {
       const range = timelineRanges.find(
@@ -2668,11 +2719,20 @@ export function App() {
           }
         }
         isGapPlaybackRef.current = true;
-        setActiveClipId(null);
-        setActiveMedia(null);
+        if (activeClipId !== null) {
+          setActiveClipId(null);
+        }
+        if (activeMedia !== null) {
+          setActiveMedia(null);
+        }
         pendingSeekRef.current = null;
         pendingPlayRef.current = shouldResume;
-        setPlayback((prev) => ({ ...prev, currentTime: value, isPlaying: shouldResume }));
+        setPlayback((prev) => {
+          if (Math.abs(prev.currentTime - value) < 0.002 && prev.isPlaying === shouldResume) {
+            return prev;
+          }
+          return { ...prev, currentTime: value, isPlaying: shouldResume };
+        });
         return;
       }
       const target = clipById.get(range.clipId);
@@ -2703,15 +2763,63 @@ export function App() {
           pendingPlayRef.current = shouldResume;
         }
       }
-      setPlayback((prev) => ({ ...prev, currentTime: value, isPlaying: prev.isPlaying }));
+      setPlayback((prev) => {
+        if (Math.abs(prev.currentTime - value) < 0.002) {
+          return prev;
+        }
+        return { ...prev, currentTime: value, isPlaying: prev.isPlaying };
+      });
       return;
     }
 
     const mediaEl = getActiveMediaEl();
     if (!mediaEl) return;
     mediaEl.currentTime = value;
-    setPlayback((prev) => ({ ...prev, currentTime: value, isPlaying: prev.isPlaying }));
-  };
+    setPlayback((prev) => {
+      if (Math.abs(prev.currentTime - value) < 0.002) {
+        return prev;
+      }
+      return { ...prev, currentTime: value, isPlaying: prev.isPlaying };
+    });
+  }, [
+    activeMedia,
+    activeClipId,
+    clipTimeline.length,
+    clipById,
+    duration,
+    getActiveMediaEl,
+    safePlay,
+    timelineRanges
+  ]);
+
+  const scheduleScrub = useCallback(
+    (value: number) => {
+      if (!Number.isFinite(value)) return;
+      pendingScrubRef.current = value;
+      if (scrubRafRef.current !== null) return;
+      scrubRafRef.current = window.requestAnimationFrame(() => {
+        scrubRafRef.current = null;
+        const nextValue = pendingScrubRef.current;
+        pendingScrubRef.current = null;
+        if (nextValue === null) return;
+        const lastValue = lastScrubValueRef.current;
+        if (lastValue !== null && Math.abs(nextValue - lastValue) < 0.0025) {
+          return;
+        }
+        lastScrubValueRef.current = nextValue;
+        applyScrub(nextValue);
+      });
+    },
+    [applyScrub]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (scrubRafRef.current !== null) {
+        window.cancelAnimationFrame(scrubRafRef.current);
+      }
+    };
+  }, []);
 
   const startPlayerScrub = () => {
     const wasPlaying = playback.isPlaying;
@@ -2790,14 +2898,14 @@ export function App() {
   }), [segmentPx]);
 
   const seekFromPointer = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
+    (event: React.PointerEvent<HTMLDivElement>, rectOverride?: DOMRect) => {
       if (duration <= 0) return;
-      const rect = event.currentTarget.getBoundingClientRect();
+      const rect = rectOverride ?? event.currentTarget.getBoundingClientRect();
       const x = clamp(event.clientX - rect.left, 0, rect.width);
       const time = clamp(x / Math.max(pxPerSec, 0.001), 0, duration);
-      handleScrub(time);
+      scheduleScrub(time);
     },
-    [duration, handleScrub, pxPerSec]
+    [duration, pxPerSec, scheduleScrub]
   );
 
   useEffect(() => {
@@ -2901,7 +3009,7 @@ export function App() {
         const candidate = startSec + Math.max(0.001, pad);
         focusTime = candidate < endSec ? candidate : startSec + span * 0.5;
       }
-      handleScrub(focusTime);
+      scheduleScrub(focusTime);
       setPlayback((prev) => ({ ...prev, currentTime: focusTime }));
       setForcedCaptionId(Number(segment.id));
       if (playback.isPlaying) {
@@ -2911,7 +3019,7 @@ export function App() {
         }
       }
     },
-    [activeJob?.id, getActiveMediaEl, handleScrub, playback.isPlaying, safePlay]
+    [activeJob?.id, getActiveMediaEl, playback.isPlaying, safePlay, scheduleScrub]
   );
 
   const handleCaptionPointerMove = useCallback(
@@ -3042,16 +3150,19 @@ export function App() {
     if (event.button !== 0) return;
     const target = event.target as HTMLElement;
     if (target.closest("[data-clip-id]")) return;
-    scrubStateRef.current = { pointerId: event.pointerId };
+    scrubStateRef.current = {
+      pointerId: event.pointerId,
+      rect: event.currentTarget.getBoundingClientRect()
+    };
     event.currentTarget.setPointerCapture(event.pointerId);
     startPlayerScrub();
-    seekFromPointer(event);
+    seekFromPointer(event, scrubStateRef.current.rect);
   };
 
   const onTrackPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const scrub = scrubStateRef.current;
     if (!scrub) return;
-    seekFromPointer(event);
+    seekFromPointer(event, scrub.rect);
   };
 
   const onTrackPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -3677,7 +3788,7 @@ export function App() {
                     min={0}
                     max={Math.max(0, duration)}
                     value={Math.min(playback.currentTime, duration || 0)}
-                    onChange={(event) => handleScrub(Number(event.target.value))}
+                    onChange={(event) => scheduleScrub(Number(event.target.value))}
                     onPointerDown={startPlayerScrub}
                     onPointerUp={endPlayerScrub}
                     onPointerCancel={endPlayerScrub}
