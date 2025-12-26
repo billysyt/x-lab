@@ -419,6 +419,9 @@ export function App() {
   const [subtitleMaxWidth, setSubtitleMaxWidth] = useState(520);
   const [subtitleBoxSize, setSubtitleBoxSize] = useState({ width: 0, height: 0 });
   const [subtitleEditSize, setSubtitleEditSize] = useState<{ width: number; height: number } | null>(null);
+  const [subtitleUserSized, setSubtitleUserSized] = useState(false);
+  const subtitleUserSizedRef = useRef(false);
+  const subtitleEditProgrammaticSizeRef = useRef<{ width: number; height: number } | null>(null);
   const subtitlePositionRef = useRef(subtitlePosition);
   const subtitleDragRafRef = useRef<number | null>(null);
   const pendingSubtitlePosRef = useRef<{ x: number; y: number } | null>(null);
@@ -456,6 +459,10 @@ export function App() {
   } | null>(null);
 
   const [isTranscriptEdit, setIsTranscriptEdit] = useState(false);
+
+  useEffect(() => {
+    subtitleUserSizedRef.current = subtitleUserSized;
+  }, [subtitleUserSized]);
 
   useEffect(() => {
     subtitlePositionRef.current = subtitlePosition;
@@ -834,6 +841,12 @@ export function App() {
     }),
     [subtitleFontSize]
   );
+  const subtitleDisplaySize = useMemo(() => {
+    if (subtitleEditor || subtitleUserSized) {
+      return subtitleEditSize ?? subtitleBoxSize;
+    }
+    return subtitleBoxSize;
+  }, [subtitleBoxSize, subtitleEditSize, subtitleEditor, subtitleUserSized]);
 
   useEffect(() => {
     if (forcedCaptionId === null) return;
@@ -909,15 +922,26 @@ export function App() {
     if (subtitleUiSaveRef.current) {
       window.clearTimeout(subtitleUiSaveRef.current);
     }
-    const size = subtitleEditSize ?? subtitleBoxSize;
+    const resolvedSize = subtitleEditSize ?? subtitleBoxSize;
+    const shouldSaveSize =
+      subtitleUserSizedRef.current && resolvedSize.width > 0 && resolvedSize.height > 0;
     const existingUiState = selectedJobUiStateRef.current;
+    const nextSubtitleState: {
+      position: typeof subtitlePosition;
+      scale: number;
+      size?: { width: number; height: number };
+      userSized?: boolean;
+    } = {
+      position: subtitlePosition,
+      scale: subtitleScale
+    };
+    if (shouldSaveSize) {
+      nextSubtitleState.size = resolvedSize;
+      nextSubtitleState.userSized = true;
+    }
     const nextUiState = {
       ...existingUiState,
-      subtitle: {
-        position: subtitlePosition,
-        size,
-        scale: subtitleScale
-      }
+      subtitle: nextSubtitleState
     };
     dispatch(updateJobUiState({ jobId: selectedJobId, uiState: nextUiState }));
     subtitleUiSaveRef.current = window.setTimeout(() => {
@@ -932,7 +956,18 @@ export function App() {
     const observer = new ResizeObserver((entries) => {
       const box = subtitleBoxRef.current?.getBoundingClientRect();
       if (!box) return;
-      setSubtitleEditSize({ width: box.width, height: box.height });
+      const nextSize = { width: box.width, height: box.height };
+      const lastProgrammatic = subtitleEditProgrammaticSizeRef.current;
+      const isProgrammatic =
+        lastProgrammatic &&
+        Math.abs(lastProgrammatic.width - nextSize.width) < 0.5 &&
+        Math.abs(lastProgrammatic.height - nextSize.height) < 0.5;
+      if (!isProgrammatic && !subtitleUserSizedRef.current) {
+        subtitleUserSizedRef.current = true;
+        setSubtitleUserSized(true);
+      }
+      subtitleEditProgrammaticSizeRef.current = nextSize;
+      setSubtitleEditSize(nextSize);
       scheduleSubtitleUiSave();
     });
     observer.observe(el);
@@ -1001,7 +1036,7 @@ export function App() {
     if (nextX !== subtitlePosition.x || nextY !== subtitlePosition.y) {
       setSubtitlePosition({ x: nextX, y: nextY });
     }
-  }, [subtitleBoxSize.width, subtitleBoxSize.height, subtitlePosition.x, subtitlePosition.y]);
+  }, [subtitleDisplaySize.height, subtitleDisplaySize.width, subtitlePosition.x, subtitlePosition.y]);
 
   useEffect(() => {
     if (!selectedJobId) return;
@@ -1021,23 +1056,38 @@ export function App() {
         const uiState = record?.ui_state?.subtitle;
         if (!uiState) {
           setSubtitlePosition({ x: 0.5, y: 0.85 });
+          subtitleEditProgrammaticSizeRef.current = null;
           setSubtitleEditSize(null);
+          setSubtitleUserSized(false);
+          subtitleUserSizedRef.current = false;
           setSubtitleScale(1.4);
           return;
         }
+        const userSized = Boolean(uiState.userSized);
+        let nextUserSized = userSized;
+        let nextSize: { width: number; height: number } | null = null;
         if (uiState.position) {
           setSubtitlePosition({
             x: Number(uiState.position.x) || 0.5,
             y: Number(uiState.position.y) || 0.85
           });
         }
-        if (uiState.size && !subtitleEditor) {
-          const width = Number(uiState.size.width) || subtitleBoxSize.width;
-          const height = Number(uiState.size.height) || subtitleBoxSize.height;
+        if (userSized && uiState.size) {
+          const width = Number(uiState.size.width) || 0;
+          const height = Number(uiState.size.height) || 0;
           if (width && height) {
-            setSubtitleEditSize({ width, height });
+            nextSize = { width, height };
           }
         }
+        if (nextUserSized && !nextSize) {
+          nextUserSized = false;
+        }
+        if (!subtitleEditor) {
+          subtitleEditProgrammaticSizeRef.current = nextSize;
+          setSubtitleEditSize(nextSize);
+        }
+        setSubtitleUserSized(nextUserSized);
+        subtitleUserSizedRef.current = nextUserSized;
         if (uiState.scale) {
           const nextScale = Number(uiState.scale);
           if (Number.isFinite(nextScale)) {
@@ -1054,10 +1104,20 @@ export function App() {
     if (!requested) return;
     subtitleEditOpenSizeRef.current = null;
     const raf = window.requestAnimationFrame(() => {
+      subtitleEditProgrammaticSizeRef.current = requested;
       setSubtitleEditSize(requested);
     });
     return () => window.cancelAnimationFrame(raf);
   }, [subtitleEditor]);
+
+  useEffect(() => {
+    if (subtitleEditor) return;
+    if (subtitleUserSizedRef.current) return;
+    if (subtitleEditSize !== null) {
+      subtitleEditProgrammaticSizeRef.current = null;
+      setSubtitleEditSize(null);
+    }
+  }, [subtitleEditSize, subtitleEditor, subtitleUserSized]);
 
   useEffect(() => {
     return () => {
@@ -2471,15 +2531,19 @@ export function App() {
       const paddingY = 4;
       const width = Math.min(subtitleMaxWidth, rect.width + paddingX * 2 + 5);
       const height = rect.height + paddingY * 2;
-      subtitleEditOpenSizeRef.current = { width, height };
-      setSubtitleEditSize({ width, height });
+      const nextSize = { width, height };
+      subtitleEditOpenSizeRef.current = nextSize;
+      subtitleEditProgrammaticSizeRef.current = nextSize;
+      setSubtitleEditSize(nextSize);
     } else {
       const boxRect = subtitleBoxRef.current?.getBoundingClientRect();
       if (boxRect) {
         const width = Math.min(subtitleMaxWidth, boxRect.width + 5);
         const height = boxRect.height;
-        subtitleEditOpenSizeRef.current = { width, height };
-        setSubtitleEditSize({ width, height });
+        const nextSize = { width, height };
+        subtitleEditOpenSizeRef.current = nextSize;
+        subtitleEditProgrammaticSizeRef.current = nextSize;
+        setSubtitleEditSize(nextSize);
       }
     }
     setSubtitleDraft(baseText);
@@ -3696,12 +3760,8 @@ export function App() {
                       left: `${subtitlePosition.x * 100}%`,
                       top: `${subtitlePosition.y * 100}%`,
                       transform: "translate(-50%, -50%)",
-                      width: (subtitleEditSize ?? subtitleBoxSize).width
-                        ? `${(subtitleEditSize ?? subtitleBoxSize).width}px`
-                        : undefined,
-                      height: (subtitleEditSize ?? subtitleBoxSize).height
-                        ? `${(subtitleEditSize ?? subtitleBoxSize).height}px`
-                        : undefined,
+                      width: subtitleDisplaySize.width ? `${subtitleDisplaySize.width}px` : undefined,
+                      height: subtitleDisplaySize.height ? `${subtitleDisplaySize.height}px` : undefined,
                       maxWidth: `${subtitleMaxWidth}px`,
                       minWidth: "140px",
                       minHeight: "36px"
