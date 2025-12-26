@@ -375,6 +375,7 @@ export function App() {
   const [isAltPressed, setIsAltPressed] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
+  const [isPlayerModalOpen, setIsPlayerModalOpen] = useState(false);
   const headerMenuRef = useRef<HTMLDivElement | null>(null);
   const headerMenuButtonRef = useRef<HTMLButtonElement | null>(null);
 
@@ -388,7 +389,9 @@ export function App() {
   const [previewPoster, setPreviewPoster] = useState<string | null>(null);
   const [activeVideoSlot, setActiveVideoSlot] = useState<0 | 1>(0);
   const previewPosterRef = useRef<string | null>(null);
-  const [subtitleScale, setSubtitleScale] = useState(1);
+  const previewPosterModeRef = useRef<"paused" | null>(null);
+  const [subtitleScale, setSubtitleScale] = useState(1.1);
+  const [subtitleBaseFontSize, setSubtitleBaseFontSize] = useState(14);
   const [subtitleEditor, setSubtitleEditor] = useState<{ segmentId: number; text: string } | null>(null);
   const [subtitleDraft, setSubtitleDraft] = useState("");
   const [subtitlePosition, setSubtitlePosition] = useState({ x: 0.5, y: 0.85 });
@@ -400,6 +403,15 @@ export function App() {
   const subtitleUiSaveRef = useRef<number | null>(null);
   const subtitleUiLoadRef = useRef<string | null>(null);
   const subtitleEditOpenSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const subtitleEditAutosaveRef = useRef<number | null>(null);
+  const subtitleEditLastSavedRef = useRef<{ segmentId: number; text: string } | null>(null);
+  const captionTimingAutosaveRef = useRef<number | null>(null);
+  const captionTimingAutosavePayloadRef = useRef<{
+    jobId: string;
+    segmentId: number;
+    start: number;
+    end: number;
+  } | null>(null);
   const subtitleDragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -420,6 +432,9 @@ export function App() {
 
   useEffect(() => {
     previewPosterRef.current = previewPoster;
+    if (!previewPoster) {
+      previewPosterModeRef.current = null;
+    }
   }, [previewPoster]);
 
   useEffect(() => {
@@ -444,6 +459,17 @@ export function App() {
       window.removeEventListener("blur", handleBlur);
     };
   }, []);
+
+  useEffect(() => {
+    if (!isPlayerModalOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsPlayerModalOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isPlayerModalOpen]);
 
   useEffect(() => {
     const win = typeof window !== "undefined" ? (window as any) : null;
@@ -756,6 +782,17 @@ export function App() {
   }, [forcedCaptionId, openCcConverter, playback.currentTime, sortedDisplaySegments]);
   const currentSubtitle = currentSubtitleMatch?.text ?? "";
 
+  const subtitleFontSize = Math.max(10, subtitleBaseFontSize * subtitleScale);
+  const subtitleTextStyle = useMemo(
+    () => ({
+      fontSize: `${subtitleFontSize}px`,
+      lineHeight: "1.2",
+      textShadow:
+        "0 0 3px rgba(0,0,0,0.95), 0 0 6px rgba(0,0,0,0.9), 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 2px 0 #000, 2px 0 0 #000, 0 -2px 0 #000, -2px 0 0 #000"
+    }),
+    [subtitleFontSize]
+  );
+
   useEffect(() => {
     if (forcedCaptionId === null) return;
     const forced = sortedDisplaySegments.find((segment) => Number(segment.id) === forcedCaptionId);
@@ -777,16 +814,39 @@ export function App() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const container = previewContainerRef.current;
+    if (!container) return;
+    const updateFromRect = (rect: DOMRect) => {
+      if (!rect.width) return;
+      setSubtitleMaxWidth(Math.max(200, rect.width * 0.8));
+      const nextFontSize = clamp(rect.width * 0.022, 12, 28);
+      setSubtitleBaseFontSize(nextFontSize);
+    };
     const updateMaxWidth = () => {
-      const rect = previewContainerRef.current?.getBoundingClientRect();
+      const rect = container.getBoundingClientRect();
       if (rect) {
-        setSubtitleMaxWidth(Math.max(200, rect.width * 0.9));
+        updateFromRect(rect);
       }
     };
     updateMaxWidth();
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver((entries) => {
+        const entry = entries[0];
+        if (entry?.contentRect) {
+          updateFromRect(entry.contentRect);
+        } else {
+          updateMaxWidth();
+        }
+      });
+      observer.observe(container);
+    }
     window.addEventListener("resize", updateMaxWidth);
-    return () => window.removeEventListener("resize", updateMaxWidth);
-  }, []);
+    return () => {
+      window.removeEventListener("resize", updateMaxWidth);
+      observer?.disconnect();
+    };
+  }, [compactTab, isCompact, isPlayerModalOpen]);
 
   useEffect(() => {
     if (subtitleEditor && subtitleEditSize) return;
@@ -800,7 +860,7 @@ export function App() {
     const width = Math.min(subtitleMaxWidth, rect.width + paddingX * 2);
     const height = rect.height + paddingY * 2;
     setSubtitleBoxSize({ width, height });
-  }, [currentSubtitle, subtitleDraft, subtitleEditor, subtitleEditSize, subtitleMaxWidth, subtitleScale]);
+  }, [currentSubtitle, subtitleDraft, subtitleEditor, subtitleEditSize, subtitleMaxWidth, subtitleFontSize]);
 
   const scheduleSubtitleUiSave = useCallback(() => {
     if (!selectedJobId) return;
@@ -838,6 +898,55 @@ export function App() {
   }, [scheduleSubtitleUiSave, subtitleEditor]);
 
   useEffect(() => {
+    if (!subtitleEditor) {
+      if (subtitleEditAutosaveRef.current) {
+        window.clearTimeout(subtitleEditAutosaveRef.current);
+        subtitleEditAutosaveRef.current = null;
+      }
+      subtitleEditLastSavedRef.current = null;
+      return;
+    }
+    subtitleEditLastSavedRef.current = {
+      segmentId: subtitleEditor.segmentId,
+      text: subtitleEditor.text
+    };
+  }, [subtitleEditor]);
+
+  useEffect(() => {
+    if (!subtitleEditor) return;
+    const jobId =
+      selectedJobId ?? (activeMedia?.source === "job" && activeMedia.jobId ? activeMedia.jobId : null);
+    if (!jobId) return;
+    if (subtitleEditAutosaveRef.current) {
+      window.clearTimeout(subtitleEditAutosaveRef.current);
+    }
+    const nextValue = subtitleDraft;
+    const segmentId = subtitleEditor.segmentId;
+    subtitleEditAutosaveRef.current = window.setTimeout(() => {
+      const newText = nextValue.trim();
+      if (!newText) return;
+      const lastSaved = subtitleEditLastSavedRef.current;
+      if (lastSaved && lastSaved.segmentId === segmentId && newText === lastSaved.text.trim()) {
+        return;
+      }
+      void apiEditSegment({ jobId, segmentId, newText })
+        .then(() => {
+          dispatch(updateSegmentText({ jobId, segmentId, newText }));
+          subtitleEditLastSavedRef.current = { segmentId, text: newText };
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          notify(`Failed to save changes: ${message}`, "error");
+        });
+    }, 650);
+    return () => {
+      if (subtitleEditAutosaveRef.current) {
+        window.clearTimeout(subtitleEditAutosaveRef.current);
+      }
+    };
+  }, [activeMedia?.jobId, activeMedia?.source, dispatch, notify, selectedJobId, subtitleDraft, subtitleEditor]);
+
+  useEffect(() => {
     const container = previewContainerRef.current?.getBoundingClientRect();
     const box = subtitleBoxRef.current?.getBoundingClientRect();
     if (!container || !box) return;
@@ -871,7 +980,7 @@ export function App() {
         if (!uiState) {
           setSubtitlePosition({ x: 0.5, y: 0.85 });
           setSubtitleEditSize(null);
-          setSubtitleScale(1);
+          setSubtitleScale(1.1);
           return;
         }
         if (uiState.position) {
@@ -890,7 +999,7 @@ export function App() {
         if (uiState.scale) {
           const nextScale = Number(uiState.scale);
           if (Number.isFinite(nextScale)) {
-            setSubtitleScale(clamp(nextScale, 0.6, 2));
+            setSubtitleScale(clamp(nextScale, 0.8, 2.4));
           }
         }
       })
@@ -907,6 +1016,15 @@ export function App() {
     });
     return () => window.cancelAnimationFrame(raf);
   }, [subtitleEditor]);
+
+  useEffect(() => {
+    return () => {
+      if (captionTimingAutosaveRef.current) {
+        window.clearTimeout(captionTimingAutosaveRef.current);
+        captionTimingAutosaveRef.current = null;
+      }
+    };
+  }, []);
 
   const waitlistUrl =
     typeof window !== "undefined" && typeof (window as any).__WAITLIST_URL__ === "string"
@@ -1037,28 +1155,6 @@ export function App() {
       setIsExporting(false);
     }
   }, [exportSegments, notify, openCcConverter, saveTextFile, selectedJob?.filename]);
-
-  const handleExportVideo = useCallback(async () => {
-    if (!activeMedia || activeMedia.kind !== "video" || !activeMedia.file) {
-      notify("No local video available to export.", "info");
-      return;
-    }
-    setIsExporting(true);
-    try {
-      const file = activeMedia.file;
-      const url = URL.createObjectURL(file);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = file.name || `${baseFilename(selectedJob?.filename)}.mp4`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      document.body.removeChild(anchor);
-      URL.revokeObjectURL(url);
-      notify("Video export started.", "success");
-    } finally {
-      setIsExporting(false);
-    }
-  }, [activeMedia, notify, selectedJob?.filename]);
 
   const handleJoinWaitlist = useCallback(() => {
     const url = waitlistUrl.trim();
@@ -1245,6 +1341,28 @@ export function App() {
         });
     }
     return Promise.resolve(true);
+  }, []);
+
+  const capturePreviewPoster = useCallback((mediaEl: HTMLMediaElement | null) => {
+    if (!mediaEl) return;
+    const videoEl = mediaEl as HTMLVideoElement;
+    if (typeof videoEl.videoWidth !== "number" || typeof videoEl.videoHeight !== "number") return;
+    if (videoEl.readyState < 2 || videoEl.videoWidth <= 0 || videoEl.videoHeight <= 0) return;
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = videoEl.videoWidth;
+      canvas.height = videoEl.videoHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL("image/png");
+      if (dataUrl) {
+        previewPosterModeRef.current = "paused";
+        setPreviewPoster(dataUrl);
+      }
+    } catch {
+      // Ignore capture failures (cross-origin or canvas errors).
+    }
   }, []);
 
   const getActiveVideoEl = useCallback(() => {
@@ -1487,7 +1605,6 @@ export function App() {
   }, [ensureWhisperModelReady, timelineClips.length]);
 
   const canExportCaptions = exportSegments.length > 0;
-  const canExportVideo = Boolean(activeMedia?.kind === "video" && activeMedia.file);
 
   const handleWindowAction = useCallback((action: "close" | "minimize" | "zoom" | "fullscreen") => {
     const win = typeof window !== "undefined" ? (window as any) : null;
@@ -1666,6 +1783,7 @@ export function App() {
     }
 
     const clearPosterIfReady = () => {
+      if (previewPosterModeRef.current === "paused") return;
       if (!previewPosterRef.current || !activeClipId) return;
       const clipEntry = clipById.get(activeClipId);
       if (!clipEntry) return;
@@ -1723,10 +1841,22 @@ export function App() {
       const localTime = Math.max(0, mediaTime - clipEntry.trimStartSec);
       setPlayback((prev) => ({ ...prev, currentTime: clipEntry.startSec + localTime }));
     };
-    const onPlay = () => setPlayback((prev) => ({ ...prev, isPlaying: true }));
+    const onPlay = () => {
+      if (previewPosterModeRef.current === "paused") {
+        setPreviewPoster(null);
+      }
+      setPlayback((prev) => ({ ...prev, isPlaying: true }));
+    };
     const onPause = () => {
       if (isGapPlaybackRef.current) return;
       setPlayback((prev) => ({ ...prev, isPlaying: false }));
+      if (
+        activeMedia?.kind === "video" &&
+        !playerScrubRef.current &&
+        !scrubStateRef.current
+      ) {
+        capturePreviewPoster(mediaEl);
+      }
     };
     const onEnded = () => {
       if (!clipTimeline.length || !activeClipId) {
@@ -1757,7 +1887,17 @@ export function App() {
       mediaEl.removeEventListener("pause", onPause);
       mediaEl.removeEventListener("ended", onEnded);
     };
-  }, [activeClipId, advanceFromClip, clipById, clipTimeline, getActiveMediaEl, applyPlaybackRate, safePlay]);
+  }, [
+    activeClipId,
+    activeMedia?.kind,
+    advanceFromClip,
+    clipById,
+    clipTimeline,
+    getActiveMediaEl,
+    applyPlaybackRate,
+    safePlay,
+    capturePreviewPoster
+  ]);
 
   useEffect(() => {
     const mediaEl = getActiveMediaEl();
@@ -2187,13 +2327,15 @@ export function App() {
       return;
     }
     const newText = subtitleDraft.trim();
-    if (!newText || newText === subtitleEditor.text.trim()) {
+    const lastSaved = subtitleEditLastSavedRef.current?.text ?? subtitleEditor.text;
+    if (!newText || newText === lastSaved.trim()) {
       setSubtitleEditor(null);
       return;
     }
     try {
       await apiEditSegment({ jobId, segmentId: subtitleEditor.segmentId, newText });
       dispatch(updateSegmentText({ jobId, segmentId: subtitleEditor.segmentId, newText }));
+      subtitleEditLastSavedRef.current = { segmentId: subtitleEditor.segmentId, text: newText };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       notify(`Failed to save changes: ${message}`, "error");
@@ -2623,6 +2765,20 @@ export function App() {
       const deltaSec = dx / Math.max(pxPerSec, 0.001);
       const next = computeCaptionTiming(drag, deltaSec);
       dispatch(updateSegmentTiming({ jobId: drag.jobId, segmentId: drag.segmentId, start: next.start, end: next.end }));
+      captionTimingAutosavePayloadRef.current = {
+        jobId: drag.jobId,
+        segmentId: drag.segmentId,
+        start: next.start,
+        end: next.end
+      };
+      if (!captionTimingAutosaveRef.current) {
+        captionTimingAutosaveRef.current = window.setTimeout(() => {
+          const payload = captionTimingAutosavePayloadRef.current;
+          captionTimingAutosaveRef.current = null;
+          if (!payload) return;
+          void apiUpdateSegmentTiming(payload).catch(() => undefined);
+        }, 500);
+      }
     },
     [computeCaptionTiming, dispatch, pxPerSec]
   );
@@ -2637,6 +2793,10 @@ export function App() {
         event.currentTarget.releasePointerCapture(event.pointerId);
       } catch {
         // Ignore.
+      }
+      if (captionTimingAutosaveRef.current) {
+        window.clearTimeout(captionTimingAutosaveRef.current);
+        captionTimingAutosaveRef.current = null;
       }
       const dx = event.clientX - drag.startX;
       const deltaSec = dx / Math.max(pxPerSec, 0.001);
@@ -2744,19 +2904,7 @@ export function App() {
   };
 
   const toggleFullscreen = () => {
-    const doc = document as Document & { exitFullscreen?: () => Promise<void> };
-    if (document.fullscreenElement) {
-      void doc.exitFullscreen?.();
-      return;
-    }
-    const videoEl = activeMedia?.kind === "video" ? getActiveVideoEl() : null;
-    const target = videoEl ?? previewContainerRef.current;
-    if (!target || !target.requestFullscreen) return;
-    try {
-      void target.requestFullscreen();
-    } catch {
-      // Ignore.
-    }
+    setIsPlayerModalOpen((prev) => !prev);
   };
 
   const handleClearSelection = useCallback(() => {
@@ -3022,6 +3170,299 @@ export function App() {
       </div>
     </div>
   );
+
+  const renderPlayerPanel = (isModal: boolean) => {
+    const showCompactCaptions = !isModal && isCompact && compactTab === "captions";
+    return (
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col items-center justify-center gap-2",
+          isModal ? "p-4" : "p-2"
+        )}
+      >
+        {showCompactCaptions ? (
+          <div className="flex min-h-0 w-full flex-1">
+            <div className="min-h-0 h-[calc(100vh-320px)] max-h-[calc(100vh-320px)] w-full overflow-hidden">
+              <div className="flex h-full min-h-0 flex-col gap-3">
+                {showCaptionSetup ? captionSetupPanel : null}
+                <div className="min-h-0 flex-1">
+                  <TranscriptPanel
+                    mediaRef={transcriptMediaRef}
+                    notify={notify}
+                    editEnabled={isTranscriptEdit}
+                    suppressEmptyState={showCaptionSetup}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div
+              className="relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden"
+              ref={previewContainerRef}
+            >
+              <div className="relative h-full w-full overflow-hidden rounded-xl bg-black">
+                {activeMedia ? (
+                  <div className="pointer-events-auto absolute left-1/2 top-3 z-20 -translate-x-1/2">
+                    {isDisplayNameEditing ? (
+                      <input
+                        className="w-[min(70vw,420px)] rounded-md border border-white/15 bg-black/70 px-3 py-1 text-center text-[12px] font-medium text-white outline-none focus:border-primary/70"
+                        value={displayNameDraft}
+                        onChange={(e) => setDisplayNameDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            void commitDisplayName();
+                          } else if (e.key === "Escape") {
+                            e.preventDefault();
+                            cancelDisplayNameEdit();
+                          }
+                        }}
+                        onBlur={() => void commitDisplayName()}
+                        autoFocus
+                        aria-label="Edit display name"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="inline-flex max-w-[min(70vw,420px)] items-center rounded-md border border-white/10 bg-black/60 px-3 py-1 text-[12px] font-medium text-white/90 shadow hover:border-white/25"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setIsDisplayNameEditing(true);
+                        }}
+                        title="Click to rename"
+                      >
+                        <span className="truncate">{activeMediaDisplayName}</span>
+                      </button>
+                    )}
+                  </div>
+                ) : null}
+                {activeVideoSrc ? (
+                  <>
+                    <video
+                      src={activeVideoSlot === 0 ? activeVideoSrc : nextVideoTarget?.url ?? undefined}
+                      ref={videoRefA}
+                      playsInline
+                      preload="auto"
+                      muted={activeVideoSlot !== 0}
+                      poster={activeVideoSlot === 0 ? previewPoster ?? undefined : undefined}
+                      onLoadedData={() => {
+                        if (previewPosterModeRef.current !== "paused") {
+                          setPreviewPoster(null);
+                        }
+                      }}
+                      className={cn(
+                        "absolute inset-0 h-full w-full object-contain transition-opacity",
+                        activeVideoSlot === 0 ? "opacity-100" : "opacity-0"
+                      )}
+                    />
+                    <video
+                      src={activeVideoSlot === 1 ? activeVideoSrc : nextVideoTarget?.url ?? undefined}
+                      ref={videoRefB}
+                      playsInline
+                      preload="auto"
+                      muted={activeVideoSlot !== 1}
+                      poster={activeVideoSlot === 1 ? previewPoster ?? undefined : undefined}
+                      onLoadedData={() => {
+                        if (previewPosterModeRef.current !== "paused") {
+                          setPreviewPoster(null);
+                        }
+                      }}
+                      className={cn(
+                        "absolute inset-0 h-full w-full object-contain transition-opacity",
+                        activeVideoSlot === 1 ? "opacity-100" : "opacity-0"
+                      )}
+                    />
+                    {shouldShowPreviewPoster ? (
+                      <img
+                        src={previewPoster}
+                        alt=""
+                        className="pointer-events-none absolute inset-0 h-full w-full object-contain"
+                      />
+                    ) : null}
+                  </>
+                ) : activeMedia?.kind === "audio" && resolvedPreviewUrl ? (
+                  <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-6 text-xs text-slate-500">
+                    <AppIcon name="volume" className="text-2xl" />
+                    <span className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Audio Preview</span>
+                  </div>
+                ) : activeMedia ? (
+                  <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-xs text-slate-500">
+                    <AppIcon name={activeMedia.kind === "audio" ? "volume" : "video"} className="text-2xl" />
+                    <span className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                      {activeMedia.kind === "audio" ? "Audio Preview" : "Preview"}
+                    </span>
+                    {activeMedia.source === "job" && activeMedia.kind === "video" ? (
+                      <span className="text-[10px] text-slate-500">Video preview not available yet</span>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="h-full w-full bg-black" />
+                )}
+                {showActiveJobOverlay ? (
+                  <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center p-4">
+                    <div className="w-full max-w-[360px] rounded-2xl border border-white/10 bg-black/70 p-5 text-center shadow-[0_24px_60px_rgba(0,0,0,0.55)] backdrop-blur-md">
+                      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-[#2563eb] via-[#4f46e5] to-[#22d3ee] p-[1px]">
+                        <div className="flex h-full w-full items-center justify-center rounded-full bg-[#0b0b0b]/80 text-white">
+                          <AppIcon name="cog" spin className="text-[16px]" />
+                        </div>
+                      </div>
+                      <div className="mt-3 text-sm font-semibold text-slate-100">{activeJobLabel}</div>
+                      <div className="mt-1 text-[11px] text-slate-400">{activeJobStatusMessage}</div>
+                      <div className="mt-4">
+                        <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+                          <div
+                            className={cn(
+                              "h-full rounded-full bg-gradient-to-r from-[#60a5fa] via-[#2563eb] to-[#22d3ee] transition-[width] duration-200",
+                              activeJobProgress === null && "animate-pulse"
+                            )}
+                            style={{
+                              width: `${Math.max(4, Math.min(100, activeJobProgress ?? 18))}%`
+                            }}
+                          />
+                        </div>
+                        <div className="mt-2 flex items-center justify-center gap-2 text-[11px] text-slate-300">
+                          <span className="rounded-full bg-white/10 px-2 py-0.5 font-semibold text-slate-100">
+                            {activeJobProgress !== null ? `${activeJobProgress}%` : "Preparing..."}
+                          </span>
+                          <span className="text-slate-400">AI Generate</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+                {subtitleEditor || currentSubtitle ? (
+                  <div
+                    ref={subtitleBoxRef}
+                    className={cn(
+                      "absolute z-10 rounded-md px-3 py-1",
+                      subtitleEditor
+                        ? "cursor-move border border-white/35 resize overflow-hidden"
+                        : "cursor-move"
+                    )}
+                    style={{
+                      left: `${subtitlePosition.x * 100}%`,
+                      top: `${subtitlePosition.y * 100}%`,
+                      transform: "translate(-50%, -50%)",
+                      width: (subtitleEditSize ?? subtitleBoxSize).width
+                        ? `${(subtitleEditSize ?? subtitleBoxSize).width}px`
+                        : undefined,
+                      height: (subtitleEditSize ?? subtitleBoxSize).height
+                        ? `${(subtitleEditSize ?? subtitleBoxSize).height}px`
+                        : undefined,
+                      maxWidth: `${subtitleMaxWidth}px`,
+                      minWidth: "140px",
+                      minHeight: "36px"
+                    }}
+                    onPointerDown={handleSubtitlePointerDown}
+                    onPointerMove={handleSubtitlePointerMove}
+                    onPointerUp={handleSubtitlePointerUp}
+                    onPointerCancel={handleSubtitlePointerUp}
+                  >
+                    {subtitleEditor ? (
+                      <textarea
+                        className="h-full w-full resize-none bg-transparent text-center text-[13px] font-medium text-white outline-none cursor-text"
+                        style={subtitleTextStyle}
+                        value={subtitleDraft}
+                        onChange={(e) => setSubtitleDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") {
+                            e.preventDefault();
+                            setSubtitleEditor(null);
+                          } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                            e.preventDefault();
+                            void handleSaveSubtitleEdit();
+                          }
+                        }}
+                        onBlur={() => void handleSaveSubtitleEdit()}
+                        autoFocus
+                        aria-label="Edit subtitle"
+                      />
+                    ) : (
+                      <div
+                        className="whitespace-pre-wrap break-words text-[13px] font-medium text-white pointer-events-none text-center"
+                        style={subtitleTextStyle}
+                      >
+                        {currentSubtitle}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+                <span
+                  ref={subtitleMeasureRef}
+                  className="pointer-events-none absolute -z-10 opacity-0 whitespace-pre-wrap break-words"
+                  style={{
+                    fontSize: `${subtitleFontSize}px`,
+                    fontWeight: 500,
+                    lineHeight: "1.2",
+                    maxWidth: `${subtitleMaxWidth}px`
+                  }}
+                />
+              </div>
+            </div>
+            <div className="flex w-full shrink-0 items-center gap-3 px-2 py-1">
+              <button
+                className={cn(
+                  "flex h-8 w-8 items-center justify-center rounded-md text-slate-200 transition",
+                  previewDisabled ? "cursor-not-allowed opacity-50" : "hover:bg-white/10"
+                )}
+                onClick={togglePlayback}
+                disabled={previewDisabled}
+                type="button"
+              >
+                <AppIcon name={isMediaPlaying ? "pause" : "play"} className="text-[12px]" />
+              </button>
+              <button
+                className={cn(
+                  "flex h-8 w-12 items-center justify-center rounded-md px-2 text-[11px] font-semibold tabular-nums text-slate-200 transition",
+                  previewDisabled ? "cursor-not-allowed opacity-50" : "hover:bg-white/10"
+                )}
+                onClick={cyclePlaybackRate}
+                disabled={previewDisabled}
+                type="button"
+                aria-label="Playback speed"
+                title="Playback speed"
+              >
+                {`${playbackRate}X`}
+              </button>
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <span className="text-[11px] text-slate-400 tabular-nums">{formatTime(playback.currentTime)}</span>
+                <div className="relative flex-1">
+                  <div className="h-1 rounded-full bg-[#2a2a30]">
+                    <div className="h-full rounded-full bg-primary" style={{ width: `${playheadPct}%` }} />
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={Math.max(0, duration)}
+                    value={Math.min(playback.currentTime, duration || 0)}
+                    onChange={(event) => handleScrub(Number(event.target.value))}
+                    onPointerDown={startPlayerScrub}
+                    onPointerUp={endPlayerScrub}
+                    onPointerCancel={endPlayerScrub}
+                    onPointerLeave={endPlayerScrub}
+                    className="absolute inset-0 h-4 w-full cursor-pointer opacity-0"
+                    disabled={previewDisabled}
+                  />
+                </div>
+                <span className="text-[11px] text-slate-400 tabular-nums">{formatTime(duration)}</span>
+              </div>
+              <button
+                className="flex h-8 w-8 items-center justify-center rounded-md text-slate-200 transition hover:bg-white/10"
+                onClick={toggleFullscreen}
+                type="button"
+                aria-label="Fullscreen"
+              >
+                <AppIcon name="expand" className="text-[12px]" />
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
 
   const leftPanelContent = (
     <>
@@ -3408,284 +3849,7 @@ export function App() {
                 </div>
               ) : null}
             </div>
-            <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-2">
-              {isCompact && compactTab === "captions" ? (
-                <div className="flex min-h-0 w-full flex-1">
-                  <div className="min-h-0 h-[calc(100vh-320px)] max-h-[calc(100vh-320px)] w-full overflow-hidden">
-                    <div className="flex h-full min-h-0 flex-col gap-3">
-                      {showCaptionSetup ? captionSetupPanel : null}
-                      <div className="min-h-0 flex-1">
-                        <TranscriptPanel
-                          mediaRef={transcriptMediaRef}
-                          notify={notify}
-                          editEnabled={isTranscriptEdit}
-                          suppressEmptyState={showCaptionSetup}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div
-                    className="relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden"
-                    ref={previewContainerRef}
-                  >
-                    <div className="relative h-full w-full overflow-hidden rounded-xl bg-black">
-                      {activeMedia ? (
-                        <div className="pointer-events-auto absolute left-1/2 top-3 z-20 -translate-x-1/2">
-                          {isDisplayNameEditing ? (
-                            <input
-                              className="w-[min(70vw,420px)] rounded-md border border-white/15 bg-black/70 px-3 py-1 text-center text-[12px] font-medium text-white outline-none focus:border-primary/70"
-                              value={displayNameDraft}
-                              onChange={(e) => setDisplayNameDraft(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  e.preventDefault();
-                                  void commitDisplayName();
-                                } else if (e.key === "Escape") {
-                                  e.preventDefault();
-                                  cancelDisplayNameEdit();
-                                }
-                              }}
-                              onBlur={() => void commitDisplayName()}
-                              autoFocus
-                              aria-label="Edit display name"
-                            />
-                          ) : (
-                            <button
-                              type="button"
-                              className="inline-flex max-w-[min(70vw,420px)] items-center rounded-md border border-white/10 bg-black/60 px-3 py-1 text-[12px] font-medium text-white/90 shadow hover:border-white/25"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setIsDisplayNameEditing(true);
-                              }}
-                              title="Click to rename"
-                            >
-                              <span className="truncate">{activeMediaDisplayName}</span>
-                            </button>
-                          )}
-                        </div>
-                      ) : null}
-                      {activeVideoSrc ? (
-                        <>
-                          <video
-                            src={activeVideoSlot === 0 ? activeVideoSrc : nextVideoTarget?.url ?? undefined}
-                            ref={videoRefA}
-                            playsInline
-                            preload="auto"
-                            muted={activeVideoSlot !== 0}
-                            poster={activeVideoSlot === 0 ? previewPoster ?? undefined : undefined}
-                            onLoadedData={() => {
-                              setPreviewPoster(null);
-                            }}
-                            className={cn(
-                              "absolute inset-0 h-full w-full object-contain transition-opacity",
-                              activeVideoSlot === 0 ? "opacity-100" : "opacity-0"
-                            )}
-                          />
-                          <video
-                            src={activeVideoSlot === 1 ? activeVideoSrc : nextVideoTarget?.url ?? undefined}
-                            ref={videoRefB}
-                            playsInline
-                            preload="auto"
-                            muted={activeVideoSlot !== 1}
-                            poster={activeVideoSlot === 1 ? previewPoster ?? undefined : undefined}
-                            onLoadedData={() => {
-                              setPreviewPoster(null);
-                            }}
-                            className={cn(
-                              "absolute inset-0 h-full w-full object-contain transition-opacity",
-                              activeVideoSlot === 1 ? "opacity-100" : "opacity-0"
-                            )}
-                          />
-                          {shouldShowPreviewPoster ? (
-                            <img
-                              src={previewPoster}
-                              alt=""
-                              className="pointer-events-none absolute inset-0 h-full w-full object-contain"
-                            />
-                          ) : null}
-                        </>
-                      ) : activeMedia?.kind === "audio" && resolvedPreviewUrl ? (
-                        <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-6 text-xs text-slate-500">
-                          <AppIcon name="volume" className="text-2xl" />
-                          <span className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Audio Preview</span>
-                        </div>
-                      ) : activeMedia ? (
-                        <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-xs text-slate-500">
-                          <AppIcon name={activeMedia.kind === "audio" ? "volume" : "video"} className="text-2xl" />
-                          <span className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
-                            {activeMedia.kind === "audio" ? "Audio Preview" : "Preview"}
-                          </span>
-                          {activeMedia.source === "job" && activeMedia.kind === "video" ? (
-                            <span className="text-[10px] text-slate-500">Video preview not available yet</span>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <div className="h-full w-full bg-black" />
-                      )}
-                      {showActiveJobOverlay ? (
-                        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center p-4">
-                          <div className="w-full max-w-[360px] rounded-2xl border border-white/10 bg-black/70 p-5 text-center shadow-[0_24px_60px_rgba(0,0,0,0.55)] backdrop-blur-md">
-                            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-[#2563eb] via-[#4f46e5] to-[#22d3ee] p-[1px]">
-                              <div className="flex h-full w-full items-center justify-center rounded-full bg-[#0b0b0b]/80 text-white">
-                                <AppIcon name="cog" spin className="text-[16px]" />
-                              </div>
-                            </div>
-                            <div className="mt-3 text-sm font-semibold text-slate-100">{activeJobLabel}</div>
-                            <div className="mt-1 text-[11px] text-slate-400">{activeJobStatusMessage}</div>
-                            <div className="mt-4">
-                              <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
-                                <div
-                                  className={cn(
-                                    "h-full rounded-full bg-gradient-to-r from-[#60a5fa] via-[#2563eb] to-[#22d3ee] transition-[width] duration-200",
-                                    activeJobProgress === null && "animate-pulse"
-                                  )}
-                                  style={{
-                                    width: `${Math.max(4, Math.min(100, activeJobProgress ?? 18))}%`
-                                  }}
-                                />
-                              </div>
-                              <div className="mt-2 flex items-center justify-center gap-2 text-[11px] text-slate-300">
-                                <span className="rounded-full bg-white/10 px-2 py-0.5 font-semibold text-slate-100">
-                                  {activeJobProgress !== null ? `${activeJobProgress}%` : "Preparing..."}
-                                </span>
-                                <span className="text-slate-400">AI Generate</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-                      {subtitleEditor || currentSubtitle ? (
-                        <div
-                          ref={subtitleBoxRef}
-                          className={cn(
-                            "absolute z-10 rounded-md bg-black/70 px-3 py-1 shadow",
-                            subtitleEditor
-                              ? "cursor-move border border-white/35 resize overflow-hidden"
-                              : "cursor-move"
-                          )}
-                          style={{
-                            left: `${subtitlePosition.x * 100}%`,
-                            top: `${subtitlePosition.y * 100}%`,
-                            transform: "translate(-50%, -50%)",
-                            width: (subtitleEditSize ?? subtitleBoxSize).width
-                              ? `${(subtitleEditSize ?? subtitleBoxSize).width}px`
-                              : undefined,
-                            height: (subtitleEditSize ?? subtitleBoxSize).height
-                              ? `${(subtitleEditSize ?? subtitleBoxSize).height}px`
-                              : undefined,
-                            maxWidth: `${subtitleMaxWidth}px`,
-                            minWidth: "140px",
-                            minHeight: "36px"
-                          }}
-                          onPointerDown={handleSubtitlePointerDown}
-                          onPointerMove={handleSubtitlePointerMove}
-                          onPointerUp={handleSubtitlePointerUp}
-                          onPointerCancel={handleSubtitlePointerUp}
-                        >
-                          {subtitleEditor ? (
-                            <textarea
-                              className="h-full w-full resize-none bg-transparent text-center text-[13px] font-medium text-white outline-none cursor-text"
-                              style={{ fontSize: `${13 * subtitleScale}px`, lineHeight: "1.2" }}
-                              value={subtitleDraft}
-                              onChange={(e) => setSubtitleDraft(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Escape") {
-                                    e.preventDefault();
-                                    setSubtitleEditor(null);
-                                  } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                                    e.preventDefault();
-                                    void handleSaveSubtitleEdit();
-                                }
-                              }}
-                              onBlur={() => void handleSaveSubtitleEdit()}
-                              autoFocus
-                              aria-label="Edit subtitle"
-                            />
-                          ) : (
-                            <div
-                              className="whitespace-pre-wrap break-words text-[13px] font-medium text-white pointer-events-none text-center"
-                              style={{ fontSize: `${13 * subtitleScale}px` }}
-                            >
-                              {currentSubtitle}
-                            </div>
-                          )}
-                        </div>
-                      ) : null}
-                      <span
-                        ref={subtitleMeasureRef}
-                        className="pointer-events-none absolute -z-10 opacity-0 whitespace-pre-wrap break-words"
-                        style={{
-                          fontSize: `${13 * subtitleScale}px`,
-                          fontWeight: 500,
-                          lineHeight: "1.2",
-                          maxWidth: `${subtitleMaxWidth}px`
-                        }}
-                      />
-                    </div>
-                  </div>
-                  <div className="flex w-full shrink-0 items-center gap-3 px-2 py-1">
-                    <button
-                      className={cn(
-                        "flex h-8 w-8 items-center justify-center rounded-md text-slate-200 transition",
-                        previewDisabled ? "cursor-not-allowed opacity-50" : "hover:bg-white/10"
-                      )}
-                      onClick={togglePlayback}
-                      disabled={previewDisabled}
-                      type="button"
-                    >
-                      <AppIcon name={isMediaPlaying ? "pause" : "play"} className="text-[12px]" />
-                    </button>
-                    <button
-                      className={cn(
-                        "flex h-8 w-12 items-center justify-center rounded-md px-2 text-[11px] font-semibold tabular-nums text-slate-200 transition",
-                        previewDisabled ? "cursor-not-allowed opacity-50" : "hover:bg-white/10"
-                      )}
-                      onClick={cyclePlaybackRate}
-                      disabled={previewDisabled}
-                      type="button"
-                      aria-label="Playback speed"
-                      title="Playback speed"
-                    >
-                      {`${playbackRate}X`}
-                    </button>
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <span className="text-[11px] text-slate-400 tabular-nums">{formatTime(playback.currentTime)}</span>
-                      <div className="relative flex-1">
-                        <div className="h-1 rounded-full bg-[#2a2a30]">
-                          <div className="h-full rounded-full bg-primary" style={{ width: `${playheadPct}%` }} />
-                        </div>
-                        <input
-                          type="range"
-                          min={0}
-                          max={Math.max(0, duration)}
-                          value={Math.min(playback.currentTime, duration || 0)}
-                          onChange={(event) => handleScrub(Number(event.target.value))}
-                          onPointerDown={startPlayerScrub}
-                          onPointerUp={endPlayerScrub}
-                          onPointerCancel={endPlayerScrub}
-                          onPointerLeave={endPlayerScrub}
-                          className="absolute inset-0 h-4 w-full cursor-pointer opacity-0"
-                          disabled={previewDisabled}
-                        />
-                      </div>
-                      <span className="text-[11px] text-slate-400 tabular-nums">{formatTime(duration)}</span>
-                    </div>
-                    <button
-                      className="flex h-8 w-8 items-center justify-center rounded-md text-slate-200 transition hover:bg-white/10"
-                      onClick={toggleFullscreen}
-                      type="button"
-                      aria-label="Fullscreen"
-                    >
-                      <AppIcon name="expand" className="text-[12px]" />
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+            {isPlayerModalOpen ? null : renderPlayerPanel(false)}
           </section>
 
           {/* Right */}
@@ -3769,7 +3933,7 @@ export function App() {
                 <div className="flex items-center gap-1">
                   <button
                     className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[12px] font-bold text-slate-200 transition hover:bg-white/10"
-                    onClick={() => setSubtitleScale((v) => Math.max(0.8, Number((v - 0.1).toFixed(2))))}
+                    onClick={() => setSubtitleScale((v) => Math.max(0.8, Number((v - 0.15).toFixed(2))))}
                     type="button"
                     aria-label="Decrease subtitle size"
                     title="Decrease subtitle size"
@@ -3778,7 +3942,7 @@ export function App() {
                   </button>
                   <button
                     className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[12px] font-bold text-slate-200 transition hover:bg-white/10"
-                    onClick={() => setSubtitleScale((v) => Math.min(1.6, Number((v + 0.1).toFixed(2))))}
+                    onClick={() => setSubtitleScale((v) => Math.min(2.4, Number((v + 0.15).toFixed(2))))}
                     type="button"
                     aria-label="Increase subtitle size"
                     title="Increase subtitle size"
@@ -3980,6 +4144,69 @@ export function App() {
         </>
       ) : null}
 
+      {isPlayerModalOpen ? (
+        <div className="fixed inset-0 z-[140] flex flex-col bg-[#0b0b0b]">
+          <div className="flex items-center justify-between border-b border-slate-800/60 px-4 py-3">
+            <div className="text-xs font-semibold text-slate-200">Player Focus</div>
+            <button
+              className="pywebview-no-drag inline-flex h-7 items-center gap-1.5 rounded-md border border-slate-700 bg-[#151515] px-2 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500"
+              onClick={() => setIsPlayerModalOpen(false)}
+              type="button"
+            >
+              <AppIcon name="times" className="text-[10px]" />
+              Close
+            </button>
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+            <div className="flex min-h-0 flex-1">{renderPlayerPanel(true)}</div>
+            <aside className="flex min-h-0 w-full flex-col border-t border-slate-800/60 bg-[#0b0b0b] lg:w-[380px] lg:border-l lg:border-t-0">
+              <div className="flex items-center justify-between px-4 py-3 text-xs font-semibold text-slate-200">
+                <span>Caption</span>
+                {segments.length > 0 ? (
+                  <button
+                    className={cn(
+                      "pywebview-no-drag inline-flex items-center gap-2 text-[10px] font-medium transition",
+                      isTranscriptEdit ? "text-slate-200" : "text-slate-500"
+                    )}
+                    onClick={() => setIsTranscriptEdit((prev) => !prev)}
+                    type="button"
+                  >
+                    <AppIcon name="edit" className="text-[11px]" />
+                    Edit
+                    <span
+                      className={cn(
+                        "relative inline-flex h-4 w-7 items-center rounded-full border transition",
+                        isTranscriptEdit ? "border-slate-500 bg-[#1b1b22]" : "border-slate-700 bg-[#151515]"
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "absolute h-3 w-3 rounded-full bg-white transition",
+                          isTranscriptEdit ? "translate-x-3" : "translate-x-1"
+                        )}
+                      />
+                    </span>
+                  </button>
+                ) : null}
+              </div>
+              <div className="min-h-0 flex-1 px-3 py-3">
+                <div className="flex h-full min-h-0 flex-col gap-3">
+                  {showCaptionSetup ? captionSetupPanel : null}
+                  <div className="min-h-0 flex-1">
+                    <TranscriptPanel
+                      mediaRef={transcriptMediaRef}
+                      notify={notify}
+                      editEnabled={isTranscriptEdit}
+                      suppressEmptyState={showCaptionSetup}
+                    />
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      ) : null}
+
       {captionMenu && captionMenuPosition ? (
         <div
           className="fixed inset-0 z-[125]"
@@ -4071,14 +4298,14 @@ export function App() {
                 <div>
                   <div className="text-sm font-semibold text-slate-100">Export</div>
                   <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-                    Choose a format to export.
+                    Choose a format to export your captions.
                   </p>
                 </div>
               </div>
-              <div className="mt-4 space-y-2">
+              <div className="mt-4 space-y-3">
                 <button
                   className={cn(
-                    "w-full rounded-md border border-slate-700 bg-[#151515] px-3 py-2 text-left text-[11px] font-semibold text-slate-200 transition",
+                    "group w-full rounded-xl border border-slate-700 bg-[#151515] px-4 py-3 text-left transition",
                     canExportCaptions ? "hover:border-slate-500" : "cursor-not-allowed opacity-50"
                   )}
                   onClick={() => {
@@ -4089,11 +4316,21 @@ export function App() {
                   disabled={!canExportCaptions}
                   type="button"
                 >
-                  Export SRT
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-600/60 bg-black/40 text-[11px] font-bold text-slate-200">
+                      SRT
+                    </div>
+                    <div>
+                      <div className="text-[12px] font-semibold text-slate-100">Standard SRT</div>
+                      <p className="mt-1 text-[11px] text-slate-400">
+                        Best for video editors and media players.
+                      </p>
+                    </div>
+                  </div>
                 </button>
                 <button
                   className={cn(
-                    "w-full rounded-md border border-slate-700 bg-[#151515] px-3 py-2 text-left text-[11px] font-semibold text-slate-200 transition",
+                    "group w-full rounded-xl border border-slate-700 bg-[#151515] px-4 py-3 text-left transition",
                     canExportCaptions ? "hover:border-slate-500" : "cursor-not-allowed opacity-50"
                   )}
                   onClick={() => {
@@ -4104,22 +4341,17 @@ export function App() {
                   disabled={!canExportCaptions}
                   type="button"
                 >
-                  Export Text
-                </button>
-                <button
-                  className={cn(
-                    "w-full rounded-md border border-slate-700 bg-[#151515] px-3 py-2 text-left text-[11px] font-semibold text-slate-200 transition",
-                    canExportVideo ? "hover:border-slate-500" : "cursor-not-allowed opacity-50"
-                  )}
-                  onClick={() => {
-                    if (!canExportVideo) return;
-                    setShowExportModal(false);
-                    void handleExportVideo();
-                  }}
-                  disabled={!canExportVideo}
-                  type="button"
-                >
-                  Export Video
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-600/60 bg-black/40 text-[11px] font-bold text-slate-200">
+                      TXT
+                    </div>
+                    <div>
+                      <div className="text-[12px] font-semibold text-slate-100">Plain Text</div>
+                      <p className="mt-1 text-[11px] text-slate-400">
+                        A clean transcript without timestamps.
+                      </p>
+                    </div>
+                  </div>
                 </button>
               </div>
               <div className="mt-5 flex items-center justify-end gap-2">
