@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { JetBrains_Mono, Manrope, Space_Grotesk } from "next/font/google";
 import "./globals.css";
-import SiteFooter from "./_components/SiteFooter";
-import SiteHeader from "./_components/SiteHeader";
 
 const manrope = Manrope({
   subsets: ["latin"],
@@ -30,19 +28,13 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
+    <html lang="zh-Hant">
       <body
         className={`${manrope.variable} ${spaceGrotesk.variable} ${jetBrainsMono.variable}`}
       >
-        <div className="min-h-screen">
-          <SiteHeader />
-          <main className="pb-24">{children}</main>
-          <SiteFooter />
-        </div>
+        {children}
       </body>
     </html>
   );

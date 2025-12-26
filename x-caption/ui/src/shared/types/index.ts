@@ -1,6 +1,6 @@
 export type AppTab = "media" | "captions" | "history";
 
-export type JobStatus = "queued" | "processing" | "completed" | "failed" | "cancelled";
+export type JobStatus = "queued" | "processing" | "completed" | "failed" | "cancelled" | "imported";
 
 export type ExportLanguage = "simplified" | "traditional";
 
@@ -10,6 +10,8 @@ export type AudioFileInfo = {
   path: string | null;
   wasTranscoded?: boolean;
   originalPath?: string | null;
+  hash?: string | null;
+  mtime?: number | null;
 };
 
 export type TranscriptSegment = {
@@ -37,6 +39,7 @@ export type TranscriptResult = {
 export type Job = {
   id: string;
   filename: string;
+  displayName?: string;
   status: JobStatus;
   message: string;
   progress: number | null;
@@ -56,6 +59,10 @@ export type Job = {
   lastSyncedAt?: number;
   streamingSegments?: TranscriptSegment[];
   expectedSegments?: number;
+  mediaHash?: string | null;
+  mediaSize?: number | null;
+  mediaMtime?: number | null;
+  mediaInvalid?: boolean;
 };
 
 export type HistoryEntry = {
@@ -72,14 +79,21 @@ export type HistoryEntry = {
   summary?: string;
   progress?: number;
   original_filename?: string;
+  display_name?: string;
   media_path?: string;
   media_kind?: string;
+  media_hash?: string;
+  media_size?: number;
+  media_mtime?: number;
+  media_invalid?: boolean;
   ui_state?: any;
   audio_file?: {
     name?: string;
     size?: number;
     path?: string;
     original_path?: string;
+    hash?: string;
+    mtime?: number;
   };
   result_preview?: TranscriptResult | null;
 };
@@ -131,6 +145,9 @@ export type TranscribeResponse = {
   message?: string;
   filename?: string;
   websocket_channel?: string;
+  media_hash?: string | null;
+  media_size?: number | null;
+  media_mtime?: number | null;
   audio_file?: {
     name?: string;
     path?: string;

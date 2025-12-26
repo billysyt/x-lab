@@ -720,8 +720,12 @@ def create_app():
             record = {"job_id": job_id}
             for key in [
                 "filename",
+                "display_name",
                 "media_path",
                 "media_kind",
+                "media_hash",
+                "media_size",
+                "media_mtime",
                 "status",
                 "language",
                 "device",
@@ -1414,6 +1418,7 @@ def create_app():
             # Get parameters
             model = request.form.get('model', 'whisper')
             language = request.form.get('language', 'auto')
+            display_name = request.form.get('display_name')
             device = request.form.get('device', 'auto') or 'auto'
             compute_type = request.form.get('compute_type', None)
             vad_filter = request.form.get('vad_filter', 'True').lower() == 'true'
@@ -1455,12 +1460,23 @@ def create_app():
                 ext = Path(filename).suffix.lower().lstrip(".")
                 media_kind = "video" if ext in _VIDEO_EXTENSIONS else "audio"
 
+            media_size = None
+            media_mtime = None
+            media_hash = None
+            if input_path:
+                media_size, media_mtime = native_history.get_file_meta(input_path)
+                media_hash = native_history.compute_file_hash(input_path)
+
             try:
                 native_history.upsert_job_record({
                     "job_id": job_id,
                     "filename": filename,
+                    "display_name": display_name,
                     "media_path": input_path,
                     "media_kind": media_kind,
+                    "media_hash": media_hash,
+                    "media_size": media_size,
+                    "media_mtime": media_mtime,
                     "status": "processing",
                     "language": language,
                     "device": device,
@@ -1533,6 +1549,9 @@ def create_app():
                 "message": "Job submitted successfully",
                 "filename": filename,
                 "websocket_channel": f"job:{job_id}",
+                "media_hash": media_hash,
+                "media_size": media_size,
+                "media_mtime": media_mtime,
                 "audio_file": {
                     "name": filename,
                     "path": input_path,

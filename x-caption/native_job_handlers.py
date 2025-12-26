@@ -464,9 +464,14 @@ def process_transcription_job(
                 pass
 
         try:
+            existing_record = native_history.get_job_record(job_id)
+            display_name = existing_record.get("display_name") if existing_record else None
+            if not display_name:
+                display_name = Path(media_path or file_path).stem
             native_history.upsert_job_record({
                 "job_id": job_id,
                 "filename": Path(media_path or file_path).name,
+                "display_name": display_name,
                 "media_path": media_path or file_path,
                 "media_kind": media_kind,
                 "status": "completed",

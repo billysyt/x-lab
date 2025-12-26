@@ -69,6 +69,7 @@ export async function apiTranscribeAudio(args: {
   file?: File;
   filePath?: string | null;
   filename?: string | null;
+  displayName?: string | null;
   mediaKind?: "audio" | "video" | null;
   model: string;
   language: string;
@@ -89,6 +90,9 @@ export async function apiTranscribeAudio(args: {
   if (args.mediaKind) {
     formData.append("media_kind", args.mediaKind);
   }
+  if (args.displayName) {
+    formData.append("display_name", args.displayName);
+  }
   formData.append("model", args.model || "whisper");
   formData.append("language", args.language);
   formData.append("device", "auto");
@@ -105,8 +109,12 @@ export async function apiTranscribeAudio(args: {
 export async function apiUpsertJobRecord(payload: {
   job_id: string;
   filename?: string | null;
+  display_name?: string | null;
   media_path?: string | null;
   media_kind?: string | null;
+  media_hash?: string | null;
+  media_size?: number | null;
+  media_mtime?: number | null;
   status?: string | null;
   language?: string | null;
   device?: string | null;

@@ -120,7 +120,13 @@ export function HistoryTab(props: { notify: (message: string, type?: ToastType) 
               Math.min(100, stageProgress !== null ? stageProgress : job.status === "completed" ? 100 : 0)
             );
             const isSelected = selectedJobId === job.id;
-            const subtitle = job.error ? `Error: ${job.error}` : job.message || "Processing...";
+            const subtitle = job.mediaInvalid
+              ? "Media file changed or missing"
+              : job.error
+                ? `Error: ${job.error}`
+                : job.status === "imported"
+                  ? "Ready to transcribe"
+                  : job.message || (job.status === "completed" ? "Completed" : "Processing...");
             const showProgressBar = job.status === "processing" || job.status === "queued";
 
             const statusLabel = (() => {
@@ -129,6 +135,8 @@ export function HistoryTab(props: { notify: (message: string, type?: ToastType) 
                   return "Queued";
                 case "processing":
                   return "Processing";
+                case "imported":
+                  return "Imported";
                 case "completed":
                   return "Done";
                 case "failed":
@@ -150,6 +158,8 @@ export function HistoryTab(props: { notify: (message: string, type?: ToastType) 
                     ? "bg-warning"
                     : job.status === "processing"
                       ? "bg-primary"
+                      : job.status === "imported"
+                        ? "bg-text-secondary"
                       : "bg-text-secondary"
             );
 
@@ -163,6 +173,8 @@ export function HistoryTab(props: { notify: (message: string, type?: ToastType) 
                     ? "text-warning"
                     : job.status === "processing"
                       ? "text-primary"
+                      : job.status === "imported"
+                        ? "text-text-secondary"
                       : "text-text-secondary"
             );
 
@@ -184,8 +196,11 @@ export function HistoryTab(props: { notify: (message: string, type?: ToastType) 
                 }}
               >
                 <div className="flex items-center gap-2">
-                  <div className="min-w-0 flex-1 truncate text-sm font-semibold text-text-primary" title={job.filename}>
-                    {job.filename}
+                  <div
+                    className="min-w-0 flex-1 truncate text-sm font-semibold text-text-primary"
+                    title={job.displayName ?? job.filename}
+                  >
+                    {job.displayName ?? job.filename}
                   </div>
 
                   <span className={statusBadge} title={statusLabel}>

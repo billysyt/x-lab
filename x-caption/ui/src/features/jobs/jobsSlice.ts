@@ -7,7 +7,13 @@ import {
   apiTranscribeAudio
 } from "../../shared/api/sttApi";
 import type { Job, PollUpdate, TranscriptResult, TranscriptSegment } from "../../shared/types";
-import { convertHistoryEntry, deriveFilenameFromResult, normalizeJobStatus, sanitizeProgressValue } from "../../shared/lib/utils";
+import {
+  convertHistoryEntry,
+  deriveFilenameFromResult,
+  normalizeJobStatus,
+  sanitizeProgressValue,
+  stripFileExtension
+} from "../../shared/lib/utils";
 import type { RootState } from "../../app/store";
 
 type JobsState = {
@@ -28,6 +34,27 @@ const initialState: JobsState = {
 
 function sortOrder(jobsById: Record<string, Job>): string[] {
   return Object.keys(jobsById).sort((a, b) => (jobsById[b]?.startTime ?? 0) - (jobsById[a]?.startTime ?? 0));
+}
+
+function moveIdToFront(order: string[], jobId: string) {
+  const existingIndex = order.indexOf(jobId);
+  if (existingIndex >= 0) {
+    order.splice(existingIndex, 1);
+  }
+  order.unshift(jobId);
+}
+
+function ensureIdInOrder(order: string[], jobId: string) {
+  if (!order.includes(jobId)) {
+    order.unshift(jobId);
+  }
+}
+
+function removeIdFromOrder(order: string[], jobId: string) {
+  const index = order.indexOf(jobId);
+  if (index >= 0) {
+    order.splice(index, 1);
+  }
 }
 
 export const bootstrapJobs = createAsyncThunk<
@@ -104,6 +131,7 @@ export const startTranscription = createAsyncThunk<
     file?: File;
     filePath?: string | null;
     filename: string;
+    displayName?: string | null;
     mediaKind?: "audio" | "video";
     language: string;
     model: string;
@@ -114,11 +142,23 @@ export const startTranscription = createAsyncThunk<
   { state: RootState }
 >(
   "jobs/startTranscription",
-  async ({ file, filePath, filename, mediaKind, language, model, noiseSuppression, chineseStyle, chineseScript }) => {
+  async ({
+    file,
+    filePath,
+    filename,
+    displayName,
+    mediaKind,
+    language,
+    model,
+    noiseSuppression,
+    chineseStyle,
+    chineseScript
+  }) => {
     const result = await apiTranscribeAudio({
       file,
       filePath,
       filename,
+      displayName,
       mediaKind,
       model,
       language,
@@ -127,28 +167,44 @@ export const startTranscription = createAsyncThunk<
       chineseScript
     });
 
+    const mediaHash = result.media_hash ?? null;
+    const mediaSize = typeof result.media_size === "number"
+      ? result.media_size
+      : (typeof result.audio_file?.size === "number" ? result.audio_file.size : null);
+    const mediaMtime = typeof result.media_mtime === "number" ? result.media_mtime : null;
+
     const audioFile = result.audio_file
       ? {
           name: result.audio_file.name || filename,
-          size: typeof result.audio_file.size === "number" ? result.audio_file.size : null,
+          size: mediaSize,
           path: result.audio_file.path ?? null,
-          wasTranscoded: Boolean(result.audio_file.was_transcoded)
+          wasTranscoded: Boolean(result.audio_file.was_transcoded),
+          hash: mediaHash,
+          mtime: mediaMtime
         }
       : {
           name: filename,
-          size: null,
+          size: mediaSize,
           path: null,
-          wasTranscoded: false
+          wasTranscoded: false,
+          hash: mediaHash,
+          mtime: mediaMtime
         };
 
+    const jobDisplayName = displayName || stripFileExtension(filename) || filename;
     const job: Job = {
       id: result.job_id,
       filename,
+      displayName: jobDisplayName,
       status: "queued",
       progress: 0,
       startTime: Date.now(),
       message: result.message || "Job submitted successfully",
       audioFile,
+      mediaHash,
+      mediaSize,
+      mediaMtime,
+      mediaInvalid: false,
       result: null,
       partialResult: null,
       error: null,
@@ -222,9 +278,23 @@ const slice = createSlice({
   initialState,
   reducers: {
     addJob(state, action: PayloadAction<Job>) {
-      state.jobsById[action.payload.id] = action.payload;
-      state.order = sortOrder(state.jobsById);
+      const nextJob = {
+        ...action.payload,
+        displayName:
+          action.payload.displayName ??
+          (stripFileExtension(action.payload.filename) || action.payload.filename)
+      };
+      state.jobsById[action.payload.id] = nextJob;
+      moveIdToFront(state.order, action.payload.id);
       state.selectedJobId = action.payload.id;
+    },
+    updateJobDisplayName(state, action: PayloadAction<{ jobId: string; displayName: string }>) {
+      const job = state.jobsById[action.payload.jobId];
+      if (!job) return;
+      job.displayName = action.payload.displayName;
+    },
+    setJobOrder(state, action: PayloadAction<string[]>) {
+      state.order = action.payload.filter((id) => Boolean(state.jobsById[id]));
     },
     selectJob(state, action: PayloadAction<string | null>) {
       state.selectedJobId = action.payload;
@@ -237,11 +307,12 @@ const slice = createSlice({
     applyJobUpdate(state, action: PayloadAction<ApplyUpdatePayload>) {
       const { jobId, data } = action.payload;
       const merged = mergeUpdatePayload(data);
-
-      if (!state.jobsById[jobId]) {
+      const isNewJob = !state.jobsById[jobId];
+      if (isNewJob) {
         state.jobsById[jobId] = {
           id: jobId,
           filename: "Unknown file",
+          displayName: "Unknown file",
           status: "queued",
           progress: 0,
           startTime: Date.now() - 15 * 60 * 1000,
@@ -255,6 +326,9 @@ const slice = createSlice({
       }
 
       const job = state.jobsById[jobId];
+      if (isNewJob) {
+        ensureIdInOrder(state.order, jobId);
+      }
 
       const normalizedStatus = merged.status ? normalizeJobStatus(merged.status) : undefined;
 
@@ -263,12 +337,21 @@ const slice = createSlice({
       }
 
       const incomingAudioMeta = merged.audio_file || (merged.meta && merged.meta.audio_file);
+      const existingAudio = job.audioFile ?? undefined;
+      const existingHash = job.mediaHash ?? existingAudio?.hash ?? null;
+      const existingMtime = job.mediaMtime ?? existingAudio?.mtime ?? null;
+      const existingSize = job.mediaSize ?? existingAudio?.size ?? null;
       if (incomingAudioMeta) {
         job.audioFile = {
           name: incomingAudioMeta.name || job.filename || job.id,
           size: typeof incomingAudioMeta.size === "number" ? incomingAudioMeta.size : null,
-          path: incomingAudioMeta.path || null
+          path: incomingAudioMeta.path || null,
+          hash: existingHash,
+          mtime: existingMtime
         };
+        job.mediaHash = existingHash;
+        job.mediaMtime = existingMtime;
+        job.mediaSize = typeof incomingAudioMeta.size === "number" ? incomingAudioMeta.size : existingSize;
       }
 
       if (normalizedStatus) {
@@ -294,6 +377,9 @@ const slice = createSlice({
 
       if (merged.original_filename && typeof merged.original_filename === "string") {
         job.filename = merged.original_filename;
+        if (!job.displayName) {
+          job.displayName = stripFileExtension(merged.original_filename) || merged.original_filename;
+        }
       }
 
       if (merged.segment || merged.type === "streaming_segment") {
@@ -323,7 +409,6 @@ const slice = createSlice({
       }
 
       job.lastSyncedAt = Date.now();
-      state.order = sortOrder(state.jobsById);
     },
     updateSegmentText(state, action: PayloadAction<{ jobId: string; segmentId: number; newText: string }>) {
       const job = state.jobsById[action.payload.jobId];
@@ -424,7 +509,24 @@ const slice = createSlice({
       job.partialResult = null;
       job.streamingSegments = action.payload.segments;
       job.lastSyncedAt = Date.now();
-      state.order = sortOrder(state.jobsById);
+    },
+    moveJobOrder(
+      state,
+      action: PayloadAction<{ jobId: string; targetJobId: string; position?: "before" | "after" }>
+    ) {
+      const { jobId, targetJobId, position } = action.payload;
+      if (jobId === targetJobId) return;
+      const fromIndex = state.order.indexOf(jobId);
+      let toIndex = state.order.indexOf(targetJobId);
+      if (fromIndex < 0 || toIndex < 0) return;
+      if (position === "after") {
+        toIndex += 1;
+      }
+      state.order.splice(fromIndex, 1);
+      if (fromIndex < toIndex) {
+        toIndex -= 1;
+      }
+      state.order.splice(toIndex, 0, jobId);
     }
   },
   extraReducers(builder) {
@@ -467,15 +569,27 @@ const slice = createSlice({
 
         if (meta.original_filename && typeof meta.original_filename === "string") {
           job.filename = meta.original_filename;
+          if (!job.displayName) {
+            job.displayName = stripFileExtension(meta.original_filename) || meta.original_filename;
+          }
         }
 
         const audioFileMeta = meta.audio_file as any;
         if (audioFileMeta) {
+          const existingAudio = job.audioFile ?? undefined;
+          const existingHash = job.mediaHash ?? existingAudio?.hash ?? null;
+          const existingMtime = job.mediaMtime ?? existingAudio?.mtime ?? null;
+          const existingSize = job.mediaSize ?? existingAudio?.size ?? null;
           job.audioFile = {
             name: audioFileMeta.name || job.filename || job.id,
             size: typeof audioFileMeta.size === "number" ? audioFileMeta.size : null,
-            path: audioFileMeta.path || null
+            path: audioFileMeta.path || null,
+            hash: existingHash,
+            mtime: existingMtime
           };
+          job.mediaHash = existingHash;
+          job.mediaMtime = existingMtime;
+          job.mediaSize = typeof audioFileMeta.size === "number" ? audioFileMeta.size : existingSize;
         }
 
         if (action.payload.result) {
@@ -512,11 +626,11 @@ const slice = createSlice({
         if (state.selectedJobId === action.payload.jobId) {
           state.selectedJobId = null;
         }
-        state.order = sortOrder(state.jobsById);
+        removeIdFromOrder(state.order, action.payload.jobId);
       })
       .addCase(startTranscription.fulfilled, (state, action) => {
         state.jobsById[action.payload.job.id] = action.payload.job;
-        state.order = sortOrder(state.jobsById);
+        moveIdToFront(state.order, action.payload.job.id);
         state.selectedJobId = action.payload.job.id;
       });
   }
@@ -527,8 +641,11 @@ export const {
   applyJobUpdate,
   addSegment,
   clearAllJobs,
+  updateJobDisplayName,
   selectJob,
   setJobSegments,
+  setJobOrder,
+  moveJobOrder,
   updateSegmentText,
   updateSegmentTiming,
   removeSegment

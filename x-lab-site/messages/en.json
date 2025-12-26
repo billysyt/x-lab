@@ -1,0 +1,108 @@
+{
+  "nav": {
+    "products": "Products",
+    "pricing": "Pricing",
+    "contact": "Contact Us",
+    "download": "Download",
+    "suite": "On-prem AI suite",
+    "localeZh": "Traditional Chinese",
+    "localeEn": "English"
+  },
+  "signal": "AI Signal",
+  "hero": {
+    "title": "Space-grade privacy for AI workflows.",
+    "subtitle": "Captions. Meeting minutes. Code access. All on-prem.",
+    "primary": "Download free",
+    "secondary": "View pricing"
+  },
+  "products": {
+    "label": "Products",
+    "title": "Designed for local AI teams.",
+    "captionDesc": "Cantonese captions with Traditional Chinese output, speaker-aware transcripts, and SRT export.",
+    "minutesDesc": "Meeting minutes with speaker ID, clean transcripts, and AI summaries.",
+    "codeDesc": "Low-cost Claude Code or Codex access with team controls and audit-ready usage."
+  },
+  "pricing": {
+    "label": "Pricing",
+    "freeTag": "Limited",
+    "freeTitle": "Free",
+    "freeDesc": "Limited access to X-Caption and X-Minutes.",
+    "freeFeatures": [
+      "+ Limited exports",
+      "+ Cantonese accuracy + Traditional Chinese captions",
+      "+ Speaker or writing format outputs"
+    ],
+    "premiumTag": "Premium",
+    "premiumPrice": "HKD 99",
+    "premiumDesc": "All-in-one plan. Buy me a dinner.",
+    "premiumFeatures": [
+      "+ X-Caption + X-Minutes + X-Code",
+      "+ Claude Code + Codex options",
+      "+ Team controls and usage budgets",
+      "+ Early whitelist promotion included"
+    ],
+    "enterpriseTag": "Enterprise",
+    "enterpriseTitle": "Let's talk",
+    "enterpriseDesc": "Custom security reviews and dedicated deployment support.",
+    "enterpriseFeatures": [
+      "+ SSO, RBAC, audit logs",
+      "+ On-prem architecture review",
+      "+ Dedicated onboarding"
+    ],
+    "enterpriseCta": "Contact sales"
+  },
+  "contact": {
+    "label": "Contact",
+    "title": "Talk to X-Lab about on-prem AI.",
+    "desc": "Security review, deployment planning, and premium access.",
+    "cta": "Contact us"
+  },
+  "footer": {
+    "products": "Products",
+    "company": "Company",
+    "deployment": "Deployment",
+    "why": "Why X-Lab",
+    "pricing": "Pricing",
+    "contact": "Contact",
+    "onPrem": "On-prem",
+    "enterprise": "Enterprise",
+    "security": "Security review",
+    "copyright": "Copyright 2025 X-Lab. All rights reserved.",
+    "privacy": "On-prem and privacy-first.",
+    "tagline": "Local-first AI for captions, meetings, and secure on-prem workflows."
+  },
+  "contactPage": {
+    "label": "Contact",
+    "title": "Talk to X-Lab.",
+    "desc": "Enterprise inquiries, on-prem deployments, and security review coordination.",
+    "detailsLabel": "Engagement desk",
+    "detailsTitle": "Enterprise contact",
+    "detailsDesc": "We support procurement, security, and deployment planning for teams in Hong Kong and abroad.",
+    "emailLabel": "Primary channel",
+    "emailTitle": "hello@x-lab.ai",
+    "emailDesc": "Enterprise response within 1 business day.",
+    "languageLabel": "Languages",
+    "languageTitle": "English & Traditional Chinese",
+    "languageDesc": "Bilingual account leads and technical documentation.",
+    "officeLabel": "Office",
+    "officeTitle": "Central District, Hong Kong SAR",
+    "officeDesc": "Visits by appointment for on-prem demos and solution workshops.",
+    "hoursLabel": "Business hours",
+    "hoursTitle": "Mon–Fri, 09:30–18:30 HKT (UTC+8)",
+    "hoursDesc": "After-hours escalation available for active engagements.",
+    "securityLabel": "Security & compliance",
+    "securityTitle": "NDA, DPA, and security review support",
+    "securityDesc": "Provide vendor questionnaires, data flow diagrams, and deployment architecture.",
+    "mapTag": "Location",
+    "mapTitle": "Central, Hong Kong SAR",
+    "mapDesc": "Enterprise visits by appointment. On-prem demos available.",
+    "mapCity": "Hong Kong SAR",
+    "mapDistrict": "Central District",
+    "mapAlt": "Stylized map of Hong Kong"
+  },
+  "menu": {
+    "captionDesc": "Cantonese captions + SRT",
+    "minutesDesc": "Meeting minutes + AI summary",
+    "codeDesc": "Claude Code / Codex"
+  }
+}

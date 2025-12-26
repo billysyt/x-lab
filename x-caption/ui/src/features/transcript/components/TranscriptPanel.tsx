@@ -32,6 +32,9 @@ function deriveStatusView(job: Job) {
   } else if (job.status === "processing") {
     statusIcon = { name: "cog", spin: true };
     statusMessage = job.message || "Processing audio file...";
+  } else if (job.status === "imported") {
+    statusIcon = { name: "folderOpen" };
+    statusMessage = "Media imported. Run AI Generate to create captions.";
   } else if (job.status === "failed") {
     statusIcon = { name: "exclamationTriangle" };
     statusMessage = `Job failed: ${job.error || "Unknown error"}`;
@@ -366,6 +369,7 @@ const TranscriptSegmentRow = (function () {
     const [isSaving, setIsSaving] = useState(false);
     const autosaveRef = useRef<number | null>(null);
     const lastSavedRef = useRef(props.segment.originalText ?? props.segment.text);
+    const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
     useEffect(() => {
       if (!isEditing) {
@@ -422,12 +426,17 @@ const TranscriptSegmentRow = (function () {
       };
     }, [draft, isEditing, props.editEnabled, saveEdit]);
 
+    useEffect(() => {
+      if (!isEditing) return;
+      const el = textareaRef.current;
+      if (!el) return;
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    }, [draft, isEditing]);
+
     return (
       <div
-        className={cn(
-          props.segmentClass,
-          isEditing && "cursor-default bg-[#14161b] border border-white/20 rounded-lg"
-        )}
+        className={cn(props.segmentClass, isEditing && "cursor-default")}
         data-start={props.segment.start}
         data-end={props.segment.end}
         data-segment-id={props.segment.id}
@@ -456,9 +465,11 @@ const TranscriptSegmentRow = (function () {
           {isEditing ? (
             <textarea
               className={cn(
-                "w-full min-h-[4rem] max-h-[14rem] resize-y rounded-lg border border-slate-600/60 bg-[#0f1115] px-2.5 py-2 text-[13px] leading-[1.5] text-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]",
-                "focus:border-white/60 focus:outline-none focus:ring-2 focus:ring-white/20"
+                "w-full overflow-hidden rounded-lg border-0 bg-transparent px-0 py-0 text-[13px] leading-[1.45] text-text-primary",
+                "focus:outline-none focus:ring-0"
               )}
+              ref={textareaRef}
+              rows={1}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
@@ -566,6 +577,10 @@ export function TranscriptPanel(props: {
             <div className={emptyStateClass}>No transcript yet. Use Open in the header to add a file.</div>
           )}
         </div>
+      ) : job.status === "imported" ? (
+        <div className={transcriptContainerClass} id="transcriptContent">
+          <div className={emptyStateClass}>Media imported. Run AI Generate to create captions.</div>
+        </div>
       ) : job.status === "completed" && jobNeedsServerResult(job) ? (
         <div className={transcriptContainerClass} id="transcriptContent">
           <div className={emptyStateClass}>Loading transcript…</div>
@@ -600,7 +615,9 @@ export function TranscriptPanel(props: {
                 spin={Boolean(statusView.statusIcon.spin)}
                 className="mb-2 text-2xl opacity-60"
               />
-              <p className="text-sm font-semibold text-text-primary">{job.filename || "Processing job"}</p>
+              <p className="text-sm font-semibold text-text-primary">
+                {(job.displayName ?? job.filename) || "Processing job"}
+              </p>
               <p className="mt-1 text-xs text-text-secondary">{statusView.statusMessage}</p>
               {job.status !== "completed"
                 ? (() => {

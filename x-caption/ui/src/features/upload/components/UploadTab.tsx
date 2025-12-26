@@ -10,11 +10,22 @@ import {
   type ForwardedRef,
   type SetStateAction
 } from "react";
+import {
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent
+} from "@dnd-kit/core";
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useAppDispatch, useAppSelector } from "../../../app/hooks";
-import { removeJob, startTranscription } from "../../jobs/jobsSlice";
+import { removeJob, setJobOrder, startTranscription, updateJobDisplayName } from "../../jobs/jobsSlice";
 import type { ToastType } from "../../../shared/components/ToastHost";
+import { apiRemoveJob, apiUpsertJobRecord } from "../../../shared/api/sttApi";
 import { AppIcon } from "../../../shared/components/AppIcon";
 import { cn } from "../../../shared/lib/cn";
+import { stripFileExtension } from "../../../shared/lib/utils";
 
 export type UploadTabHandle = {
   submitTranscription: () => Promise<void>;
@@ -25,6 +36,7 @@ export type UploadTabHandle = {
 export type MediaItem = {
   id: string;
   name: string;
+  displayName?: string;
   kind: "video" | "audio" | "caption" | "other";
   source: "job" | "local";
   jobId?: string;
@@ -34,6 +46,7 @@ export type MediaItem = {
   thumbnailUrl?: string | null;
   createdAt?: number;
   durationSec?: number | null;
+  invalid?: boolean;
 };
 
 type UploadTabProps = {
@@ -60,6 +73,19 @@ function getKind(filename?: string | null) {
   return "other";
 }
 
+function hashStableId(value: string) {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+}
+
+function buildImportedJobId(path: string, size?: number | null) {
+  return `media-${hashStableId(`${path}::${size ?? ""}`)}`;
+}
+
 export const UploadTab = forwardRef(function UploadTab(
   props: UploadTabProps,
   ref: ForwardedRef<UploadTabHandle>
@@ -72,13 +98,13 @@ export const UploadTab = forwardRef(function UploadTab(
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [isDragOver, setIsDragOver] = useState(false);
   const [sortMode, setSortMode] = useState<"recent" | "name">("recent");
   const [filterMode, setFilterMode] = useState<"all" | "video" | "audio">("all");
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const sortMenuRef = useRef<HTMLDivElement | null>(null);
   const filterMenuRef = useRef<HTMLDivElement | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
 
   const [localMediaState, setLocalMediaState] = useState<MediaItem[]>([]);
   const localMedia = props.localMedia ?? localMediaState;
@@ -122,6 +148,9 @@ export const UploadTab = forwardRef(function UploadTab(
         setFilterMenuOpen(false);
       }
       if (contextMenu) {
+        if (contextMenuRef.current && contextMenuRef.current.contains(target)) {
+          return;
+        }
         setContextMenu(null);
       }
     }
@@ -208,6 +237,7 @@ export const UploadTab = forwardRef(function UploadTab(
     return {
       id,
       name: file.name,
+      displayName: stripFileExtension(file.name) || file.name,
       kind: getKind(file.name),
       source: "local",
       file,
@@ -222,11 +252,14 @@ export const UploadTab = forwardRef(function UploadTab(
   function buildLocalPathItem(args: { path: string; name: string; size?: number | null; mime?: string | null }): MediaItem {
     const id = `local-path-${args.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const previewUrl = toFileUrl(args.path);
+    const jobId = buildImportedJobId(args.path, args.size);
     return {
       id,
       name: args.name,
+      displayName: stripFileExtension(args.name) || args.name,
       kind: getKind(args.name),
       source: "local",
+      jobId,
       file: undefined,
       localPath: args.path,
       previewUrl,
@@ -424,14 +457,7 @@ export const UploadTab = forwardRef(function UploadTab(
     if (!picked.length) return;
 
     const items = picked.map(buildLocalItem);
-    setLocalMedia((prev) => {
-      prev.forEach((item) => {
-        if (item.previewUrl) {
-          URL.revokeObjectURL(item.previewUrl);
-        }
-      });
-      return items;
-    });
+    setLocalMedia((prev) => [...items, ...prev]);
     setSelectedId(items[0]?.id ?? null);
     props.onAddToTimeline?.(items);
     const playable = picked.find((file) => getKind(file.name) !== "caption") ?? null;
@@ -478,17 +504,21 @@ export const UploadTab = forwardRef(function UploadTab(
 
   function addLocalPathItem(args: { path: string; name: string; size?: number | null; mime?: string | null }) {
     const item = buildLocalPathItem(args);
-    setLocalMedia((prev) => {
-      prev.forEach((prevItem) => {
-        if (prevItem.previewUrl && prevItem.file) {
-          URL.revokeObjectURL(prevItem.previewUrl);
-        }
-      });
-      return [item];
-    });
+    setLocalMedia((prev) => [item, ...prev]);
     setSelectedId(item.id);
     props.onAddToTimeline?.([item]);
     clearSelectedFile();
+    if (item.jobId && item.localPath) {
+      const displayName = item.displayName ?? (stripFileExtension(args.name) || args.name);
+      void apiUpsertJobRecord({
+        job_id: item.jobId,
+        filename: args.name,
+        display_name: displayName,
+        media_path: item.localPath,
+        media_kind: item.kind,
+        status: "imported"
+      }).catch(() => undefined);
+    }
     if (item.kind === "video" && item.previewUrl) {
       scheduleIdle(() => {
         void (async () => {
@@ -514,28 +544,16 @@ export const UploadTab = forwardRef(function UploadTab(
     if (selectedFile && item.file === selectedFile) {
       clearSelectedFile();
     }
+    if (item.jobId) {
+      void apiRemoveJob(item.jobId).catch(() => undefined);
+    }
   }
 
   const mediaItems = useMemo(() => {
     const jobItems = jobOrder
       .map((id) => buildJobItem(id))
       .filter(Boolean) as MediaItem[];
-    if (!localMedia.length) {
-      return jobItems;
-    }
-    const jobNames = new Set(jobItems.map((item) => item.name.toLowerCase()));
-    const jobPaths = new Set(
-      jobItems
-        .map((item) => item.localPath ?? item.previewUrl)
-        .filter((value): value is string => Boolean(value))
-    );
-    const dedupedLocal = localMedia.filter((item) => {
-      if (jobNames.has(item.name.toLowerCase())) return false;
-      if (item.localPath && jobPaths.has(item.localPath)) return false;
-      if (item.previewUrl && jobPaths.has(item.previewUrl)) return false;
-      return true;
-    });
-    return [...dedupedLocal, ...jobItems];
+    return [...localMedia, ...jobItems];
   }, [jobOrder, localMedia, jobsById, jobPreviewMeta]);
 
   const filteredMediaItems = useMemo(() => {
@@ -545,13 +563,158 @@ export const UploadTab = forwardRef(function UploadTab(
     }
     if (sortMode === "name") {
       items.sort((a, b) => a.name.localeCompare(b.name));
-    } else {
-      items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     }
     return items;
   }, [filterMode, mediaItems, sortMode]);
 
   const hasMediaItems = Boolean(filteredMediaItems.length);
+  const canReorder = sortMode === "recent" && filterMode === "all";
+  const sortableIds = useMemo(() => filteredMediaItems.map((item) => item.id), [filteredMediaItems]);
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 6 }
+    })
+  );
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      if (!canReorder) return;
+      const { active, over } = event;
+      if (!over) return;
+      const activeId = String(active.id);
+      const overId = String(over.id);
+      if (activeId === overId) return;
+
+      const activeItem = filteredMediaItems.find((item) => item.id === activeId);
+      const overItem = filteredMediaItems.find((item) => item.id === overId);
+      if (!activeItem || !overItem) return;
+      if (activeItem.source !== overItem.source) return;
+
+      if (activeItem.source === "job") {
+        const fromIndex = jobOrder.indexOf(activeId);
+        const toIndex = jobOrder.indexOf(overId);
+        if (fromIndex < 0 || toIndex < 0) return;
+        dispatch(setJobOrder(arrayMove(jobOrder, fromIndex, toIndex)));
+        return;
+      }
+
+      if (activeItem.source === "local") {
+        const fromIndex = localMedia.findIndex((item) => item.id === activeId);
+        const toIndex = localMedia.findIndex((item) => item.id === overId);
+        if (fromIndex < 0 || toIndex < 0) return;
+        setLocalMedia(arrayMove(localMedia, fromIndex, toIndex));
+      }
+    },
+    [canReorder, dispatch, filteredMediaItems, jobOrder, localMedia, setLocalMedia]
+  );
+
+  const SortableMediaRow = ({
+    item,
+    updatedAt,
+    isSelected,
+    isProcessingJob
+  }: {
+    item: MediaItem;
+    updatedAt: number | null;
+    isSelected: boolean;
+    isProcessingJob: boolean;
+  }) => {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+      id: item.id,
+      disabled: !canReorder
+    });
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition
+    };
+
+    return (
+      <div ref={setNodeRef} style={style}>
+        <button
+          data-media-row
+          className={cn(
+            "relative w-full rounded-lg border border-slate-800/70 bg-[#141417] px-3 py-2 text-left transition hover:border-slate-600 focus:outline-none focus-visible:outline-none",
+            canReorder && "cursor-grab active:cursor-grabbing",
+            isDragging && "shadow-[0_12px_24px_rgba(0,0,0,0.35)]",
+            isSelected && "border-primary/70 ring-1 ring-primary/30",
+            item.invalid && "border-rose-500/50"
+          )}
+          {...attributes}
+          {...listeners}
+          onClick={(event) => {
+            if (item.invalid) {
+              event.preventDefault();
+              event.stopPropagation();
+              const shouldRemove = window.confirm(
+                "This media file has changed or is missing. Remove this job?"
+              );
+              if (shouldRemove) {
+                if (item.source === "local") {
+                  removeLocalItem(item);
+                } else if (item.jobId) {
+                  void handleRemoveJob(null, item.jobId);
+                }
+              }
+              return;
+            }
+            setSelectedId(item.id);
+            props.onAddToTimeline?.([item]);
+          }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setSelectedId(item.id);
+            setContextMenu({
+              x: e.clientX,
+              y: e.clientY,
+              item
+            });
+          }}
+          type="button"
+        >
+          <div className={cn("flex w-full items-center gap-3", isProcessingJob && "blur-[1.5px]")}>
+            {item.kind === "video" && item.thumbnailUrl ? (
+              <div className="h-10 w-16 overflow-hidden rounded-md bg-[#0f0f10]">
+                <img src={item.thumbnailUrl} alt="" className="h-full w-full object-cover" />
+              </div>
+            ) : (
+              <div className="flex h-10 w-16 items-center justify-center rounded-md bg-[#0f0f10] text-slate-300">
+                <AppIcon name={item.kind === "video" ? "video" : "volume"} className="text-[14px]" />
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <span
+                className="block text-[12px] font-semibold leading-snug text-slate-100"
+                style={{
+                  display: "-webkit-box",
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden"
+                }}
+              >
+                {item.displayName ?? item.name}
+              </span>
+              {updatedAt || item.invalid ? (
+                <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-500" style={{ whiteSpace: "nowrap" }}>
+                  {updatedAt ? <span className="truncate">{formatTimestamp(updatedAt)}</span> : null}
+                  {item.invalid ? (
+                    <span className="inline-flex items-center gap-1 text-rose-400">
+                      <AppIcon name="exclamationTriangle" className="text-[10px]" />
+                      Invalid file
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
+          {isProcessingJob ? (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/30">
+              <AppIcon name="spinner" spin className="text-[16px] text-slate-100" />
+            </div>
+          ) : null}
+        </button>
+      </div>
+    );
+  };
 
   useEffect(() => {
     if (selectedId && !mediaItems.some((item) => item.id === selectedId)) {
@@ -587,12 +750,13 @@ export const UploadTab = forwardRef(function UploadTab(
     });
   }, [jobPreviewMeta, mediaItems, scheduleIdle]);
 
-  async function handleRemoveJob(e: React.MouseEvent, id: string) {
-    e.preventDefault();
-    e.stopPropagation();
+  async function handleRemoveJob(e: React.MouseEvent | null, id: string) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     try {
       await dispatch(removeJob({ jobId: id, skipConfirm: true, silent: true })).unwrap();
-      props.notify("Media removed.", "success");
       setSelectedId((prev) => (prev === id ? null : prev));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -618,6 +782,7 @@ export const UploadTab = forwardRef(function UploadTab(
     return {
       id,
       name: job.filename || id,
+      displayName: job.displayName ?? job.filename ?? id,
       kind,
       source: "job",
       jobId: id,
@@ -626,14 +791,19 @@ export const UploadTab = forwardRef(function UploadTab(
       createdAt: job.startTime || Date.now(),
       durationSec:
         typeof jobDuration === "number" ? jobDuration : meta?.durationSec ?? localMatch?.durationSec ?? null,
-      thumbnailUrl: localMatch?.thumbnailUrl ?? meta?.thumbnailUrl ?? null
+      thumbnailUrl: localMatch?.thumbnailUrl ?? meta?.thumbnailUrl ?? null,
+      invalid: Boolean(job.mediaInvalid)
     };
   }
 
   async function submitTranscription() {
-    const current = localMedia.find((item) => item.id === selectedId);
-    const filePath = current?.localPath ?? null;
-    const filename = current?.name || selectedFile?.name;
+    const selectedItem = selectedId ? mediaItems.find((item) => item.id === selectedId) : null;
+    const importedJobId =
+      selectedItem?.source === "job" && selectedItem.jobId && jobsById[selectedItem.jobId]?.status === "imported"
+        ? selectedItem.jobId
+        : null;
+    const filePath = selectedItem?.localPath ?? null;
+    const filename = selectedItem?.name || selectedFile?.name;
     if (!filename) {
       props.notify("Please select a file first", "info");
       return;
@@ -644,12 +814,14 @@ export const UploadTab = forwardRef(function UploadTab(
     }
 
     try {
+      const displayName = selectedItem?.displayName ?? (stripFileExtension(filename) || filename);
       const { job } = await dispatch(
         startTranscription({
           file: undefined,
           filePath,
           filename,
-          mediaKind: (current?.kind === "audio" || current?.kind === "video") ? current.kind : undefined,
+          displayName,
+          mediaKind: (selectedItem?.kind === "audio" || selectedItem?.kind === "video") ? selectedItem.kind : undefined,
           language: settings.language,
           model: settings.model,
           noiseSuppression: settings.noiseSuppression,
@@ -658,7 +830,19 @@ export const UploadTab = forwardRef(function UploadTab(
         })
       ).unwrap();
 
-      setLocalMedia([]);
+      if (displayName) {
+        dispatch(updateJobDisplayName({ jobId: job.id, displayName }));
+        void apiUpsertJobRecord({ job_id: job.id, filename, display_name: displayName }).catch(() => undefined);
+      }
+
+      if (selectedItem?.source === "local") {
+        removeLocalItem(selectedItem);
+      }
+      if (importedJobId) {
+        void dispatch(removeJob({ jobId: importedJobId, skipConfirm: true, silent: true }))
+          .unwrap()
+          .catch(() => undefined);
+      }
       setSelectedId(job.id);
       clearSelectedFile();
     } catch (error) {
@@ -688,7 +872,7 @@ export const UploadTab = forwardRef(function UploadTab(
           <div className="flex items-center gap-2">
             <div className="relative" ref={sortMenuRef}>
               <button
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-800/70 bg-[#151515] text-[10px] text-slate-300 hover:border-slate-600"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[#1b1b22] text-[10px] text-slate-200 transition hover:bg-[#26262f]"
                 onClick={(e) => {
                   e.stopPropagation();
                   setFilterMenuOpen(false);
@@ -728,7 +912,7 @@ export const UploadTab = forwardRef(function UploadTab(
             </div>
             <div className="relative" ref={filterMenuRef}>
               <button
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-800/70 bg-[#151515] text-[10px] text-slate-300 hover:border-slate-600"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[#1b1b22] text-[10px] text-slate-200 transition hover:bg-[#26262f]"
                 onClick={(e) => {
                   e.stopPropagation();
                   setSortMenuOpen(false);
@@ -772,86 +956,45 @@ export const UploadTab = forwardRef(function UploadTab(
 
         <div
           className={cn(
-            "flex-1 rounded-xl p-1",
-            isDragOver && "ring-1 ring-primary/70"
+            "flex-1 rounded-xl p-1"
           )}
           onDragOver={(e) => {
+            const types = Array.from(e.dataTransfer?.types ?? []);
+            if (!types.includes("Files")) return;
             e.preventDefault();
-            setIsDragOver(true);
           }}
           onDragLeave={(e) => {
             e.preventDefault();
-            setIsDragOver(false);
           }}
           onDrop={(e) => {
+            const types = Array.from(e.dataTransfer?.types ?? []);
+            if (!types.includes("Files")) return;
             e.preventDefault();
-            setIsDragOver(false);
             const files = Array.from(e.dataTransfer.files || []);
             if (files.length) addLocalFiles(files);
           }}
         >
-          <div className="space-y-2">
-            {filteredMediaItems.map((item) => {
-              const job = item.source === "job" && item.jobId ? jobsById[item.jobId] : null;
-              const updatedAt = job?.completedAt ?? job?.startTime ?? item.createdAt ?? null;
-              const isSelected = selectedId === item.id;
-              return (
-                <button
-                  key={item.id}
-                  data-media-row
-                  className={cn(
-                    "flex w-full items-center gap-3 rounded-lg border border-slate-800/70 bg-[#141417] px-3 py-2 text-left transition hover:border-slate-600",
-                    isSelected && "border-primary/70 ring-1 ring-primary/30"
-                  )}
-                  onClick={() => {
-                    setSelectedId(item.id);
-                    props.onAddToTimeline?.([item]);
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setSelectedId(item.id);
-                    setContextMenu({
-                      x: e.clientX,
-                      y: e.clientY,
-                      item
-                    });
-                  }}
-                  type="button"
-                >
-                  {item.kind === "video" && item.thumbnailUrl ? (
-                    <div className="h-10 w-16 overflow-hidden rounded-md bg-[#0f0f10]">
-                      <img src={item.thumbnailUrl} alt="" className="h-full w-full object-cover" />
-                    </div>
-                  ) : (
-                    <div className="flex h-10 w-16 items-center justify-center rounded-md bg-[#0f0f10] text-slate-300">
-                      <AppIcon
-                        name={item.kind === "video" ? "video" : "volume"}
-                        className="text-[14px]"
-                      />
-                    </div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <span
-                      className="block text-[12px] font-semibold leading-snug text-slate-100"
-                      style={{
-                        display: "-webkit-box",
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: "vertical",
-                        overflow: "hidden"
-                      }}
-                    >
-                      {item.name}
-                    </span>
-                    {updatedAt ? (
-                      <span className="mt-1 block truncate text-[10px] text-slate-500" style={{ whiteSpace: "nowrap" }}>
-                        {formatTimestamp(updatedAt)}
-                      </span>
-                    ) : null}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+          <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+            <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+              <div className="space-y-2">
+                {filteredMediaItems.map((item) => {
+                  const job = item.source === "job" && item.jobId ? jobsById[item.jobId] : null;
+                  const updatedAt = job?.completedAt ?? job?.startTime ?? item.createdAt ?? null;
+                  const isSelected = selectedId === item.id;
+                  const isProcessingJob = job?.status === "processing" || job?.status === "queued";
+                  return (
+                    <SortableMediaRow
+                      key={item.id}
+                      item={item}
+                      updatedAt={updatedAt}
+                      isSelected={isSelected}
+                      isProcessingJob={isProcessingJob}
+                    />
+                  );
+                })}
+              </div>
+            </SortableContext>
+          </DndContext>
           {!hasMediaItems ? (
             <div className="py-6 text-center text-[11px] text-slate-500">
               No media yet. Use Open in the header to add a file.
@@ -861,8 +1004,12 @@ export const UploadTab = forwardRef(function UploadTab(
 
         {contextMenu ? (
           <div
+            ref={contextMenuRef}
             className="fixed z-[100] min-w-[160px] overflow-hidden rounded-lg border border-slate-800/70 bg-[#151515] text-[11px] text-slate-200 shadow-xl"
+            data-media-menu
             style={{ left: contextMenu.x, top: contextMenu.y }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
           >
             <button
               className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#1b1b22]"

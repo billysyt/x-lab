@@ -1,0 +1,108 @@
+{
+  "nav": {
+    "products": "產品",
+    "pricing": "價格",
+    "contact": "聯絡我們",
+    "download": "下載",
+    "suite": "本地部署 AI 套件",
+    "localeZh": "繁體中文",
+    "localeEn": "English"
+  },
+  "signal": "AI 訊號",
+  "hero": {
+    "title": "太空級私隱的 AI 工作流程。",
+    "subtitle": "字幕、會議紀錄、程式碼入口，全部本地化部署。",
+    "primary": "免費下載",
+    "secondary": "查看價格"
+  },
+  "products": {
+    "label": "產品",
+    "title": "為本地 AI 團隊打造。",
+    "captionDesc": "廣東話字幕、繁體輸出、講者識別，支援 SRT 匯出。",
+    "minutesDesc": "會議紀錄、講者識別、清晰逐字稿與 AI 摘要。",
+    "codeDesc": "低成本 Claude Code 或 Codex 入口，團隊控制與用量審計。"
+  },
+  "pricing": {
+    "label": "價格",
+    "freeTag": "限量",
+    "freeTitle": "免費",
+    "freeDesc": "X-Caption 與 X-Minutes 限量使用。",
+    "freeFeatures": [
+      "+ 匯出次數限制",
+      "+ 廣東話準確度 + 繁體字幕",
+      "+ 講者 / 書寫格式輸出"
+    ],
+    "premiumTag": "Premium",
+    "premiumPrice": "HKD 99",
+    "premiumDesc": "全功能方案，請我食餐飯。",
+    "premiumFeatures": [
+      "+ X-Caption + X-Minutes + X-Code",
+      "+ Claude Code + Codex 選項",
+      "+ 團隊控制與用量預算",
+      "+ 優先白名單推廣"
+    ],
+    "enterpriseTag": "企業",
+    "enterpriseTitle": "聯絡我們",
+    "enterpriseDesc": "安全審核與專屬部署支援。",
+    "enterpriseFeatures": [
+      "+ SSO、RBAC、稽核紀錄",
+      "+ 本地部署架構評估",
+      "+ 專屬導入支援"
+    ],
+    "enterpriseCta": "聯絡銷售"
+  },
+  "contact": {
+    "label": "聯絡",
+    "title": "與 X-Lab 洽談本地化 AI。",
+    "desc": "安全審核、部署規劃與高階方案。",
+    "cta": "聯絡我們"
+  },
+  "footer": {
+    "products": "產品",
+    "company": "公司",
+    "deployment": "部署",
+    "why": "為何 X-Lab",
+    "pricing": "價格",
+    "contact": "聯絡",
+    "onPrem": "本地部署",
+    "enterprise": "企業",
+    "security": "安全審核",
+    "copyright": "Copyright 2025 X-Lab. All rights reserved.",
+    "privacy": "本地部署、私隱優先。",
+    "tagline": "本地優先 AI：字幕、會議與安全部署。"
+  },
+  "contactPage": {
+    "label": "聯絡",
+    "title": "與 X-Lab 取得聯繫。",
+    "desc": "企業諮詢、本地部署與保安審核協調。",
+    "detailsLabel": "洽談中心",
+    "detailsTitle": "企業聯絡",
+    "detailsDesc": "支援採購、保安與部署規劃，覆蓋香港及全球團隊。",
+    "emailLabel": "主要聯絡",
+    "emailTitle": "hello@x-lab.ai",
+    "emailDesc": "一個工作天內回覆，歡迎 NDA 與保安問卷。",
+    "languageLabel": "支援語言",
+    "languageTitle": "英文及繁體中文",
+    "languageDesc": "雙語客戶代表及技術文件。",
+    "officeLabel": "辦公室",
+    "officeTitle": "香港中環",
+    "officeDesc": "只限預約參觀，可安排本地部署示範及方案工作坊。",
+    "hoursLabel": "辦公時間",
+    "hoursTitle": "週一至週五 09:30–18:30（香港時間 UTC+8）",
+    "hoursDesc": "現有合作可安排非辦公時間支援。",
+    "securityLabel": "保安與合規",
+    "securityTitle": "NDA、DPA 及保安審核支援",
+    "securityDesc": "可提供供應商問卷、資料流程及部署架構。",
+    "mapTag": "位置",
+    "mapTitle": "香港中環",
+    "mapDesc": "只限預約參觀，可安排本地部署示範。",
+    "mapCity": "香港特別行政區",
+    "mapDistrict": "中環",
+    "mapAlt": "香港地圖視覺"
+  },
+  "menu": {
+    "captionDesc": "廣東話字幕 + SRT",
+    "minutesDesc": "會議紀錄 + AI 摘要",
+    "codeDesc": "Claude Code / Codex"
+  }
+}

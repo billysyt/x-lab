@@ -23,6 +23,11 @@ export function normalizeJobStatus(status: unknown): JobStatus {
     case "canceled":
     case "cancelled":
       return "cancelled";
+    case "imported":
+    case "open":
+    case "opened":
+    case "ready":
+      return "imported";
     default:
       return normalized as JobStatus;
   }
@@ -101,16 +106,31 @@ export function convertHistoryEntry(entry: HistoryEntry): Job | null {
   const completedAt = entry.completed_at ? Date.parse(entry.completed_at) : undefined;
 
   const audioMeta = entry.audio_file ?? {};
+  const mediaSize = typeof entry.media_size === "number"
+    ? entry.media_size
+    : (typeof audioMeta.size === "number" ? audioMeta.size : null);
+  const mediaHash = entry.media_hash ?? audioMeta.hash ?? null;
+  const mediaMtime = typeof entry.media_mtime === "number"
+    ? entry.media_mtime
+    : (typeof audioMeta.mtime === "number" ? audioMeta.mtime : null);
   const audioFile: AudioFileInfo = {
     name: audioMeta.name ?? entry.original_filename ?? entry.job_id,
-    size: typeof audioMeta.size === "number" ? audioMeta.size : null,
+    size: mediaSize,
     path: audioMeta.path ?? entry.media_path ?? null,
-    originalPath: audioMeta.original_path ?? null
+    originalPath: audioMeta.original_path ?? null,
+    hash: mediaHash,
+    mtime: mediaMtime
   };
+
+  const displayName =
+    entry.display_name ??
+    (entry.ui_state && typeof entry.ui_state === "object" ? (entry.ui_state as any).display_name : undefined) ??
+    ((stripFileExtension(entry.original_filename ?? "") || entry.original_filename) ?? entry.job_id);
 
   return {
     id: entry.job_id,
     filename: entry.original_filename ?? entry.job_id,
+    displayName,
     status,
     message: entry.message ?? (isCompleted ? "Completed" : ""),
     progress: isCompleted ? 100 : (entry.progress ?? (status === "failed" ? -1 : 0)),
@@ -127,7 +147,11 @@ export function convertHistoryEntry(entry: HistoryEntry): Job | null {
     partialResult: null,
     error: null,
     currentStage: null,
-    lastSyncedAt: undefined
+    lastSyncedAt: undefined,
+    mediaHash,
+    mediaSize,
+    mediaMtime,
+    mediaInvalid: Boolean(entry.media_invalid)
   };
 }
 
@@ -146,4 +170,12 @@ export function deriveFilenameFromResult(result: TranscriptResult | null | undef
   if (!filePath) return fallback;
   const parts = filePath.split(/[\\/]/);
   return parts[parts.length - 1] || fallback;
+}
+
+export function stripFileExtension(name: string | null | undefined): string {
+  if (!name) return "";
+  const base = name.split(/[\\/]/).pop() || name;
+  const dot = base.lastIndexOf(".");
+  if (dot <= 0) return base;
+  return base.slice(0, dot);
 }

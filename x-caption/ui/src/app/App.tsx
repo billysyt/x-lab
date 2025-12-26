@@ -11,6 +11,7 @@ import {
   removeSegment,
   selectJob,
   setJobSegments,
+  updateJobDisplayName,
   updateSegmentText,
   updateSegmentTiming
 } from "../features/jobs/jobsSlice";
@@ -20,6 +21,7 @@ import type { ToastType } from "../shared/components/ToastHost";
 import { AppIcon } from "../shared/components/AppIcon";
 import { Select } from "../shared/components/Select";
 import { cn } from "../shared/lib/cn";
+import { stripFileExtension } from "../shared/lib/utils";
 import { fileFromBase64 } from "../shared/lib/file";
 import {
   apiConvertChinese,
@@ -497,6 +499,8 @@ export function App() {
     }>
   >([]);
   const [activeMedia, setActiveMedia] = useState<MediaItem | null>(null);
+  const [isDisplayNameEditing, setIsDisplayNameEditing] = useState(false);
+  const [displayNameDraft, setDisplayNameDraft] = useState("");
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
   const [activeClipId, setActiveClipId] = useState<string | null>(null);
   const pendingPlayRef = useRef(false);
@@ -536,6 +540,14 @@ export function App() {
     }
     return null;
   }, [activeMedia?.jobId, activeMedia?.source, jobsById, selectedJob]);
+  const activeMediaDisplayName = useMemo(() => {
+    if (!activeMedia) return "";
+    if (activeMedia.source === "job" && activeMedia.jobId) {
+      const job = jobsById[activeMedia.jobId];
+      return job?.displayName ?? job?.filename ?? activeMedia.displayName ?? activeMedia.name ?? "";
+    }
+    return activeMedia.displayName ?? activeMedia.name ?? "";
+  }, [activeMedia, jobsById]);
   const captionMenuPosition = useMemo(() => {
     if (!captionMenu || typeof window === "undefined") return null;
     const width = 160;
@@ -557,6 +569,21 @@ export function App() {
   useEffect(() => {
     setForcedCaptionId(null);
   }, [activeJob?.id]);
+
+  useEffect(() => {
+    setIsDisplayNameEditing(false);
+  }, [activeMedia?.id]);
+
+  useEffect(() => {
+    if (!activeMedia) {
+      setIsDisplayNameEditing(false);
+      setDisplayNameDraft("");
+      return;
+    }
+    if (!isDisplayNameEditing) {
+      setDisplayNameDraft(activeMediaDisplayName || activeMedia.displayName || activeMedia.name || "");
+    }
+  }, [activeMedia?.id, activeMediaDisplayName, isDisplayNameEditing]);
 
   useEffect(() => {
     if (!showImportModal) return;
@@ -822,6 +849,9 @@ export function App() {
     void apiGetJobRecord(selectedJobId)
       .then((res) => {
         const record = res?.record;
+        if (record?.display_name) {
+          dispatch(updateJobDisplayName({ jobId: selectedJobId, displayName: String(record.display_name) }));
+        }
         const uiState = record?.ui_state?.subtitle;
         if (!uiState) {
           setSubtitlePosition({ x: 0.5, y: 0.85 });
@@ -1256,6 +1286,7 @@ export function App() {
           const newJob: Job = {
             id: jobId,
             filename,
+            displayName: stripFileExtension(filename) || filename,
             status: "completed",
             message: "Captions loaded",
             progress: 100,
@@ -1275,6 +1306,7 @@ export function App() {
         void apiUpsertJobRecord({
           job_id: jobId,
           filename,
+          display_name: stripFileExtension(filename) || filename,
           media_path: (activeMedia as any)?.localPath ?? null,
           media_kind: activeMedia?.kind ?? null,
           status: "completed",
@@ -2725,6 +2757,74 @@ export function App() {
     setPlayback({ currentTime: 0, duration: 0, isPlaying: false });
   }, [dispatch]);
 
+  const commitDisplayName = useCallback(async () => {
+    if (!activeMedia) return;
+    const trimmed = displayNameDraft.trim();
+    const nextName = trimmed || activeMediaDisplayName || activeMedia.name || "";
+    setIsDisplayNameEditing(false);
+    setDisplayNameDraft(nextName);
+
+    if (!nextName || nextName === activeMediaDisplayName) {
+      return;
+    }
+
+    setActiveMedia((prev) =>
+      prev && prev.id === activeMedia.id ? { ...prev, displayName: nextName } : prev
+    );
+    setTimelineClips((prev) =>
+      prev.map((clip) =>
+        clip.media.id === activeMedia.id ? { ...clip, media: { ...clip.media, displayName: nextName } } : clip
+      )
+    );
+
+    if (activeMedia.source === "local") {
+      setLocalMedia((prev) =>
+        prev.map((item) => (item.id === activeMedia.id ? { ...item, displayName: nextName } : item))
+      );
+      if (activeMedia.jobId && activeMedia.localPath) {
+        try {
+          await apiUpsertJobRecord({
+            job_id: activeMedia.jobId,
+            filename: activeMedia.name,
+            display_name: nextName,
+            media_path: activeMedia.localPath,
+            media_kind: activeMedia.kind,
+            status: "imported"
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          notify(`Failed to save display name: ${message}`, "error");
+        }
+      }
+      return;
+    }
+
+    if (activeMedia.source === "job" && activeMedia.jobId) {
+      dispatch(updateJobDisplayName({ jobId: activeMedia.jobId, displayName: nextName }));
+      try {
+        const filename = jobsById[activeMedia.jobId]?.filename ?? activeMedia.name ?? null;
+        await apiUpsertJobRecord({ job_id: activeMedia.jobId, filename, display_name: nextName });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        notify(`Failed to save display name: ${message}`, "error");
+      }
+    }
+  }, [
+    activeMedia,
+    activeMediaDisplayName,
+    displayNameDraft,
+    dispatch,
+    jobsById,
+    notify,
+    setLocalMedia,
+    setTimelineClips
+  ]);
+
+  const cancelDisplayNameEdit = useCallback(() => {
+    setIsDisplayNameEditing(false);
+    setDisplayNameDraft(activeMediaDisplayName || activeMedia?.displayName || activeMedia?.name || "");
+  }, [activeMedia?.displayName, activeMedia?.name, activeMediaDisplayName]);
+
   const handleAddToTimeline = useCallback(
     (items: MediaItem[]) => {
       if (!items.length) return;
@@ -2883,11 +2983,11 @@ export function App() {
       <div className="pt-2">
         <button
           className={cn(
-            "inline-flex w-full items-center justify-center gap-2 rounded-md bg-white px-3 py-2.5 text-[11.5px] font-semibold text-[#0b0b0b] shadow-[0_10px_24px_rgba(37,99,235,0.35)] ring-1 ring-[#93c5fd]/40 transition hover:shadow-[0_16px_32px_rgba(37,99,235,0.45)]",
+            "inline-flex w-full items-center justify-center rounded-md bg-[#1b1b22] px-3 py-2.5 text-[11.5px] font-semibold text-slate-200 transition hover:bg-[#26262f]",
             modelDownload.status === "checking" ||
               modelDownload.status === "downloading" ||
               isTranscribing
-              ? "cursor-not-allowed opacity-60 hover:shadow-[0_10px_24px_rgba(37,99,235,0.25)]"
+              ? "cursor-not-allowed opacity-60 hover:bg-[#1b1b22]"
               : ""
           )}
           onClick={handleGenerateCaptions}
@@ -2898,11 +2998,6 @@ export function App() {
           }
           type="button"
         >
-          <span className="flex items-center gap-0.5 text-[#2563eb]">
-            <AppIcon name="sparkle" className="text-[10px]" />
-            <AppIcon name="sparkle" className="text-[12px]" />
-            <AppIcon name="sparkle" className="text-[9px]" />
-          </span>
           {isTranscribing
             ? "Processing..."
             : modelDownload.status === "downloading"
@@ -2929,7 +3024,12 @@ export function App() {
           </button>
         ) : null}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 stt-scrollbar">
+      <div
+        className={cn(
+          "min-h-0 flex-1 overflow-y-auto px-4 py-3 stt-scrollbar",
+          !isCompact && "h-[calc(100vh-340px)] max-h-[calc(100vh-340px)]"
+        )}
+      >
         <div className="h-full">
           <UploadTab
             ref={uploadRef}
@@ -3020,7 +3120,7 @@ export function App() {
             ) : null}
             {!isHeaderCompact ? (
               <button
-                className="pywebview-no-drag inline-flex h-7 items-center gap-1.5 rounded-md border border-slate-700 bg-[#151515] px-2 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500"
+                className="pywebview-no-drag inline-flex h-7 items-center gap-1.5 rounded-md bg-[#1b1b22] px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-[#26262f]"
                 onClick={handleOpenFiles}
                 type="button"
                 aria-label="Open"
@@ -3066,8 +3166,8 @@ export function App() {
                 </button>
                 <button
                   className={cn(
-                    "pywebview-no-drag inline-flex h-7 items-center justify-center gap-1.5 rounded-md border border-slate-700 bg-[#151515] px-2 text-[11px] font-semibold text-slate-200 transition",
-                    isExporting ? "cursor-not-allowed opacity-50" : "hover:border-slate-500"
+                    "pywebview-no-drag inline-flex h-7 items-center justify-center gap-1.5 rounded-md bg-[#1b1b22] px-2 text-[11px] font-semibold text-slate-200 transition",
+                    isExporting ? "cursor-not-allowed opacity-50" : "hover:bg-[#26262f]"
                   )}
                   onClick={() => setShowExportModal(true)}
                   disabled={isExporting}
@@ -3317,6 +3417,42 @@ export function App() {
                     ref={previewContainerRef}
                   >
                     <div className="relative h-full w-full overflow-hidden rounded-xl bg-black">
+                      {activeMedia ? (
+                        <div className="pointer-events-auto absolute left-1/2 top-3 z-20 -translate-x-1/2">
+                          {isDisplayNameEditing ? (
+                            <input
+                              className="w-[min(70vw,420px)] rounded-md border border-white/15 bg-black/70 px-3 py-1 text-center text-[12px] font-medium text-white outline-none focus:border-primary/70"
+                              value={displayNameDraft}
+                              onChange={(e) => setDisplayNameDraft(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  void commitDisplayName();
+                                } else if (e.key === "Escape") {
+                                  e.preventDefault();
+                                  cancelDisplayNameEdit();
+                                }
+                              }}
+                              onBlur={() => void commitDisplayName()}
+                              autoFocus
+                              aria-label="Edit display name"
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              className="inline-flex max-w-[min(70vw,420px)] items-center rounded-md border border-white/10 bg-black/60 px-3 py-1 text-[12px] font-medium text-white/90 shadow hover:border-white/25"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setIsDisplayNameEditing(true);
+                              }}
+                              title="Click to rename"
+                            >
+                              <span className="truncate">{activeMediaDisplayName}</span>
+                            </button>
+                          )}
+                        </div>
+                      ) : null}
                       {activeVideoSrc ? (
                         <>
                           <video
@@ -3565,7 +3701,7 @@ export function App() {
             <div className="flex items-center justify-between px-4 py-2 text-xs text-slate-400">
               <div className="flex items-center gap-2">
                 <button
-                  className="inline-flex h-7 items-center gap-1.5 rounded-md border border-slate-700/70 bg-[#151515] px-2 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500"
+                  className="inline-flex h-7 items-center gap-1.5 rounded-md bg-[#1b1b22] px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-[#26262f]"
                   onClick={handleLoadSrt}
                   type="button"
                   aria-label="Load SRT"

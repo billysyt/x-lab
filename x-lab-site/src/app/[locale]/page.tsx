@@ -1,8 +1,9 @@
 import Link from "next/link";
 import Image from "next/image";
-import HeroVisual from "./_components/HeroVisual";
-import NeuralNet from "./_components/NeuralNet";
-import Waveform from "./_components/Waveform";
+import { getTranslations } from "next-intl/server";
+import HeroVisual from "../_components/HeroVisual";
+import NeuralNet from "../_components/NeuralNet";
+import Waveform from "../_components/Waveform";
 
 const ProductRow = ({
   icon,
@@ -29,16 +30,27 @@ const ProductRow = ({
   </div>
 );
 
-const SignalRow = () => (
+const SignalRow = ({ label }: { label: string }) => (
   <div className="flex items-center gap-3 text-xs text-x-soft">
     <span className="h-1 w-1 rounded-full bg-x-accent" />
     <span className="h-1 w-1 rounded-full bg-x-accent/70" />
     <span className="h-1 w-1 rounded-full bg-x-accent/40" />
-    <span className="uppercase tracking-[0.3em]">AI Signal</span>
+    <span className="uppercase tracking-[0.3em]">{label}</span>
   </div>
 );
 
-export default function Home() {
+export default async function Home({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
+  const t = await getTranslations({ locale });
+  const withLocale = (path: string) => `/${locale}${path}`;
+  const freeFeatures = t.raw("pricing.freeFeatures") as string[];
+  const premiumFeatures = t.raw("pricing.premiumFeatures") as string[];
+  const enterpriseFeatures = t.raw("pricing.enterpriseFeatures") as string[];
+
   return (
     <div className="relative">
       <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
@@ -52,19 +64,19 @@ export default function Home() {
       <section className="mx-auto flex w-[min(1120px,92vw)] flex-col gap-14 pt-16">
         <div className="grid items-center gap-12 lg:grid-cols-[1.05fr_0.95fr]">
           <div className="space-y-6">
-            <SignalRow />
+            <SignalRow label={t("signal")} />
             <h1 className="text-4xl font-semibold tracking-tight md:text-6xl">
-              Space-grade privacy for AI workflows.
+              {t("hero.title")}
             </h1>
             <p className="text-base text-x-muted md:text-lg">
-              Captions. Meeting minutes. Code access. All on-prem.
+              {t("hero.subtitle")}
             </p>
             <div className="flex flex-wrap gap-3">
-              <Link className="btn-primary" href="/#products">
-                Download free
+              <Link className="btn-primary" href={withLocale("/#products")}>
+                {t("hero.primary")}
               </Link>
-              <Link className="btn-ghost" href="/#pricing">
-                View pricing
+              <Link className="btn-ghost" href={withLocale("/#pricing")}>
+                {t("hero.secondary")}
               </Link>
             </div>
             <Waveform />
@@ -76,14 +88,14 @@ export default function Home() {
 
       <section id="products" className="mx-auto mt-20 w-[min(1120px,92vw)]">
         <div className="space-y-3">
-          <div className="section-label">Products</div>
-          <h2 className="text-3xl font-semibold tracking-tight">Designed for local AI teams.</h2>
+          <div className="section-label">{t("products.label")}</div>
+          <h2 className="text-3xl font-semibold tracking-tight">{t("products.title")}</h2>
         </div>
         <div className="mt-6">
           <ProductRow
             icon="/x-caption-icon.svg"
             title="X-Caption"
-            desc="Cantonese captions with 繁體 output, speaker-aware transcripts, and SRT export."
+            desc={t("products.captionDesc")}
           >
             <div className="flex flex-wrap items-center gap-3">
               <Image src="/badge-macos.svg" alt="Download on macOS" width={150} height={46} />
@@ -94,7 +106,7 @@ export default function Home() {
           <ProductRow
             icon="/x-minutes-icon.svg"
             title="X-Minutes"
-            desc="Meeting minutes with speaker ID, clean transcripts, and AI summaries."
+            desc={t("products.minutesDesc")}
           >
             <div className="flex flex-wrap items-center gap-3">
               <Image src="/badge-macos.svg" alt="Download on macOS" width={150} height={46} />
@@ -105,7 +117,7 @@ export default function Home() {
           <ProductRow
             icon="/x-code-icon.svg"
             title="X-Code"
-            desc="Low-cost Claude Code or Codex access with team controls and audit-ready usage."
+            desc={t("products.codeDesc")}
           >
             <div className="flex flex-wrap items-center gap-3 text-sm text-x-soft">
               <span className="rounded-2xl border border-x-line bg-x-surface px-4 py-3">
@@ -121,55 +133,48 @@ export default function Home() {
 
       <section id="pricing" className="mx-auto mt-20 w-[min(1120px,92vw)]">
         <div className="space-y-4 border-t border-x-line pt-10">
-          <div className="section-label">Pricing</div>
+          <div className="section-label">{t("pricing.label")}</div>
           <div className="grid gap-6 lg:grid-cols-3">
             <div className="rounded-[26px] border border-x-line bg-x-surface p-7">
               <div className="text-xs uppercase tracking-[0.3em] text-x-soft">
-                Limited
+                {t("pricing.freeTag")}
               </div>
-              <h3 className="mt-3 text-2xl font-semibold">Free</h3>
-              <p className="mt-2 text-sm text-x-muted">
-                Limited access to X-Caption and X-Minutes.
-              </p>
+              <h3 className="mt-3 text-2xl font-semibold">{t("pricing.freeTitle")}</h3>
+              <p className="mt-2 text-sm text-x-muted">{t("pricing.freeDesc")}</p>
               <div className="mt-6 space-y-2 text-sm text-x-muted">
-                <p>+ Limited exports</p>
-                <p>+ Cantonese accuracy + 繁體 caption</p>
-                <p>+ Speaker or writing format outputs</p>
+                {freeFeatures.map((item) => (
+                  <p key={item}>{item}</p>
+                ))}
               </div>
             </div>
 
             <div className="relative rounded-[30px] border border-x-accent/40 bg-x-surface-2 p-8 shadow-deep lg:-translate-y-3">
               <div className="absolute right-6 top-6 rounded-full border border-x-accent/40 px-3 py-1 text-[0.65rem] uppercase tracking-[0.25em] text-x-accent">
-                Premium
+                {t("pricing.premiumTag")}
               </div>
-              <h3 className="text-3xl font-semibold">HKD 99</h3>
-              <p className="mt-2 text-sm text-x-muted">
-                All-in-one plan. Buy me a dinner.
-              </p>
+              <h3 className="text-3xl font-semibold">{t("pricing.premiumPrice")}</h3>
+              <p className="mt-2 text-sm text-x-muted">{t("pricing.premiumDesc")}</p>
               <div className="mt-5 space-y-2 text-sm text-x-muted">
-                <p>+ X-Caption + X-Minutes + X-Code</p>
-                <p>+ Claude Code + Codex options</p>
-                <p>+ Team controls and usage budgets</p>
-                <p>+ Early whitelist promotion included</p>
+                {premiumFeatures.map((item) => (
+                  <p key={item}>{item}</p>
+                ))}
               </div>
             </div>
 
             <div className="rounded-[26px] border border-x-line bg-x-surface p-7">
               <div className="text-xs uppercase tracking-[0.3em] text-x-soft">
-                Enterprise
+                {t("pricing.enterpriseTag")}
               </div>
-              <h3 className="mt-3 text-2xl font-semibold">Let's talk</h3>
-              <p className="mt-2 text-sm text-x-muted">
-                Custom security reviews and dedicated deployment support.
-              </p>
+              <h3 className="mt-3 text-2xl font-semibold">{t("pricing.enterpriseTitle")}</h3>
+              <p className="mt-2 text-sm text-x-muted">{t("pricing.enterpriseDesc")}</p>
               <div className="mt-6 space-y-2 text-sm text-x-muted">
-                <p>+ SSO, RBAC, audit logs</p>
-                <p>+ On-prem architecture review</p>
-                <p>+ Dedicated onboarding</p>
+                {enterpriseFeatures.map((item) => (
+                  <p key={item}>{item}</p>
+                ))}
               </div>
               <div className="mt-6">
-                <Link className="btn-primary" href="/#cta">
-                  Contact sales
+                <Link className="btn-primary" href={withLocale("/#cta")}>
+                  {t("pricing.enterpriseCta")}
                 </Link>
               </div>
             </div>
@@ -182,17 +187,15 @@ export default function Home() {
           <NeuralNet />
           <div className="relative z-10 flex flex-col items-start justify-between gap-6 md:flex-row md:items-center">
             <div>
-              <div className="section-label">Contact</div>
+              <div className="section-label">{t("contact.label")}</div>
               <h2 className="mt-3 text-3xl font-semibold tracking-tight">
-                Talk to X-Lab about on-prem AI.
+                {t("contact.title")}
               </h2>
-              <p className="mt-3 text-sm text-x-muted">
-                Security review, deployment planning, and premium access.
-              </p>
+              <p className="mt-3 text-sm text-x-muted">{t("contact.desc")}</p>
             </div>
             <div className="flex flex-col gap-3">
               <Link className="btn-primary" href="mailto:hello@x-lab.ai">
-                Contact us
+                {t("contact.cta")}
               </Link>
             </div>
           </div>
