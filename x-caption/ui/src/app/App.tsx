@@ -500,7 +500,7 @@ export function App() {
   const [activeClipId, setActiveClipId] = useState<string | null>(null);
   const pendingPlayRef = useRef(false);
   const pendingSeekRef = useRef<number | null>(null);
-  const scrubStateRef = useRef<{ pointerId: number; useScrollOffset: boolean } | null>(null);
+  const scrubStateRef = useRef<{ pointerId: number } | null>(null);
   const playerScrubRef = useRef<{ wasPlaying: boolean } | null>(null);
   const mediaRafActiveRef = useRef(false);
   const pendingSwapRef = useRef<string | null>(null);
@@ -522,6 +522,7 @@ export function App() {
     mode: "move" | "start" | "end";
   } | null>(null);
   const [captionHover, setCaptionHover] = useState<{ start: number; end: number } | null>(null);
+  const [forcedCaptionId, setForcedCaptionId] = useState<number | null>(null);
   const [captionMenu, setCaptionMenu] = useState<{
     x: number;
     y: number;
@@ -551,6 +552,10 @@ export function App() {
       setIsHeaderMenuOpen(false);
     }
   }, [isHeaderCompact]);
+
+  useEffect(() => {
+    setForcedCaptionId(null);
+  }, [activeJob?.id]);
 
   useEffect(() => {
     if (!showImportModal) return;
@@ -667,6 +672,21 @@ export function App() {
   const currentSubtitleMatch = useMemo(() => {
     if (!sortedDisplaySegments.length) return null;
     const time = playback.currentTime;
+    if (forcedCaptionId !== null) {
+      const forced = sortedDisplaySegments.find((segment) => Number(segment.id) === forcedCaptionId);
+      if (forced) {
+        const rawText = forced.originalText ?? forced.text ?? "";
+        let text = rawText;
+        if (openCcConverter) {
+          try {
+            text = openCcConverter(rawText);
+          } catch {
+            text = rawText;
+          }
+        }
+        return { segment: forced, text: text.trim() };
+      }
+    }
     let match: TranscriptSegment | null = null;
     for (const segment of sortedDisplaySegments) {
       const start = Number(segment.start ?? 0);
@@ -689,8 +709,27 @@ export function App() {
       }
     }
     return { segment: match, text: text.trim() };
-  }, [openCcConverter, playback.currentTime, sortedDisplaySegments]);
+  }, [forcedCaptionId, openCcConverter, playback.currentTime, sortedDisplaySegments]);
   const currentSubtitle = currentSubtitleMatch?.text ?? "";
+
+  useEffect(() => {
+    if (forcedCaptionId === null) return;
+    const forced = sortedDisplaySegments.find((segment) => Number(segment.id) === forcedCaptionId);
+    if (!forced) {
+      setForcedCaptionId(null);
+      return;
+    }
+    const start = Number(forced.start ?? 0);
+    const end = Number(forced.end ?? 0);
+    if (playback.currentTime >= start && playback.currentTime < end) {
+      setForcedCaptionId(null);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setForcedCaptionId((current) => (current === forcedCaptionId ? null : current));
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [forcedCaptionId, playback.currentTime, sortedDisplaySegments]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -2326,6 +2365,7 @@ export function App() {
     const mediaEl = getActiveMediaEl();
     if (!mediaEl) return;
     mediaEl.currentTime = value;
+    setPlayback((prev) => ({ ...prev, currentTime: value, isPlaying: prev.isPlaying }));
   };
 
   const startPlayerScrub = () => {
@@ -2386,9 +2426,15 @@ export function App() {
   const timelineScrollWidth = timelineWidth;
   const playheadLeftPx = duration > 0 ? Math.min(timelineWidth, playback.currentTime * pxPerSec) : 0;
   const playheadPct = duration > 0 ? Math.min(100, (playback.currentTime / duration) * 100) : 0;
-  const viewStartSec = timelineScrollLeft / Math.max(pxPerSec, 0.001);
-  const firstTickSec = Math.floor(viewStartSec / segmentSec) * segmentSec;
-  const ticks = Array.from({ length: tickCount }, (_, idx) => firstTickSec + idx * segmentSec);
+  const baseTickCount = duration > 0 && segmentSec > 0
+    ? Math.floor(duration / segmentSec) + 1
+    : 0;
+  const ticks = baseTickCount
+    ? Array.from({ length: baseTickCount }, (_, idx) => idx * segmentSec)
+    : [];
+  if (duration > 0 && ticks.length && ticks[ticks.length - 1] < duration) {
+    ticks.push(duration);
+  }
   const segmentPx = segmentSec * pxPerSec;
   const faintGridStyle = {
     backgroundImage: "linear-gradient(to right, rgba(15,23,42,0.3) 1px, transparent 1px)",
@@ -2396,13 +2442,11 @@ export function App() {
   };
 
   const seekFromPointer = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>, useScrollOffset: boolean) => {
+    (event: React.PointerEvent<HTMLDivElement>) => {
       if (duration <= 0) return;
       const rect = event.currentTarget.getBoundingClientRect();
       const x = clamp(event.clientX - rect.left, 0, rect.width);
-      const scrollEl = timelineScrollRef.current;
-      const offset = useScrollOffset && scrollEl ? scrollEl.scrollLeft : 0;
-      const time = clamp((offset + x) / Math.max(pxPerSec, 0.001), 0, duration);
+      const time = clamp(x / Math.max(pxPerSec, 0.001), 0, duration);
       handleScrub(time);
     },
     [duration, handleScrub, pxPerSec]
@@ -2422,6 +2466,7 @@ export function App() {
     if (playheadLeftPx < leftBound || playheadLeftPx > rightBound) {
       const nextLeft = clamp(playheadLeftPx - viewport * 0.4, 0, Math.max(0, timelineWidth - viewport));
       scroller.scrollLeft = nextLeft;
+      setTimelineScrollLeft(nextLeft);
     }
   }, [playback.currentTime, playheadLeftPx, timelineWidth]);
 
@@ -2510,6 +2555,7 @@ export function App() {
       }
       handleScrub(focusTime);
       setPlayback((prev) => ({ ...prev, currentTime: focusTime }));
+      setForcedCaptionId(Number(segment.id));
       if (playback.isPlaying) {
         const mediaEl = getActiveMediaEl();
         if (mediaEl && mediaEl.paused) {
@@ -2626,20 +2672,20 @@ export function App() {
     [activeJob?.id, duration, minCaptionDuration, pxPerSec, sortedDisplaySegments]
   );
 
-  const onTrackPointerDown = (event: React.PointerEvent<HTMLDivElement>, useScrollOffset: boolean) => {
+  const onTrackPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     const target = event.target as HTMLElement;
     if (target.closest("[data-clip-id]")) return;
-    scrubStateRef.current = { pointerId: event.pointerId, useScrollOffset };
+    scrubStateRef.current = { pointerId: event.pointerId };
     event.currentTarget.setPointerCapture(event.pointerId);
     startPlayerScrub();
-    seekFromPointer(event, useScrollOffset);
+    seekFromPointer(event);
   };
 
   const onTrackPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const scrub = scrubStateRef.current;
     if (!scrub) return;
-    seekFromPointer(event, scrub.useScrollOffset);
+    seekFromPointer(event);
   };
 
   const onTrackPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -2723,6 +2769,7 @@ export function App() {
     const maxScroll = Math.max(0, timelineWidth - el.clientWidth);
     if (el.scrollLeft > maxScroll) {
       el.scrollLeft = maxScroll;
+      setTimelineScrollLeft(maxScroll);
     }
   }, [timelineWidth, timelineViewportWidth]);
 
@@ -2733,6 +2780,7 @@ export function App() {
       if (maxScroll <= 0) return;
       const next = clamp(el.scrollLeft + event.deltaY, 0, maxScroll);
       el.scrollLeft = next;
+      setTimelineScrollLeft(next);
     }
   }, []);
 
@@ -3532,22 +3580,36 @@ export function App() {
                         <div className="absolute left-1/2 top-1 h-0 w-0 -translate-x-1/2 border-x-[4px] border-t-[6px] border-transparent border-t-primary" />
                       </div>
                       <div
-                        className="sticky left-0 z-10 flex h-10 items-center justify-between bg-[#0b0b0b] text-[10px] text-slate-500"
-                        style={{ width: `${Math.max(1, timelineViewportWidth)}px` }}
-                        onPointerDown={(event) => onTrackPointerDown(event, true)}
+                        className="relative z-10 h-10 bg-[#0b0b0b] text-[10px] text-slate-500"
+                        style={{ width: `${timelineWidth}px` }}
+                        onPointerDown={onTrackPointerDown}
                         onPointerMove={onTrackPointerMove}
                         onPointerUp={onTrackPointerUp}
                       >
-                        {ticks.map((tick, idx) => (
-                          <span key={idx} className="cursor-ew-resize">
-                            {formatTime(Math.max(0, tick))}
-                          </span>
-                        ))}
+                        {ticks.map((tick, idx) => {
+                          const left = Math.max(0, tick * pxPerSec);
+                          const isFirst = idx === 0;
+                          const isLast = idx === ticks.length - 1;
+                          const translateClass = isFirst
+                            ? "translate-x-0"
+                            : isLast
+                              ? "-translate-x-full"
+                              : "-translate-x-1/2";
+                          return (
+                            <span
+                              key={`tick-${idx}`}
+                              className={cn("absolute top-1 cursor-ew-resize", translateClass)}
+                              style={{ left: `${left}px` }}
+                            >
+                              {formatTime(Math.max(0, tick))}
+                            </span>
+                          );
+                        })}
                       </div>
                       <div className="relative mt-2 space-y-1 pb-1" style={{ width: `${timelineWidth}px` }}>
                         <div
                           className="absolute -top-3 left-0 right-0 h-5 cursor-ew-resize"
-                          onPointerDown={(event) => onTrackPointerDown(event, false)}
+                          onPointerDown={onTrackPointerDown}
                           onPointerMove={onTrackPointerMove}
                           onPointerUp={onTrackPointerUp}
                         />
@@ -3556,7 +3618,7 @@ export function App() {
                           className="relative h-10 overflow-hidden rounded-md bg-transparent"
                           style={{ width: `${timelineWidth}px` }}
                           ref={timelineTrackRef}
-                          onPointerDown={(event) => onTrackPointerDown(event, false)}
+                          onPointerDown={onTrackPointerDown}
                           onPointerMove={onTrackPointerMove}
                           onPointerUp={onTrackPointerUp}
                           onMouseMove={handleCaptionHoverMove}
