@@ -192,3 +192,20 @@ export type ConvertChineseResponse = {
   converted_text?: string;
   error?: string;
 };
+
+export type YoutubeImportResponse = {
+  file?: {
+    name?: string;
+    path?: string;
+    size?: number | null;
+    mime?: string | null;
+  };
+  source?: {
+    url?: string | null;
+    title?: string | null;
+    id?: string | null;
+  };
+  stream_url?: string | null;
+  duration_sec?: number | null;
+  error?: string;
+};

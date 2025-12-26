@@ -5,5 +5,7 @@ numpy>=1.24.0
 opencc-python-reimplemented>=0.1.7
 # Flask web framework
 flask>=2.3.0
+# YouTube audio download
+yt-dlp>=2024.3.10
 # Native desktop shell
 pywebview>=4.4.2

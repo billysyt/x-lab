@@ -32,6 +32,17 @@ export type UploadTabHandle = {
   submitTranscription: () => Promise<void>;
   hasSelection: () => boolean;
   openFilePicker: () => void;
+  addLocalPathItem: (args: {
+    path: string;
+    name: string;
+    size?: number | null;
+    mime?: string | null;
+    displayName?: string | null;
+    durationSec?: number | null;
+    previewUrl?: string | null;
+    streamUrl?: string | null;
+    transcriptionKind?: "audio" | "video";
+  }) => void;
 };
 
 export type MediaItem = {
@@ -40,10 +51,12 @@ export type MediaItem = {
   displayName?: string;
   kind: "video" | "audio" | "caption" | "other";
   source: "job" | "local";
+  transcriptionKind?: "video" | "audio";
   jobId?: string;
   file?: File;
   localPath?: string | null;
   previewUrl?: string | null;
+  streamUrl?: string | null;
   thumbnailUrl?: string | null;
   thumbnailSource?: "saved" | "captured" | "none";
   createdAt?: number;
@@ -122,6 +135,7 @@ export const UploadTab = memo(forwardRef(function UploadTab(
     item: MediaItem;
   } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const getPreviewKind = useCallback((item: MediaItem) => (item.streamUrl ? "video" : item.kind), []);
 
   const scheduleIdle = useCallback((task: () => void) => {
     if (typeof window === "undefined") {
@@ -247,7 +261,8 @@ export const UploadTab = memo(forwardRef(function UploadTab(
   useImperativeHandle(ref, () => ({
     submitTranscription,
     hasSelection: () => Boolean(selectedFile || selectedId),
-    openFilePicker: requestFilePicker
+    openFilePicker: requestFilePicker,
+    addLocalPathItem
   }));
 
   useEffect(() => {
@@ -281,23 +296,35 @@ export const UploadTab = memo(forwardRef(function UploadTab(
     };
   }
 
-  function buildLocalPathItem(args: { path: string; name: string; size?: number | null; mime?: string | null }): MediaItem {
+  function buildLocalPathItem(args: {
+    path: string;
+    name: string;
+    size?: number | null;
+    mime?: string | null;
+    displayName?: string | null;
+    durationSec?: number | null;
+    previewUrl?: string | null;
+    streamUrl?: string | null;
+    transcriptionKind?: "audio" | "video";
+  }): MediaItem {
     const id = `local-path-${args.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const previewUrl = toFileUrl(args.path);
+    const previewUrl = args.previewUrl ?? toFileUrl(args.path);
     const jobId = buildImportedJobId(args.path, args.size);
     return {
       id,
       name: args.name,
-      displayName: stripFileExtension(args.name) || args.name,
+      displayName: args.displayName ?? (stripFileExtension(args.name) || args.name),
       kind: getKind(args.name),
       source: "local",
+      transcriptionKind: args.transcriptionKind,
       jobId,
       file: undefined,
       localPath: args.path,
       previewUrl,
+      streamUrl: args.streamUrl ?? args.previewUrl ?? null,
       thumbnailUrl: null,
       createdAt: Date.now(),
-      durationSec: null
+      durationSec: typeof args.durationSec === "number" ? args.durationSec : null
     };
   }
 
@@ -466,6 +493,19 @@ export const UploadTab = memo(forwardRef(function UploadTab(
     return { duration, thumbnail };
   }
 
+  async function captureAudioDurationFromUrl(url: string) {
+    return new Promise<number>((resolve) => {
+      const el = document.createElement("audio");
+      el.preload = "metadata";
+      el.src = url;
+      el.onloadedmetadata = () => {
+        const dur = Number.isFinite(el.duration) ? el.duration : 0;
+        resolve(dur);
+      };
+      el.onerror = () => resolve(0);
+    });
+  }
+
   function addLocalFiles(files: File[]) {
     if (!files.length) return;
     const supported = files.filter((file) => {
@@ -534,7 +574,17 @@ export const UploadTab = memo(forwardRef(function UploadTab(
     });
   }
 
-  function addLocalPathItem(args: { path: string; name: string; size?: number | null; mime?: string | null }) {
+  function addLocalPathItem(args: {
+    path: string;
+    name: string;
+    size?: number | null;
+    mime?: string | null;
+    displayName?: string | null;
+    durationSec?: number | null;
+    previewUrl?: string | null;
+    streamUrl?: string | null;
+    transcriptionKind?: "audio" | "video";
+  }) {
     const item = buildLocalPathItem(args);
     setLocalMedia((prev) => [item, ...prev]);
     setSelectedId(item.id);
@@ -568,6 +618,17 @@ export const UploadTab = memo(forwardRef(function UploadTab(
         })();
       });
     }
+    if (item.kind === "audio" && item.previewUrl && item.durationSec == null) {
+      scheduleIdle(() => {
+        void (async () => {
+          const duration = await captureAudioDurationFromUrl(item.previewUrl as string);
+          if (!duration) return;
+          setLocalMedia((prev) =>
+            prev.map((m) => (m.id === item.id ? { ...m, durationSec: duration || m.durationSec } : m))
+          );
+        })();
+      });
+    }
   }
 
   function removeLocalItem(item: MediaItem) {
@@ -594,13 +655,13 @@ export const UploadTab = memo(forwardRef(function UploadTab(
   const filteredMediaItems = useMemo(() => {
     let items = [...mediaItems];
     if (filterMode !== "all") {
-      items = items.filter((item) => item.kind === filterMode);
+      items = items.filter((item) => getPreviewKind(item) === filterMode);
     }
     if (sortMode === "name") {
       items.sort((a, b) => a.name.localeCompare(b.name));
     }
     return items;
-  }, [filterMode, mediaItems, sortMode]);
+  }, [filterMode, getPreviewKind, mediaItems, sortMode]);
 
   const hasMediaItems = Boolean(filteredMediaItems.length);
   const canReorder = sortMode === "recent" && filterMode === "all";
@@ -707,13 +768,13 @@ export const UploadTab = memo(forwardRef(function UploadTab(
           type="button"
         >
           <div className={cn("flex w-full items-center gap-3", isProcessingJob && "blur-[1.5px]")}>
-            {item.kind === "video" && item.thumbnailUrl ? (
+            {getPreviewKind(item) === "video" && item.thumbnailUrl ? (
               <div className="h-10 w-16 overflow-hidden rounded-md bg-[#0f0f10]">
                 <img src={item.thumbnailUrl} alt="" className="h-full w-full object-cover" />
               </div>
             ) : (
               <div className="flex h-10 w-16 items-center justify-center rounded-md bg-[#0f0f10] text-slate-300">
-                <AppIcon name={item.kind === "video" ? "video" : "volume"} className="text-[14px]" />
+                <AppIcon name={getPreviewKind(item) === "video" ? "video" : "volume"} className="text-[14px]" />
               </div>
             )}
             <div className="min-w-0 flex-1">
@@ -864,6 +925,9 @@ export const UploadTab = memo(forwardRef(function UploadTab(
 
     try {
       const displayName = selectedItem?.displayName ?? (stripFileExtension(filename) || filename);
+      const transcriptionKind =
+        selectedItem?.transcriptionKind ??
+        (selectedItem?.kind === "audio" || selectedItem?.kind === "video" ? selectedItem.kind : undefined);
       const { job } = await dispatch(
         startTranscription({
           jobId: reuseJobId,
@@ -871,7 +935,7 @@ export const UploadTab = memo(forwardRef(function UploadTab(
           filePath,
           filename,
           displayName,
-          mediaKind: (selectedItem?.kind === "audio" || selectedItem?.kind === "video") ? selectedItem.kind : undefined,
+          mediaKind: transcriptionKind,
           language: settings.language,
           model: settings.model,
           noiseSuppression: settings.noiseSuppression,

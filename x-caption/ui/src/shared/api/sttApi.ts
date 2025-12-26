@@ -4,6 +4,7 @@ import type {
   JobStatusResponse,
   PollResponse,
   PreprocessResponse,
+  YoutubeImportResponse,
   WhisperModelDownload,
   WhisperModelStatus,
   RemoveJobResponse,
@@ -225,4 +226,12 @@ export async function apiConvertChinese(args: {
     return payload.converted_text;
   }
   throw new Error(payload?.error || "Chinese conversion failed");
+}
+
+export async function apiImportYoutube(url: string): Promise<YoutubeImportResponse> {
+  return fetchJson<YoutubeImportResponse>("/import/youtube", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url })
+  });
 }

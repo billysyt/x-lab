@@ -98,6 +98,117 @@ active_model_download_id: Optional[str] = None
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
+def is_youtube_url(raw_url: str) -> bool:
+    try:
+        parsed = urlparse(raw_url)
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").lower()
+    return host.endswith("youtube.com") or host.endswith("youtu.be") or host.endswith("music.youtube.com")
+
+
+def _resolve_youtube_download(downloads_dir: Path, download_id: str) -> Path:
+    candidates = [path for path in downloads_dir.glob(f"{download_id}.*") if path.is_file()]
+    if not candidates:
+        raise RuntimeError("Download completed but no audio file was created.")
+    allowed = [path for path in candidates if path.suffix.lstrip(".").lower() in ALLOWED_EXTENSIONS]
+    if allowed:
+        candidates = allowed
+    return max(candidates, key=lambda path: path.stat().st_mtime)
+
+
+def _download_youtube_audio(url: str) -> Dict[str, Any]:
+    try:
+        from yt_dlp import YoutubeDL  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("YouTube import requires yt-dlp. Please install the dependency.") from exc
+
+    downloads_dir = get_uploads_dir() / "youtube"
+    downloads_dir.mkdir(parents=True, exist_ok=True)
+    download_id = uuid.uuid4().hex
+    outtmpl = str(downloads_dir / f"{download_id}.%(ext)s")
+    ydl_opts = {
+        "format": "worstaudio",
+        "outtmpl": outtmpl,
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "retries": 2,
+        "postprocessors": [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "64",
+            }
+        ],
+    }
+
+    with YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+
+    if not info:
+        raise RuntimeError("Failed to fetch YouTube metadata.")
+    if "entries" in info:
+        info = next((entry for entry in info.get("entries") or [] if entry), None)
+        if not info:
+            raise RuntimeError("No playable YouTube entries found.")
+
+    title = (info.get("title") or "youtube_audio").strip()
+    video_id = info.get("id")
+    duration = info.get("duration")
+    downloaded_path = _resolve_youtube_download(downloads_dir, download_id)
+
+    stream_url = None
+    try:
+        stream_opts = {
+            "format": "best[ext=mp4][acodec!=none][vcodec!=none]/best[acodec!=none][vcodec!=none]/best",
+            "noplaylist": True,
+            "quiet": True,
+            "no_warnings": True,
+        }
+        with YoutubeDL(stream_opts) as stream_ydl:
+            stream_info = stream_ydl.extract_info(url, download=False)
+        if stream_info and "entries" in stream_info:
+            stream_info = next((entry for entry in stream_info.get("entries") or [] if entry), None)
+        if stream_info:
+            stream_url = stream_info.get("url")
+            if not duration:
+                duration = stream_info.get("duration")
+    except Exception as exc:
+        logger.warning("Failed to resolve YouTube stream URL: %s", exc)
+
+    safe_title = secure_filename(title) or "youtube_audio"
+    safe_title = safe_title[:80].strip("-_") or "youtube_audio"
+    final_name = f"{safe_title}-{download_id[:8]}{downloaded_path.suffix}"
+    final_path = downloads_dir / final_name
+    try:
+        if downloaded_path.resolve() != final_path.resolve():
+            downloaded_path.replace(final_path)
+    except Exception:
+        final_path = downloaded_path
+
+    mime_type, _ = mimetypes.guess_type(str(final_path))
+    size = None
+    with contextlib.suppress(OSError):
+        size = final_path.stat().st_size
+
+    return {
+        "file": {
+            "path": str(final_path),
+            "name": final_path.name,
+            "size": size,
+            "mime": mime_type or "application/octet-stream",
+        },
+        "source": {
+            "url": url,
+            "title": title,
+            "id": video_id,
+        },
+        "stream_url": stream_url,
+        "duration_sec": duration if isinstance(duration, (int, float)) else None,
+    }
+
+
 def is_loopback_origin(origin: Optional[str]) -> bool:
     """Return True if the supplied Origin header represents a loopback host."""
     if not origin:
@@ -1325,6 +1436,23 @@ def create_app():
         except Exception as e:
             logger.error(f"Error serving media file: {e}")
             return jsonify({"error": "Failed to serve media file"}), 500
+
+    @app.route('/import/youtube', methods=['POST'])
+    def import_youtube():
+        try:
+            payload = request.get_json(silent=True) or {}
+            url = str(payload.get("url") or "").strip()
+            if not url:
+                return jsonify({"error": "YouTube URL is required."}), 400
+            if not is_youtube_url(url):
+                return jsonify({"error": "Only YouTube links are supported."}), 400
+
+            result = _download_youtube_audio(url)
+            return jsonify(result), 200
+
+        except Exception as exc:
+            logger.error("YouTube import failed: %s", exc, exc_info=True)
+            return jsonify({"error": f"Failed to import YouTube audio: {exc}"}), 500
 
     @app.route('/preprocess_audio', methods=['POST'])
     def preprocess_audio():

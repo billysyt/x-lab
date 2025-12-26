@@ -40,6 +40,7 @@ export default defineConfig({
       "/download": "http://127.0.0.1:11220",
       "/audio": "http://127.0.0.1:11220",
       "/media": "http://127.0.0.1:11220",
+      "/import": "http://127.0.0.1:11220",
       "/static/vendor": "http://127.0.0.1:11220"
     }
   }

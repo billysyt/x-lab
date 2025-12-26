@@ -28,6 +28,7 @@ import {
   apiConvertChinese,
   apiEditSegment,
   apiGetJobRecord,
+  apiImportYoutube,
   apiGetWhisperModelDownload,
   apiGetWhisperModelStatus,
   apiStartWhisperModelDownload,
@@ -391,8 +392,14 @@ export function App() {
       type === "error" ? "Something went wrong" : type === "success" ? "Done" : "Notice";
     setAlertModal({ title, message, tone: type });
   }, []);
+  const [showOpenModal, setShowOpenModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [youtubeImporting, setYoutubeImporting] = useState(false);
+  const [youtubeError, setYoutubeError] = useState<string | null>(null);
+  const [youtubeProgress, setYoutubeProgress] = useState<number | null>(null);
+  const youtubeProgressTimerRef = useRef<number | null>(null);
   const [isAltPressed, setIsAltPressed] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
@@ -596,6 +603,10 @@ export function App() {
   const timelineScrollIdleRef = useRef<number | null>(null);
   const timelineUserScrollingRef = useRef(false);
   const dragRegionClass = useCustomDrag ? "stt-drag-region" : "pywebview-drag-region";
+  const getPreviewKind = useCallback((media?: MediaItem | null) => {
+    if (!media) return null;
+    return media.streamUrl ? "video" : media.kind;
+  }, []);
   const captionDragRef = useRef<{
     pointerId: number;
     jobId: string;
@@ -643,6 +654,7 @@ export function App() {
     }
     return activeMedia.displayName ?? activeMedia.name ?? "";
   }, [activeMedia, jobsById]);
+  const activePreviewKind = getPreviewKind(activeMedia);
   const captionMenuPosition = useMemo(() => {
     if (!captionMenu || typeof window === "undefined") return null;
     const width = 160;
@@ -698,6 +710,24 @@ export function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [showImportModal]);
+
+  useEffect(() => {
+    if (!showOpenModal) return;
+    setYoutubeError(null);
+    setYoutubeProgress(null);
+    if (youtubeProgressTimerRef.current) {
+      window.clearInterval(youtubeProgressTimerRef.current);
+      youtubeProgressTimerRef.current = null;
+    }
+  }, [showOpenModal]);
+
+  useEffect(() => {
+    if (showOpenModal) return;
+    if (youtubeProgressTimerRef.current) {
+      window.clearInterval(youtubeProgressTimerRef.current);
+      youtubeProgressTimerRef.current = null;
+    }
+  }, [showOpenModal]);
 
   useEffect(() => {
     const el = timelineScrollRef.current;
@@ -1280,6 +1310,78 @@ export function App() {
     uploadRef.current?.openFilePicker?.();
   }, [isCompact]);
 
+  const handleOpenModal = useCallback(() => {
+    setShowOpenModal(true);
+  }, []);
+
+  const handleOpenLocalFromModal = useCallback(() => {
+    setShowOpenModal(false);
+    handleOpenFiles();
+  }, [handleOpenFiles]);
+
+  const handleImportYoutube = useCallback(async () => {
+    const url = youtubeUrl.trim();
+    if (!url) {
+      setYoutubeError("Paste a YouTube link to continue.");
+      return;
+    }
+    setYoutubeError(null);
+    setYoutubeImporting(true);
+    setYoutubeProgress(5);
+    if (youtubeProgressTimerRef.current) {
+      window.clearInterval(youtubeProgressTimerRef.current);
+    }
+    youtubeProgressTimerRef.current = window.setInterval(() => {
+      setYoutubeProgress((prev) => {
+        if (prev === null) return prev;
+        if (prev >= 90) return prev;
+        const next = prev + Math.random() * 8 + 3;
+        return Math.min(90, Math.round(next));
+      });
+    }, 700);
+    try {
+      const payload = await apiImportYoutube(url);
+      const file = payload?.file;
+      if (!file?.path || !file?.name) {
+        throw new Error("Download failed. Please try again.");
+      }
+      const addLocalPathItem = uploadRef.current?.addLocalPathItem;
+      if (!addLocalPathItem) {
+        throw new Error("Upload panel is not ready yet.");
+      }
+      if (isCompact) {
+        setIsLeftDrawerOpen(true);
+      }
+      const displayName = payload?.source?.title?.trim() || undefined;
+      addLocalPathItem({
+        path: file.path,
+        name: file.name,
+        size: typeof file.size === "number" ? file.size : null,
+        mime: file.mime ?? null,
+        displayName,
+        durationSec: typeof payload?.duration_sec === "number" ? payload.duration_sec : null,
+        previewUrl: payload?.stream_url ?? null,
+        streamUrl: payload?.stream_url ?? null,
+        transcriptionKind: "audio"
+      });
+      setYoutubeProgress(100);
+      setShowOpenModal(false);
+      setYoutubeUrl("");
+      notify("YouTube audio imported.", "success");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setYoutubeError(message || "Failed to import YouTube audio.");
+      notify(message || "Failed to import YouTube audio.", "error");
+    } finally {
+      setYoutubeImporting(false);
+      if (youtubeProgressTimerRef.current) {
+        window.clearInterval(youtubeProgressTimerRef.current);
+        youtubeProgressTimerRef.current = null;
+      }
+      setYoutubeProgress(null);
+    }
+  }, [isCompact, notify, youtubeUrl]);
+
   const setWindowOnTop = useCallback((next: boolean) => {
     const win = typeof window !== "undefined" ? (window as any) : null;
     const api = win?.pywebview?.api;
@@ -1476,19 +1578,19 @@ export function App() {
   }, [activeVideoSlot]);
 
   const getActiveMediaEl = useCallback(() => {
-    return activeMedia?.kind === "video" ? getActiveVideoEl() : audioRef.current;
-  }, [activeMedia, getActiveVideoEl]);
+    return activePreviewKind === "video" ? getActiveVideoEl() : audioRef.current;
+  }, [activePreviewKind, getActiveVideoEl]);
 
   const cyclePlaybackRate = useCallback(() => {
     setPlaybackRate((prev) => {
       const next = prev < 1.25 ? 1.5 : prev < 1.75 ? 2 : 1;
       applyPlaybackRate(getActiveMediaEl(), next);
-      if (activeMedia?.kind === "video") {
+      if (activePreviewKind === "video") {
         applyPlaybackRate(getInactiveVideoEl(), next);
       }
       return next;
     });
-  }, [activeMedia?.kind, applyPlaybackRate, getActiveMediaEl, getInactiveVideoEl]);
+  }, [activePreviewKind, applyPlaybackRate, getActiveMediaEl, getInactiveVideoEl]);
 
   const handleToggleChineseVariant = useCallback(() => {
     dispatch(setExportLanguage(exportLanguage === "traditional" ? "simplified" : "traditional"));
@@ -1854,7 +1956,7 @@ export function App() {
 
 
   const transcriptMediaRef =
-    activeMedia?.kind === "video"
+    activePreviewKind === "video"
       ? (activeVideoSlot === 0
         ? (videoRefA as RefObject<HTMLMediaElement>)
         : (videoRefB as RefObject<HTMLMediaElement>))
@@ -1888,7 +1990,7 @@ export function App() {
           const sameMedia = clipEntry.media.id === nextEntry.media.id;
           const canSwapVideo =
             !sameMedia &&
-            nextEntry.media.kind === "video" &&
+            getPreviewKind(nextEntry.media) === "video" &&
             Boolean(getInactiveVideoEl());
           if (canSwapVideo) {
             const nextVideo = getInactiveVideoEl();
@@ -1991,10 +2093,11 @@ export function App() {
     },
     [
       activeMedia?.id,
-      activeMedia?.kind,
+      activePreviewKind,
       applyPlaybackRate,
       clipById,
       clipTimeline,
+      getPreviewKind,
       getActiveMediaEl,
       getActiveVideoEl,
       getInactiveVideoEl,
@@ -2078,7 +2181,7 @@ export function App() {
       if (isGapPlaybackRef.current) return;
       setPlayback((prev) => ({ ...prev, isPlaying: false }));
       if (
-        activeMedia?.kind === "video" &&
+        activePreviewKind === "video" &&
         !playerScrubRef.current &&
         !scrubStateRef.current
       ) {
@@ -2116,7 +2219,7 @@ export function App() {
     };
   }, [
     activeClipId,
-    activeMedia?.kind,
+    activePreviewKind,
     advanceFromClip,
     clipById,
     clipTimeline,
@@ -2130,7 +2233,7 @@ export function App() {
     const mediaEl = getActiveMediaEl();
     if (!mediaEl) return;
     applyPlaybackRate(mediaEl);
-  }, [getActiveMediaEl, applyPlaybackRate, activeMedia?.id, activeMedia?.kind]);
+  }, [getActiveMediaEl, applyPlaybackRate, activeMedia?.id, activePreviewKind]);
 
   useEffect(() => {
     if (!playback.isPlaying) return;
@@ -2201,8 +2304,8 @@ export function App() {
   }, [activeMedia]);
 
   const resolvedPreviewUrl = activeMedia?.previewUrl ?? activePreviewUrl;
-  const activeVideoSrc = resolvedPreviewUrl && activeMedia?.kind === "video" ? resolvedPreviewUrl : null;
-  const audioPreviewSrc = activeMedia?.kind === "audio" ? resolvedPreviewUrl : null;
+  const activeVideoSrc = resolvedPreviewUrl && activePreviewKind === "video" ? resolvedPreviewUrl : null;
+  const audioPreviewSrc = activePreviewKind === "audio" ? resolvedPreviewUrl : null;
   useEffect(() => {
     const audioEl = audioRef.current;
     if (!audioEl) return;
@@ -2225,13 +2328,13 @@ export function App() {
   const shouldShowPreviewPoster = Boolean(previewPoster);
   const nextVideoTarget = useMemo(() => {
     if (!nextClip) return null;
-    if (nextClip.media.kind !== "video") return null;
+    if (getPreviewKind(nextClip.media) !== "video") return null;
     if (activeMedia?.id === nextClip.media.id) return null;
     return {
       url: nextClip.media.previewUrl ?? null,
       trimStartSec: nextClip.trimStartSec
     };
-  }, [activeMedia?.id, nextClip]);
+  }, [activeMedia?.id, getPreviewKind, nextClip]);
 
   useEffect(() => {
     if (!nextVideoTarget?.url) return;
@@ -2415,14 +2518,14 @@ export function App() {
   }, [activeMedia, playback.duration]);
 
   useEffect(() => {
-    if (activeMedia?.kind === "video" && audioRef.current) {
+    if (activePreviewKind === "video" && audioRef.current) {
       try {
         audioRef.current.pause();
       } catch {
         // Ignore.
       }
     }
-    if (activeMedia?.kind === "audio") {
+    if (activePreviewKind === "audio") {
       [videoRefA.current, videoRefB.current].forEach((video) => {
         if (!video) return;
         try {
@@ -2432,7 +2535,7 @@ export function App() {
         }
       });
     }
-  }, [activeMedia?.id, activeMedia?.kind]);
+  }, [activeMedia?.id, activePreviewKind]);
 
   useEffect(() => {
     if (!clipTimeline.length) return;
@@ -3697,16 +3800,16 @@ export function App() {
                       />
                     ) : null}
                   </>
-                ) : activeMedia?.kind === "audio" && resolvedPreviewUrl ? (
+                ) : activePreviewKind === "audio" && resolvedPreviewUrl ? (
                   <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-6 text-xs text-slate-500">
                     <AppIcon name="volume" className="text-2xl" />
                     <span className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Audio Preview</span>
                   </div>
                 ) : activeMedia ? (
                   <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-xs text-slate-500">
-                    <AppIcon name={activeMedia.kind === "audio" ? "volume" : "video"} className="text-2xl" />
+                    <AppIcon name={activePreviewKind === "audio" ? "volume" : "video"} className="text-2xl" />
                     <span className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
-                      {activeMedia.kind === "audio" ? "Audio Preview" : "Preview"}
+                      {activePreviewKind === "audio" ? "Audio Preview" : "Preview"}
                     </span>
                     {activeMedia.source === "job" && activeMedia.kind === "video" ? (
                       <span className="text-[10px] text-slate-500">Video preview not available yet</span>
@@ -3986,7 +4089,7 @@ export function App() {
             {!isHeaderCompact ? (
               <button
                 className="pywebview-no-drag inline-flex h-7 items-center gap-1.5 rounded-md bg-[#1b1b22] px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-[#26262f]"
-                onClick={handleOpenFiles}
+                onClick={handleOpenModal}
                 type="button"
                 aria-label="Open"
                 title="Open"
@@ -4091,7 +4194,7 @@ export function App() {
                 className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#1b1b22]"
                 onClick={() => {
                   setIsHeaderMenuOpen(false);
-                  handleOpenFiles();
+                  handleOpenModal();
                 }}
                 type="button"
               >
@@ -4651,6 +4754,144 @@ export function App() {
         </div>
       ) : null}
 
+      {showOpenModal ? (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div
+            className="w-full max-w-[460px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
+            role="dialog"
+            aria-modal="true"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="p-5">
+              <div>
+                <div className="text-sm font-semibold text-slate-100">Open</div>
+                <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                  Import a local file or pull the smallest YouTube audio for transcription.
+                </p>
+              </div>
+              <div className="mt-4 space-y-3">
+                <button
+                  className={cn(
+                    "group w-full rounded-xl px-4 py-3 text-left transition",
+                    youtubeImporting ? "cursor-not-allowed opacity-50" : "hover:bg-[#151515]"
+                  )}
+                  onClick={handleOpenLocalFromModal}
+                  type="button"
+                  disabled={youtubeImporting}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#111827] text-[#60a5fa]">
+                      <AppIcon name="folderOpen" className="text-[14px]" />
+                    </div>
+                    <div>
+                      <div className="text-[12px] font-semibold text-slate-100">Import video / audio</div>
+                      <p className="mt-1 text-[11px] text-slate-400">
+                        Choose a local media file to add to the timeline.
+                      </p>
+                    </div>
+                  </div>
+                </button>
+                <div className={cn("group w-full rounded-xl px-4 py-3 transition", youtubeImporting ? "" : "hover:bg-[#151515]")}>
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#111827] text-[#ef4444]">
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="h-6 w-6"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <rect x="3" y="6" width="18" height="12" rx="3" />
+                        <path d="M10 9.5l5 2.5-5 2.5z" fill="currentColor" stroke="none" />
+                      </svg>
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-[12px] font-semibold text-slate-100">From YouTube</div>
+                      <p className="mt-1 text-[11px] text-slate-400">
+                        We download audio only (smallest size) to generate captions.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-center gap-2">
+                    <input
+                      type="url"
+                      value={youtubeUrl}
+                      onChange={(event) => {
+                        setYoutubeUrl(event.target.value);
+                        if (youtubeError) {
+                          setYoutubeError(null);
+                        }
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          if (!youtubeImporting) {
+                            void handleImportYoutube();
+                          }
+                        }
+                      }}
+                      placeholder="Paste a YouTube link"
+                      className={cn(
+                        "w-full flex-1 rounded-md border border-slate-700 bg-[#0b0b0b] px-3 py-2 text-[11px] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-[#3b82f6]/60",
+                        youtubeImporting && "cursor-not-allowed opacity-60"
+                      )}
+                      disabled={youtubeImporting}
+                    />
+                    <button
+                      className="rounded-md bg-white px-3 py-2 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95 disabled:opacity-60"
+                      onClick={() => void handleImportYoutube()}
+                      type="button"
+                      disabled={youtubeImporting || !youtubeUrl.trim()}
+                    >
+                      {youtubeImporting ? "Importing..." : "Import"}
+                    </button>
+                  </div>
+                  {youtubeImporting ? (
+                    <div className="mt-3 rounded-lg border border-slate-700/70 bg-[#0b0b0b] px-3 py-2 text-[11px] text-slate-400">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex h-4 w-4 items-center justify-center">
+                          <svg
+                            className="h-4 w-4 animate-spin text-slate-300"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          >
+                            <path d="M12 2a10 10 0 0 1 10 10" />
+                          </svg>
+                        </span>
+                        Downloading audio...
+                      </div>
+                      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#1b1b22]">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-[#3b82f6] via-[#6366f1] to-[#8b5cf6] transition-all"
+                          style={{ width: `${youtubeProgress ?? 20}%` }}
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+                  {youtubeError ? (
+                    <p className="mt-2 text-[11px] text-rose-400">{youtubeError}</p>
+                  ) : null}
+                </div>
+              </div>
+              <div className="mt-5 flex items-center justify-end gap-2">
+                <button
+                  className="rounded-md bg-transparent px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
+                  onClick={() => setShowOpenModal(false)}
+                  type="button"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {showExportModal ? (
         <div
           className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
@@ -4663,22 +4904,17 @@ export function App() {
             onClick={(event) => event.stopPropagation()}
           >
             <div className="p-5">
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#111827] text-[#60a5fa]">
-                  <AppIcon name="download" className="text-[16px]" />
-                </div>
-                <div>
-                  <div className="text-sm font-semibold text-slate-100">Export</div>
-                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-                    Choose a format to export your captions.
-                  </p>
-                </div>
+              <div>
+                <div className="text-sm font-semibold text-slate-100">Export</div>
+                <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                  Choose a format to export your captions.
+                </p>
               </div>
               <div className="mt-4 space-y-3">
                 <button
                   className={cn(
-                    "group w-full rounded-xl border border-slate-700 bg-[#151515] px-4 py-3 text-left transition",
-                    canExportCaptions ? "hover:border-slate-500" : "cursor-not-allowed opacity-50"
+                    "group w-full rounded-xl px-4 py-3 text-left transition",
+                    canExportCaptions ? "hover:bg-[#151515]" : "cursor-not-allowed opacity-50"
                   )}
                   onClick={() => {
                     if (!canExportCaptions) return;
@@ -4689,8 +4925,21 @@ export function App() {
                   type="button"
                 >
                   <div className="flex items-start gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-600/60 bg-black/40 text-[11px] font-bold text-slate-200">
-                      SRT
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#111827] text-[#60a5fa]">
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="h-6 w-6"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <rect x="3" y="4.5" width="18" height="11" rx="2" />
+                        <path d="M7 9.5h10" />
+                        <path d="M7 12.5h6" />
+                        <path d="M8 18.5h8" />
+                      </svg>
                     </div>
                     <div>
                       <div className="text-[12px] font-semibold text-slate-100">Standard SRT</div>
@@ -4702,8 +4951,8 @@ export function App() {
                 </button>
                 <button
                   className={cn(
-                    "group w-full rounded-xl border border-slate-700 bg-[#151515] px-4 py-3 text-left transition",
-                    canExportCaptions ? "hover:border-slate-500" : "cursor-not-allowed opacity-50"
+                    "group w-full rounded-xl px-4 py-3 text-left transition",
+                    canExportCaptions ? "hover:bg-[#151515]" : "cursor-not-allowed opacity-50"
                   )}
                   onClick={() => {
                     if (!canExportCaptions) return;
@@ -4714,8 +4963,22 @@ export function App() {
                   type="button"
                 >
                   <div className="flex items-start gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-600/60 bg-black/40 text-[11px] font-bold text-slate-200">
-                      TXT
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#111827] text-[#f59e0b]">
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="h-6 w-6"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M7 3.5h7l4 4v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-15a2 2 0 0 1 2-2z" />
+                        <path d="M14 3.5v4h4" />
+                        <path d="M9 12.5h6" />
+                        <path d="M9 15.5h6" />
+                        <path d="M9 18.5h4" />
+                      </svg>
                     </div>
                     <div>
                       <div className="text-[12px] font-semibold text-slate-100">Plain Text</div>
@@ -4854,7 +5117,7 @@ export function App() {
                   className="rounded-md bg-white px-3 py-1.5 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95"
                   onClick={() => {
                     setShowImportModal(false);
-                    handleOpenFiles();
+                    handleOpenModal();
                   }}
                   type="button"
                 >
