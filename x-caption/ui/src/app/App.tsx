@@ -5,8 +5,10 @@ import { setExportLanguage } from "../features/transcript/transcriptSlice";
 import { useAppDispatch, useAppSelector } from "./hooks";
 import {
   addJob,
+  addSegment,
   bootstrapJobs,
   pollJobUpdates,
+  removeSegment,
   selectJob,
   setJobSegments,
   updateSegmentText,
@@ -27,7 +29,9 @@ import {
   apiGetWhisperModelStatus,
   apiStartWhisperModelDownload,
   apiUpsertJobRecord,
-  apiUpdateSegmentTiming
+  apiUpdateSegmentTiming,
+  apiAddSegment,
+  apiDeleteSegment
 } from "../shared/api/sttApi";
 import type { ExportLanguage, Job, TranscriptSegment, WhisperModelDownload, WhisperModelStatus } from "../shared/types";
 
@@ -517,6 +521,12 @@ export function App() {
     startX: number;
     mode: "move" | "start" | "end";
   } | null>(null);
+  const [captionHover, setCaptionHover] = useState<{ start: number; end: number } | null>(null);
+  const [captionMenu, setCaptionMenu] = useState<{
+    x: number;
+    y: number;
+    segment: TranscriptSegment;
+  } | null>(null);
   const activeJob = useMemo(() => {
     if (selectedJob) return selectedJob;
     if (activeMedia?.source === "job" && activeMedia.jobId) {
@@ -524,6 +534,17 @@ export function App() {
     }
     return null;
   }, [activeMedia?.jobId, activeMedia?.source, jobsById, selectedJob]);
+  const captionMenuPosition = useMemo(() => {
+    if (!captionMenu || typeof window === "undefined") return null;
+    const width = 160;
+    const height = 44;
+    const maxLeft = Math.max(8, window.innerWidth - width - 8);
+    const maxTop = Math.max(8, window.innerHeight - height - 8);
+    return {
+      left: Math.min(captionMenu.x, maxLeft),
+      top: Math.min(captionMenu.y, maxTop)
+    };
+  }, [captionMenu]);
 
   useEffect(() => {
     if (!isHeaderCompact) {
@@ -604,6 +625,17 @@ export function App() {
     activeJob?.partialResult?.segments ||
     activeJob?.streamingSegments ||
     [];
+  const sortedSegments = useMemo(
+    () =>
+      [...segments]
+        .map((seg) => ({
+          ...seg,
+          start: Number(seg.start) || 0,
+          end: Number(seg.end) || 0
+        }))
+        .sort((a, b) => a.start - b.start),
+    [segments]
+  );
   const displaySegments = useMemo(
     () =>
       segments.filter((segment: any) => {
@@ -611,6 +643,17 @@ export function App() {
         return !isBlankAudioText(rawText);
       }),
     [segments]
+  );
+  const sortedDisplaySegments = useMemo(
+    () =>
+      [...displaySegments]
+        .map((seg) => ({
+          ...seg,
+          start: Number(seg.start) || 0,
+          end: Number(seg.end) || 0
+        }))
+        .sort((a, b) => a.start - b.start),
+    [displaySegments]
   );
   const exportSegments = useMemo(
     () =>
@@ -2381,16 +2424,12 @@ export function App() {
     (drag: NonNullable<typeof captionDragRef.current>, deltaSec: number) => {
       let start = drag.start;
       let end = drag.end;
-      const sorted = [...segments]
-        .map((seg) => ({
-          id: seg.id,
-          start: Number(seg.start) || 0,
-          end: Number(seg.end) || 0
-        }))
-        .sort((a, b) => a.start - b.start);
-      const currentIndex = sorted.findIndex((seg) => seg.id === drag.segmentId);
-      const prevSeg = currentIndex > 0 ? sorted[currentIndex - 1] : null;
-      const nextSeg = currentIndex >= 0 && currentIndex < sorted.length - 1 ? sorted[currentIndex + 1] : null;
+      const currentIndex = sortedDisplaySegments.findIndex((seg) => seg.id === drag.segmentId);
+      const prevSeg = currentIndex > 0 ? sortedDisplaySegments[currentIndex - 1] : null;
+      const nextSeg =
+        currentIndex >= 0 && currentIndex < sortedDisplaySegments.length - 1
+          ? sortedDisplaySegments[currentIndex + 1]
+          : null;
       const prevEnd = prevSeg ? prevSeg.end : 0;
       const nextStart = nextSeg ? nextSeg.start : (duration > 0 ? duration : Number.POSITIVE_INFINITY);
       const span = Math.max(minCaptionDuration, drag.end - drag.start);
@@ -2432,7 +2471,7 @@ export function App() {
       }
       return { start, end };
     },
-    [activeJob?.id, duration, minCaptionDuration, segments]
+    [duration, minCaptionDuration, sortedDisplaySegments]
   );
 
   const handleCaptionPointerDown = useCallback(
@@ -2501,6 +2540,75 @@ export function App() {
       }).catch(() => undefined);
     },
     [computeCaptionTiming, dispatch, pxPerSec]
+  );
+
+  const handleAddCaption = useCallback(
+    (start: number, end: number) => {
+      if (!activeJob?.id) return;
+      const jobId = activeJob.id;
+      const maxId = sortedSegments.reduce((max, seg) => Math.max(max, Number(seg.id) || 0), 0);
+      const nextId = maxId + 1;
+      const text = "New Caption";
+      const segment: TranscriptSegment = {
+        id: nextId,
+        start,
+        end,
+        text,
+        originalText: text
+      };
+      dispatch(addSegment({ jobId, segment }));
+      void apiAddSegment({ jobId, segmentId: nextId, start, end, text }).catch(() => undefined);
+    },
+    [activeJob?.id, dispatch, sortedSegments]
+  );
+
+  const handleDeleteCaption = useCallback(
+    (segment: TranscriptSegment) => {
+      if (!activeJob?.id) return;
+      const jobId = activeJob.id;
+      dispatch(removeSegment({ jobId, segmentId: Number(segment.id) }));
+      void apiDeleteSegment({ jobId, segmentId: Number(segment.id) }).catch(() => undefined);
+    },
+    [activeJob?.id, dispatch]
+  );
+
+  const handleCaptionHoverMove = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (captionDragRef.current) return;
+      if (scrubStateRef.current || playerScrubRef.current) return;
+      if (duration <= 0) return;
+      if (!activeJob?.id) return;
+      const track = timelineTrackRef.current;
+      const scrollEl = timelineScrollRef.current;
+      if (!track || !scrollEl) return;
+      const rect = track.getBoundingClientRect();
+      const x = Math.max(0, event.clientX - rect.left);
+      const time = clamp((scrollEl.scrollLeft + x) / Math.max(pxPerSec, 0.001), 0, duration);
+      for (const seg of sortedDisplaySegments) {
+        if (time >= seg.start && time <= seg.end) {
+          setCaptionHover(null);
+          return;
+        }
+      }
+      let gapStart = 0;
+      let gapEnd = duration;
+      for (const seg of sortedDisplaySegments) {
+        if (time < seg.start) {
+          gapEnd = seg.start;
+          break;
+        }
+        gapStart = Math.max(gapStart, seg.end);
+      }
+      if (gapEnd - gapStart <= minCaptionDuration) {
+        setCaptionHover(null);
+        return;
+      }
+      const desired = Math.min(5, gapEnd - gapStart);
+      const start = clamp(time, gapStart, gapEnd - desired);
+      const end = start + desired;
+      setCaptionHover({ start, end });
+    },
+    [activeJob?.id, duration, minCaptionDuration, pxPerSec, sortedDisplaySegments]
   );
 
   const onTrackPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -3435,6 +3543,8 @@ export function App() {
                           onPointerDown={onTrackPointerDown}
                           onPointerMove={onTrackPointerMove}
                           onPointerUp={onTrackPointerUp}
+                          onMouseMove={handleCaptionHoverMove}
+                          onMouseLeave={() => setCaptionHover(null)}
                         >
                           {displaySegments.map((segment: any) => {
                             const start = Number(segment.start ?? 0);
@@ -3463,6 +3573,15 @@ export function App() {
                                 onPointerMove={handleCaptionPointerMove}
                                 onPointerUp={handleCaptionPointerUp}
                                 onPointerCancel={handleCaptionPointerUp}
+                                onContextMenu={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  setCaptionMenu({
+                                    x: event.clientX,
+                                    y: event.clientY,
+                                    segment
+                                  });
+                                }}
                               >
                                 <span className="block truncate leading-6">{text}</span>
                                 <span
@@ -3476,7 +3595,23 @@ export function App() {
                               </div>
                             );
                           })}
-                          {null}
+                          {captionHover ? (
+                            <div
+                              className="absolute top-0 flex h-full items-center justify-center rounded-lg border border-dashed border-slate-500/40 bg-white/5 text-[10px] text-slate-200"
+                              style={{
+                                left: `${Math.max(0, captionHover.start * pxPerSec)}px`,
+                                width: `${Math.max(2, (captionHover.end - captionHover.start) * pxPerSec)}px`
+                              }}
+                              onPointerDown={(event) => event.stopPropagation()}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleAddCaption(captionHover.start, captionHover.end);
+                                setCaptionHover(null);
+                              }}
+                            >
+                              <span className="text-[12px] font-semibold text-white/90">+</span>
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     </div>
@@ -3506,6 +3641,34 @@ export function App() {
             {leftPanelContent}
           </div>
         </>
+      ) : null}
+
+      {captionMenu && captionMenuPosition ? (
+        <div
+          className="fixed inset-0 z-[125]"
+          onClick={() => setCaptionMenu(null)}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            setCaptionMenu(null);
+          }}
+        >
+          <div
+            className="absolute w-40 overflow-hidden rounded-lg border border-slate-700/60 bg-[#121212] shadow-[0_16px_40px_rgba(0,0,0,0.55)]"
+            style={{ left: `${captionMenuPosition.left}px`, top: `${captionMenuPosition.top}px` }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              className="w-full px-3 py-2 text-left text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
+              onClick={() => {
+                handleDeleteCaption(captionMenu.segment);
+                setCaptionMenu(null);
+              }}
+              type="button"
+            >
+              Delete caption
+            </button>
+          </div>
+        </div>
       ) : null}
 
       {alertModal ? (

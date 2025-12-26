@@ -166,6 +166,40 @@ export async function apiUpdateSegmentTiming(args: {
   });
 }
 
+export async function apiAddSegment(args: {
+  jobId: string;
+  start: number;
+  end: number;
+  text: string;
+  segmentId?: number;
+}): Promise<{ success?: boolean; message?: string; segment?: any }> {
+  return fetchJson<{ success?: boolean; message?: string; segment?: any }>("/api/segment/add", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      job_id: args.jobId,
+      segment_id: args.segmentId,
+      start: args.start,
+      end: args.end,
+      text: args.text
+    })
+  });
+}
+
+export async function apiDeleteSegment(args: {
+  jobId: string;
+  segmentId: number;
+}): Promise<{ success?: boolean; message?: string }> {
+  return fetchJson<{ success?: boolean; message?: string }>("/api/segment/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      job_id: args.jobId,
+      segment_id: args.segmentId
+    })
+  });
+}
+
 export async function apiConvertChinese(args: {
   text: string;
   target: "traditional" | "simplified";

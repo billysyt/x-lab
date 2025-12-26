@@ -375,6 +375,41 @@ const slice = createSlice({
         }
       }
     },
+    addSegment(
+      state,
+      action: PayloadAction<{ jobId: string; segment: TranscriptSegment }>
+    ) {
+      const job = state.jobsById[action.payload.jobId];
+      if (!job) return;
+      const segment = action.payload.segment;
+      const apply = (result: TranscriptResult | null | undefined) => {
+        if (!result) return;
+        const segments = Array.isArray(result.segments) ? [...result.segments] : [];
+        segments.push(segment);
+        segments.sort((a, b) => a.start - b.start);
+        result.segments = segments;
+      };
+      apply(job.result);
+      apply(job.partialResult);
+      if (job.streamingSegments && Array.isArray(job.streamingSegments)) {
+        const next = [...job.streamingSegments, segment].sort((a, b) => a.start - b.start);
+        job.streamingSegments = next;
+      }
+    },
+    removeSegment(state, action: PayloadAction<{ jobId: string; segmentId: number }>) {
+      const job = state.jobsById[action.payload.jobId];
+      if (!job) return;
+      const segmentId = action.payload.segmentId;
+      const apply = (result: TranscriptResult | null | undefined) => {
+        if (!result || !Array.isArray(result.segments)) return;
+        result.segments = result.segments.filter((seg) => seg.id !== segmentId);
+      };
+      apply(job.result);
+      apply(job.partialResult);
+      if (job.streamingSegments && Array.isArray(job.streamingSegments)) {
+        job.streamingSegments = job.streamingSegments.filter((seg) => seg.id !== segmentId);
+      }
+    },
     setJobSegments(state, action: PayloadAction<{ jobId: string; segments: TranscriptSegment[] }>) {
       const job = state.jobsById[action.payload.jobId];
       if (!job) return;
@@ -490,11 +525,13 @@ const slice = createSlice({
 export const {
   addJob,
   applyJobUpdate,
+  addSegment,
   clearAllJobs,
   selectJob,
   setJobSegments,
   updateSegmentText,
-  updateSegmentTiming
+  updateSegmentTiming,
+  removeSegment
 } = slice.actions;
 export const jobsReducer = slice.reducer;
 

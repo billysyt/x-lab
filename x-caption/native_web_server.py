@@ -572,6 +572,142 @@ def create_app():
                 "error": "Failed to update segment timing"
             }), 500
 
+    @app.route('/api/segment/add', methods=['POST'])
+    def add_segment():
+        """Add a new segment to the transcript."""
+        try:
+            data = request.get_json()
+            job_id = data.get('job_id')
+            start = data.get('start')
+            end = data.get('end')
+            text = data.get('text') or "New Caption"
+            segment_id = data.get('segment_id')
+
+            if not job_id or start is None or end is None:
+                return jsonify({
+                    "success": False,
+                    "error": "job_id, start, and end are required"
+                }), 400
+
+            try:
+                start_val = float(start)
+                end_val = float(end)
+            except Exception:
+                return jsonify({
+                    "success": False,
+                    "error": "start and end must be numbers"
+                }), 400
+
+            if end_val <= start_val:
+                return jsonify({
+                    "success": False,
+                    "error": "end must be greater than start"
+                }), 400
+
+            record = native_history.get_job_record(job_id)
+            transcription = record.get("transcript") if record else None
+            if not transcription:
+                return jsonify({
+                    "success": False,
+                    "error": "Transcription not found"
+                }), 404
+
+            segments = transcription.get("segments") or []
+            if segment_id is None:
+                max_id = 0
+                for seg in segments:
+                    try:
+                        max_id = max(max_id, int(seg.get("id", 0)))
+                    except Exception:
+                        continue
+                segment_id = max_id + 1
+
+            new_segment = {
+                "id": int(segment_id),
+                "start": start_val,
+                "end": end_val,
+                "text": text,
+                "originalText": text,
+            }
+            segments.append(new_segment)
+            segments.sort(key=lambda s: float(s.get("start", 0)))
+            transcription["segments"] = segments
+            transcription["text"] = " ".join([seg.get("text", "") for seg in segments if seg.get("text")]).strip()
+
+            native_history.update_job_transcript(job_id, transcription)
+
+            return jsonify({
+                "success": True,
+                "message": "Segment added",
+                "segment": new_segment
+            }), 200
+
+        except Exception as e:
+            logger.error(f"Error adding segment: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return jsonify({
+                "success": False,
+                "error": "Failed to add segment"
+            }), 500
+
+    @app.route('/api/segment/delete', methods=['POST'])
+    def delete_segment():
+        """Delete a segment from the transcript."""
+        try:
+            data = request.get_json()
+            job_id = data.get('job_id')
+            segment_id = data.get('segment_id')
+
+            if not job_id or segment_id is None:
+                return jsonify({
+                    "success": False,
+                    "error": "job_id and segment_id are required"
+                }), 400
+
+            try:
+                segment_id_val = int(segment_id)
+            except Exception:
+                return jsonify({
+                    "success": False,
+                    "error": "segment_id must be a number"
+                }), 400
+
+            record = native_history.get_job_record(job_id)
+            transcription = record.get("transcript") if record else None
+            if not transcription:
+                return jsonify({
+                    "success": False,
+                    "error": "Transcription not found"
+                }), 404
+
+            segments = transcription.get("segments") or []
+            next_segments = [seg for seg in segments if int(seg.get("id", -1)) != segment_id_val]
+
+            if len(next_segments) == len(segments):
+                return jsonify({
+                    "success": False,
+                    "error": f"Segment {segment_id_val} not found"
+                }), 404
+
+            transcription["segments"] = next_segments
+            transcription["text"] = " ".join([seg.get("text", "") for seg in next_segments if seg.get("text")]).strip()
+            native_history.update_job_transcript(job_id, transcription)
+
+            return jsonify({
+                "success": True,
+                "message": "Segment deleted"
+            }), 200
+
+        except Exception as e:
+            logger.error(f"Error deleting segment: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return jsonify({
+                "success": False,
+                "error": "Failed to delete segment"
+            }), 500
+
     @app.route('/api/job/record', methods=['POST'])
     def upsert_job_record():
         """Create or update a job record in the app database."""
