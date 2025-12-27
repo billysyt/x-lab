@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { setVersion } from "../features/ui/uiSlice";
 import { setChineseStyle, setLanguage } from "../features/settings/settingsSlice";
 import { setExportLanguage } from "../features/transcript/transcriptSlice";
@@ -713,21 +713,22 @@ export function App() {
 
   useEffect(() => {
     if (!showOpenModal) return;
-    setYoutubeError(null);
-    setYoutubeProgress(null);
+    if (!youtubeImporting) {
+      setYoutubeProgress(null);
+    }
     if (youtubeProgressTimerRef.current) {
       window.clearInterval(youtubeProgressTimerRef.current);
       youtubeProgressTimerRef.current = null;
     }
-  }, [showOpenModal]);
+  }, [showOpenModal, youtubeImporting]);
 
   useEffect(() => {
-    if (showOpenModal) return;
+    if (showOpenModal || youtubeImporting) return;
     if (youtubeProgressTimerRef.current) {
       window.clearInterval(youtubeProgressTimerRef.current);
       youtubeProgressTimerRef.current = null;
     }
-  }, [showOpenModal]);
+  }, [showOpenModal, youtubeImporting]);
 
   useEffect(() => {
     const el = timelineScrollRef.current;
@@ -772,7 +773,7 @@ export function App() {
     const interval = window.setInterval(() => {
       const activeIds = jobOrder.filter((id) => {
         const status = jobsById[id]?.status;
-        return status !== "completed" && status !== "failed" && status !== "cancelled";
+        return status === "queued" || status === "processing";
       });
       activeIds.forEach((jobId) => {
         if (inFlight.has(jobId)) return;
@@ -933,7 +934,7 @@ export function App() {
     };
   }, [compactTab, isCompact, isPlayerModalOpen]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (subtitleEditor && subtitleEditSize) return;
     const measureEl = subtitleMeasureRef.current;
     if (!measureEl) return;
@@ -1311,6 +1312,8 @@ export function App() {
   }, [isCompact]);
 
   const handleOpenModal = useCallback(() => {
+    setYoutubeError(null);
+    setYoutubeProgress(null);
     setShowOpenModal(true);
   }, []);
 
@@ -1326,6 +1329,7 @@ export function App() {
       return;
     }
     setYoutubeError(null);
+    setShowOpenModal(false);
     setYoutubeImporting(true);
     setYoutubeProgress(5);
     if (youtubeProgressTimerRef.current) {
@@ -1362,16 +1366,24 @@ export function App() {
         durationSec: typeof payload?.duration_sec === "number" ? payload.duration_sec : null,
         previewUrl: payload?.stream_url ?? null,
         streamUrl: payload?.stream_url ?? null,
+        externalSource: {
+          type: "youtube",
+          url: payload?.source?.url ?? url,
+          streamUrl: payload?.stream_url ?? null,
+          title: payload?.source?.title ?? null,
+          id: payload?.source?.id ?? null
+        },
         transcriptionKind: "audio"
       });
       setYoutubeProgress(100);
       setShowOpenModal(false);
       setYoutubeUrl("");
-      notify("YouTube audio imported.", "success");
+      notify("YouTube media loaded.", "success");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setYoutubeError(message || "Failed to import YouTube audio.");
-      notify(message || "Failed to import YouTube audio.", "error");
+      setYoutubeError(message || "Failed to load YouTube media.");
+      notify(message || "Failed to load YouTube media.", "error");
+      setShowOpenModal(true);
     } finally {
       setYoutubeImporting(false);
       if (youtubeProgressTimerRef.current) {
@@ -4766,7 +4778,7 @@ export function App() {
               <div>
                 <div className="text-sm font-semibold text-slate-100">Open</div>
                 <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-                  Import a local file or pull the smallest YouTube audio for transcription.
+                  Import a local file or load YouTube media for transcription.
                 </p>
               </div>
               <div className="mt-4 space-y-3">
@@ -4810,7 +4822,7 @@ export function App() {
                     <div className="flex-1">
                       <div className="text-[12px] font-semibold text-slate-100">From YouTube</div>
                       <p className="mt-1 text-[11px] text-slate-400">
-                        We download audio only (smallest size) to generate captions.
+                        We load YouTube media to generate captions.
                       </p>
                     </div>
                   </div>
@@ -4848,31 +4860,6 @@ export function App() {
                       {youtubeImporting ? "Importing..." : "Import"}
                     </button>
                   </div>
-                  {youtubeImporting ? (
-                    <div className="mt-3 rounded-lg border border-slate-700/70 bg-[#0b0b0b] px-3 py-2 text-[11px] text-slate-400">
-                      <div className="flex items-center gap-2">
-                        <span className="inline-flex h-4 w-4 items-center justify-center">
-                          <svg
-                            className="h-4 w-4 animate-spin text-slate-300"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                          >
-                            <path d="M12 2a10 10 0 0 1 10 10" />
-                          </svg>
-                        </span>
-                        Downloading audio...
-                      </div>
-                      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#1b1b22]">
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-[#3b82f6] via-[#6366f1] to-[#8b5cf6] transition-all"
-                          style={{ width: `${youtubeProgress ?? 20}%` }}
-                        />
-                      </div>
-                    </div>
-                  ) : null}
                   {youtubeError ? (
                     <p className="mt-2 text-[11px] text-rose-400">{youtubeError}</p>
                   ) : null}
@@ -4886,6 +4873,56 @@ export function App() {
                 >
                   Cancel
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {youtubeImporting ? (
+        <div className="fixed inset-0 z-[135] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div
+            className="w-full max-w-[420px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="p-5">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#111827] text-[#ef4444]">
+                  <AppIcon name="youtube" className="text-[16px]" />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-slate-100">Loading YouTube media</div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                    Preparing your YouTube media. Please wait...
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 rounded-lg border border-slate-700/70 bg-[#0b0b0b] px-3 py-2 text-[11px] text-slate-400">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex h-4 w-4 items-center justify-center">
+                    <svg
+                      className="h-4 w-4 animate-spin text-slate-300"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    >
+                      <path d="M12 2a10 10 0 0 1 10 10" />
+                    </svg>
+                  </span>
+                  Loading YouTube media...
+                </div>
+                <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#1b1b22]">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-[#ef4444] via-[#f97316] to-[#facc15] transition-all"
+                    style={{ width: `${Math.max(4, Math.min(100, youtubeProgress ?? 12))}%` }}
+                  />
+                </div>
+                <div className="mt-2 text-right text-[10px] font-semibold text-slate-300">
+                  {youtubeProgress !== null ? `${youtubeProgress}%` : "Loading..."}
+                </div>
               </div>
             </div>
           </div>

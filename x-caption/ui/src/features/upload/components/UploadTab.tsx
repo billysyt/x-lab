@@ -41,8 +41,17 @@ export type UploadTabHandle = {
     durationSec?: number | null;
     previewUrl?: string | null;
     streamUrl?: string | null;
+    externalSource?: MediaSourceInfo | null;
     transcriptionKind?: "audio" | "video";
   }) => void;
+};
+
+export type MediaSourceInfo = {
+  type: "youtube";
+  url?: string | null;
+  streamUrl?: string | null;
+  title?: string | null;
+  id?: string | null;
 };
 
 export type MediaItem = {
@@ -57,6 +66,7 @@ export type MediaItem = {
   localPath?: string | null;
   previewUrl?: string | null;
   streamUrl?: string | null;
+  externalSource?: MediaSourceInfo | null;
   thumbnailUrl?: string | null;
   thumbnailSource?: "saved" | "captured" | "none";
   createdAt?: number;
@@ -305,10 +315,11 @@ export const UploadTab = memo(forwardRef(function UploadTab(
     durationSec?: number | null;
     previewUrl?: string | null;
     streamUrl?: string | null;
+    externalSource?: MediaSourceInfo | null;
     transcriptionKind?: "audio" | "video";
   }): MediaItem {
     const id = `local-path-${args.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const previewUrl = args.previewUrl ?? toFileUrl(args.path);
+    const previewUrl = args.previewUrl ?? args.streamUrl ?? toFileUrl(args.path);
     const jobId = buildImportedJobId(args.path, args.size);
     return {
       id,
@@ -322,6 +333,7 @@ export const UploadTab = memo(forwardRef(function UploadTab(
       localPath: args.path,
       previewUrl,
       streamUrl: args.streamUrl ?? args.previewUrl ?? null,
+      externalSource: args.externalSource ?? null,
       thumbnailUrl: null,
       createdAt: Date.now(),
       durationSec: typeof args.durationSec === "number" ? args.durationSec : null
@@ -583,6 +595,7 @@ export const UploadTab = memo(forwardRef(function UploadTab(
     durationSec?: number | null;
     previewUrl?: string | null;
     streamUrl?: string | null;
+    externalSource?: MediaSourceInfo | null;
     transcriptionKind?: "audio" | "video";
   }) {
     const item = buildLocalPathItem(args);
@@ -592,13 +605,26 @@ export const UploadTab = memo(forwardRef(function UploadTab(
     clearSelectedFile();
     if (item.jobId && item.localPath) {
       const displayName = item.displayName ?? (stripFileExtension(args.name) || args.name);
+      const uiState =
+        args.externalSource?.type === "youtube"
+          ? {
+              mediaSource: {
+                type: "youtube",
+                url: args.externalSource.url ?? null,
+                streamUrl: args.externalSource.streamUrl ?? null,
+                title: args.externalSource.title ?? null,
+                id: args.externalSource.id ?? null
+              }
+            }
+          : undefined;
       void apiUpsertJobRecord({
         job_id: item.jobId,
         filename: args.name,
         display_name: displayName,
         media_path: item.localPath,
         media_kind: item.kind,
-        status: "imported"
+        status: "imported",
+        ui_state: uiState
       }).catch(() => undefined);
     }
     if (item.kind === "video" && item.previewUrl) {
@@ -723,6 +749,9 @@ export const UploadTab = memo(forwardRef(function UploadTab(
       transform: CSS.Transform.toString(transform),
       transition
     };
+    const isYoutube = item.externalSource?.type === "youtube";
+    const previewKind = getPreviewKind(item);
+    const fallbackIcon = isYoutube ? "youtube" : previewKind === "video" ? "video" : "volume";
 
     return (
       <div ref={setNodeRef} style={style}>
@@ -768,13 +797,18 @@ export const UploadTab = memo(forwardRef(function UploadTab(
           type="button"
         >
           <div className={cn("flex w-full items-center gap-3", isProcessingJob && "blur-[1.5px]")}>
-            {getPreviewKind(item) === "video" && item.thumbnailUrl ? (
+            {previewKind === "video" && item.thumbnailUrl ? (
               <div className="h-10 w-16 overflow-hidden rounded-md bg-[#0f0f10]">
                 <img src={item.thumbnailUrl} alt="" className="h-full w-full object-cover" />
               </div>
             ) : (
-              <div className="flex h-10 w-16 items-center justify-center rounded-md bg-[#0f0f10] text-slate-300">
-                <AppIcon name={getPreviewKind(item) === "video" ? "video" : "volume"} className="text-[14px]" />
+              <div
+                className={cn(
+                  "flex h-10 w-16 items-center justify-center rounded-md bg-[#0f0f10]",
+                  isYoutube ? "text-[#ef4444]" : "text-slate-300"
+                )}
+              >
+                <AppIcon name={fallbackIcon} className="text-[14px]" />
               </div>
             )}
             <div className="min-w-0 flex-1">
@@ -875,7 +909,20 @@ export const UploadTab = memo(forwardRef(function UploadTab(
     const localMatch = localMedia.find((item) => item.name === job.filename && item.kind === "video");
     const meta = jobPreviewMeta[id];
     const mediaPath = job.audioFile?.path || job.result?.file_path || null;
-    const previewUrl = mediaPath ? toFileUrl(mediaPath) : null;
+    const rawSource =
+      job.uiState && typeof job.uiState === "object" ? (job.uiState as Record<string, any>).mediaSource : null;
+    const externalSource =
+      rawSource && typeof rawSource === "object" && rawSource.type === "youtube"
+        ? {
+            type: "youtube" as const,
+            url: typeof rawSource.url === "string" ? rawSource.url : null,
+            streamUrl: typeof rawSource.streamUrl === "string" ? rawSource.streamUrl : null,
+            title: typeof rawSource.title === "string" ? rawSource.title : null,
+            id: typeof rawSource.id === "string" ? rawSource.id : null
+          }
+        : null;
+    const streamUrl = externalSource?.streamUrl || null;
+    const previewUrl = streamUrl ?? (mediaPath ? toFileUrl(mediaPath) : null);
     const persistedThumbnail =
       job.uiState && typeof job.uiState === "object" && typeof (job.uiState as any)?.thumbnail?.data === "string"
         ? (job.uiState as any).thumbnail.data
@@ -894,6 +941,8 @@ export const UploadTab = memo(forwardRef(function UploadTab(
       jobId: id,
       localPath: mediaPath,
       previewUrl,
+      streamUrl,
+      externalSource,
       createdAt: job.startTime || Date.now(),
       durationSec:
         typeof jobDuration === "number" ? jobDuration : meta?.durationSec ?? localMatch?.durationSec ?? null,
@@ -947,6 +996,22 @@ export const UploadTab = memo(forwardRef(function UploadTab(
       if (displayName) {
         dispatch(updateJobDisplayName({ jobId: job.id, displayName }));
         void apiUpsertJobRecord({ job_id: job.id, filename, display_name: displayName }).catch(() => undefined);
+      }
+      if (selectedItem?.externalSource?.type === "youtube") {
+        const existingUiState =
+          job.uiState && typeof job.uiState === "object" ? (job.uiState as Record<string, any>) : {};
+        const nextUiState = {
+          ...existingUiState,
+          mediaSource: {
+            type: "youtube",
+            url: selectedItem.externalSource.url ?? null,
+            streamUrl: selectedItem.externalSource.streamUrl ?? null,
+            title: selectedItem.externalSource.title ?? null,
+            id: selectedItem.externalSource.id ?? null
+          }
+        };
+        dispatch(updateJobUiState({ jobId: job.id, uiState: nextUiState }));
+        void apiUpsertJobRecord({ job_id: job.id, ui_state: nextUiState }).catch(() => undefined);
       }
 
       if (selectedItem?.source === "local") {

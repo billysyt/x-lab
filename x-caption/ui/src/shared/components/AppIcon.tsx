@@ -47,7 +47,8 @@ import {
   FaUser,
   FaUsers,
   FaVideo,
-  FaVolumeUp
+  FaVolumeUp,
+  FaYoutube
 } from "react-icons/fa";
 
 const icons = {
@@ -98,7 +99,8 @@ const icons = {
   video: FaVideo,
   volume: FaVolumeUp,
   captions: FaClosedCaptioning,
-  sparkle: FaStar
+  sparkle: FaStar,
+  youtube: FaYoutube
 } as const satisfies Record<string, IconType>;
 
 export type AppIconName = keyof typeof icons;
