@@ -17,7 +17,7 @@ import contextlib
 from urllib.parse import urlparse
 import urllib.error
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Callable
 from collections import defaultdict
 import threading
 
@@ -95,6 +95,10 @@ model_downloads: Dict[str, Dict[str, Any]] = {}
 model_download_lock = threading.Lock()
 active_model_download_id: Optional[str] = None
 
+# YouTube import download tracking
+youtube_downloads: Dict[str, Dict[str, Any]] = {}
+youtube_download_lock = threading.Lock()
+
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
@@ -117,7 +121,11 @@ def _resolve_youtube_download(downloads_dir: Path, download_id: str) -> Path:
     return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
-def _download_youtube_audio(url: str) -> Dict[str, Any]:
+def _download_youtube_audio(
+    url: str,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    download_id: Optional[str] = None
+) -> Dict[str, Any]:
     try:
         from yt_dlp import YoutubeDL  # type: ignore
     except Exception as exc:
@@ -125,8 +133,13 @@ def _download_youtube_audio(url: str) -> Dict[str, Any]:
 
     downloads_dir = get_uploads_dir() / "youtube"
     downloads_dir.mkdir(parents=True, exist_ok=True)
-    download_id = uuid.uuid4().hex
+    download_id = download_id or uuid.uuid4().hex
     outtmpl = str(downloads_dir / f"{download_id}.%(ext)s")
+
+    def progress_hook(update: Dict[str, Any]) -> None:
+        if progress_callback:
+            progress_callback(update)
+
     ydl_opts = {
         "format": "worstaudio",
         "outtmpl": outtmpl,
@@ -141,6 +154,7 @@ def _download_youtube_audio(url: str) -> Dict[str, Any]:
                 "preferredquality": "64",
             }
         ],
+        "progress_hooks": [progress_hook],
     }
 
     with YoutubeDL(ydl_opts) as ydl:
@@ -207,6 +221,94 @@ def _download_youtube_audio(url: str) -> Dict[str, Any]:
         "stream_url": stream_url,
         "duration_sec": duration if isinstance(duration, (int, float)) else None,
     }
+
+
+def _serialize_youtube_download(state: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "download_id": state.get("id"),
+        "status": state.get("status"),
+        "progress": state.get("progress"),
+        "message": state.get("message"),
+        "error": state.get("error"),
+        "file": state.get("file"),
+        "source": state.get("source"),
+        "stream_url": state.get("stream_url"),
+        "duration_sec": state.get("duration_sec"),
+        "started_at": state.get("started_at"),
+        "updated_at": state.get("updated_at"),
+    }
+
+
+def _get_youtube_download_state(download_id: str) -> Optional[Dict[str, Any]]:
+    with youtube_download_lock:
+        return youtube_downloads.get(download_id)
+
+
+def _start_youtube_download(url: str) -> Dict[str, Any]:
+    download_id = uuid.uuid4().hex
+    state = {
+        "id": download_id,
+        "status": "queued",
+        "progress": 0,
+        "message": "Starting YouTube download...",
+        "error": None,
+        "file": None,
+        "source": {"url": url},
+        "stream_url": None,
+        "duration_sec": None,
+        "started_at": time.time(),
+        "updated_at": time.time(),
+    }
+    with youtube_download_lock:
+        youtube_downloads[download_id] = state
+
+    def progress_hook(update: Dict[str, Any]) -> None:
+        status = update.get("status")
+        info = update.get("info_dict") or {}
+        title = info.get("title") if isinstance(info, dict) else None
+        with youtube_download_lock:
+            if title:
+                source = state.get("source") or {}
+                source["title"] = title
+                state["source"] = source
+            if status == "downloading":
+                total = update.get("total_bytes")
+                if not total:
+                    info_total = info.get("filesize") if isinstance(info, dict) else None
+                    if isinstance(info_total, int) and info_total > 0:
+                        total = info_total
+                downloaded = update.get("downloaded_bytes") or 0
+                if total and total > 0:
+                    state["progress"] = int(min(100, (downloaded / total) * 100))
+                state["status"] = "downloading"
+                state["message"] = "Downloading YouTube media..."
+            elif status in {"postprocessing", "finished"}:
+                state["status"] = "processing"
+                state["message"] = "Processing audio..."
+            state["updated_at"] = time.time()
+
+    def _run_download() -> None:
+        nonlocal state
+        try:
+            result = _download_youtube_audio(url, progress_callback=progress_hook, download_id=download_id)
+            with youtube_download_lock:
+                state["status"] = "completed"
+                state["progress"] = 100
+                state["message"] = "YouTube media ready."
+                state["file"] = result.get("file")
+                state["source"] = result.get("source")
+                state["stream_url"] = result.get("stream_url")
+                state["duration_sec"] = result.get("duration_sec")
+                state["updated_at"] = time.time()
+        except Exception as exc:
+            with youtube_download_lock:
+                state["status"] = "failed"
+                state["error"] = str(exc)
+                state["updated_at"] = time.time()
+
+    thread = threading.Thread(target=_run_download, name=f"YouTubeDownload-{download_id}", daemon=True)
+    thread.start()
+    return state
 
 
 def is_loopback_origin(origin: Optional[str]) -> bool:
@@ -1453,6 +1555,29 @@ def create_app():
         except Exception as exc:
             logger.error("YouTube import failed: %s", exc, exc_info=True)
             return jsonify({"error": f"Failed to import YouTube audio: {exc}"}), 500
+
+    @app.route('/import/youtube/start', methods=['POST'])
+    def import_youtube_start():
+        try:
+            payload = request.get_json(silent=True) or {}
+            url = str(payload.get("url") or "").strip()
+            if not url:
+                return jsonify({"error": "YouTube URL is required."}), 400
+            if not is_youtube_url(url):
+                return jsonify({"error": "Only YouTube links are supported."}), 400
+
+            state = _start_youtube_download(url)
+            return jsonify(_serialize_youtube_download(state)), 200
+        except Exception as exc:
+            logger.error("YouTube import start failed: %s", exc, exc_info=True)
+            return jsonify({"error": f"Failed to start YouTube import: {exc}"}), 500
+
+    @app.route('/import/youtube/<download_id>', methods=['GET'])
+    def import_youtube_status(download_id: str):
+        state = _get_youtube_download_state(download_id)
+        if not state:
+            return jsonify({"error": "YouTube import not found."}), 404
+        return jsonify(_serialize_youtube_download(state)), 200
 
     @app.route('/preprocess_audio', methods=['POST'])
     def preprocess_audio():

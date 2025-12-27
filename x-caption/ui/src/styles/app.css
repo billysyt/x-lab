@@ -174,3 +174,24 @@
     opacity: 1;
   }
 }
+
+.youtube-progress-active {
+  background-color: #ffffff;
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.25) 0%,
+    rgba(255, 255, 255, 0.95) 50%,
+    rgba(255, 255, 255, 0.25) 100%
+  );
+  background-size: 200% 100%;
+  animation: youtube-progress-sheen 1.1s linear infinite;
+}
+
+@keyframes youtube-progress-sheen {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}

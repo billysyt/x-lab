@@ -28,10 +28,11 @@ import {
   apiConvertChinese,
   apiEditSegment,
   apiGetJobRecord,
-  apiImportYoutube,
+  apiGetYoutubeImport,
   apiGetWhisperModelDownload,
   apiGetWhisperModelStatus,
   apiStartWhisperModelDownload,
+  apiStartYoutubeImport,
   apiUpsertJobRecord,
   apiUpdateSegmentTiming,
   apiAddSegment,
@@ -335,6 +336,9 @@ export function App() {
   const [youtubeImporting, setYoutubeImporting] = useState(false);
   const [youtubeError, setYoutubeError] = useState<string | null>(null);
   const [youtubeProgress, setYoutubeProgress] = useState<number | null>(null);
+  const [youtubeImportId, setYoutubeImportId] = useState<string | null>(null);
+  const [youtubeImportTitle, setYoutubeImportTitle] = useState<string | null>(null);
+  const [youtubeImportStatus, setYoutubeImportStatus] = useState<string | null>(null);
   const youtubeProgressTimerRef = useRef<number | null>(null);
   const [isAltPressed, setIsAltPressed] = useState(false);
   const [isWindowFocused, setIsWindowFocused] = useState(() => {
@@ -658,23 +662,90 @@ export function App() {
   }, [showImportModal]);
 
   useEffect(() => {
-    if (!showOpenModal) return;
-    if (!youtubeImporting) {
-      setYoutubeProgress(null);
-    }
-    if (youtubeProgressTimerRef.current) {
-      window.clearInterval(youtubeProgressTimerRef.current);
-      youtubeProgressTimerRef.current = null;
-    }
-  }, [showOpenModal, youtubeImporting]);
+    if (!youtubeImporting || !youtubeImportId) return;
+    let cancelled = false;
+    let inFlight = false;
 
-  useEffect(() => {
-    if (showOpenModal || youtubeImporting) return;
-    if (youtubeProgressTimerRef.current) {
-      window.clearInterval(youtubeProgressTimerRef.current);
-      youtubeProgressTimerRef.current = null;
-    }
-  }, [showOpenModal, youtubeImporting]);
+    const poll = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const status = await apiGetYoutubeImport(youtubeImportId);
+        if (cancelled) return;
+        setYoutubeProgress(typeof status.progress === "number" ? Math.round(status.progress) : null);
+        setYoutubeImportStatus(status.status ?? null);
+        if (status?.source?.title) {
+          setYoutubeImportTitle(status.source.title);
+        }
+        if (status.status === "completed") {
+          const file = status.file;
+          if (!file?.path || !file?.name) {
+            throw new Error("Download failed. Please try again.");
+          }
+          const addLocalPathItem = uploadRef.current?.addLocalPathItem;
+          if (!addLocalPathItem) {
+            throw new Error("Upload panel is not ready yet.");
+          }
+          if (isCompact) {
+            setIsLeftDrawerOpen(true);
+          }
+          const displayName = status?.source?.title?.trim() || undefined;
+          addLocalPathItem({
+            path: file.path,
+            name: file.name,
+            size: typeof file.size === "number" ? file.size : null,
+            mime: file.mime ?? null,
+            displayName,
+            durationSec: typeof status?.duration_sec === "number" ? status.duration_sec : null,
+            previewUrl: status?.stream_url ?? null,
+            streamUrl: status?.stream_url ?? null,
+            externalSource: {
+              type: "youtube",
+              url: status?.source?.url ?? youtubeUrl.trim(),
+              streamUrl: status?.stream_url ?? null,
+              title: status?.source?.title ?? null,
+              id: status?.source?.id ?? null
+            },
+            transcriptionKind: "audio"
+          });
+          setYoutubeProgress(100);
+          setShowOpenModal(false);
+          setYoutubeUrl("");
+          notify("YouTube media loaded.", "success");
+          setYoutubeImporting(false);
+          setYoutubeImportId(null);
+          setYoutubeProgress(null);
+          setYoutubeImportTitle(null);
+          setYoutubeImportStatus(null);
+        } else if (status.status === "failed") {
+          throw new Error(status.error || "Failed to load YouTube media.");
+        }
+      } catch (error) {
+        if (cancelled) return;
+        const message = error instanceof Error ? error.message : String(error);
+        setYoutubeError(message || "Failed to load YouTube media.");
+        notify(message || "Failed to load YouTube media.", "error");
+        setShowOpenModal(true);
+        setYoutubeImporting(false);
+        setYoutubeImportId(null);
+        setYoutubeProgress(null);
+        setYoutubeImportTitle(null);
+        setYoutubeImportStatus(null);
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    poll();
+    youtubeProgressTimerRef.current = window.setInterval(poll, 300);
+    return () => {
+      cancelled = true;
+      if (youtubeProgressTimerRef.current) {
+        window.clearInterval(youtubeProgressTimerRef.current);
+        youtubeProgressTimerRef.current = null;
+      }
+    };
+  }, [isCompact, notify, youtubeImportId, youtubeImporting, youtubeUrl]);
 
   useEffect(() => {
     const el = timelineScrollRef.current;
@@ -1260,6 +1331,9 @@ export function App() {
   const handleOpenModal = useCallback(() => {
     setYoutubeError(null);
     setYoutubeProgress(null);
+    setYoutubeImportId(null);
+    setYoutubeImportTitle(null);
+    setYoutubeImportStatus(null);
     setShowOpenModal(true);
   }, []);
 
@@ -1277,66 +1351,70 @@ export function App() {
     setYoutubeError(null);
     setShowOpenModal(false);
     setYoutubeImporting(true);
-    setYoutubeProgress(5);
-    if (youtubeProgressTimerRef.current) {
-      window.clearInterval(youtubeProgressTimerRef.current);
-    }
-    youtubeProgressTimerRef.current = window.setInterval(() => {
-      setYoutubeProgress((prev) => {
-        if (prev === null) return prev;
-        if (prev >= 90) return prev;
-        const next = prev + Math.random() * 8 + 3;
-        return Math.min(90, Math.round(next));
-      });
-    }, 700);
+    setYoutubeImportTitle(null);
+    setYoutubeImportStatus(null);
     try {
-      const payload = await apiImportYoutube(url);
-      const file = payload?.file;
-      if (!file?.path || !file?.name) {
-        throw new Error("Download failed. Please try again.");
+      const startPayload = await apiStartYoutubeImport(url);
+      const downloadId = startPayload?.download_id;
+      if (!downloadId) {
+        throw new Error("Failed to start YouTube import.");
       }
-      const addLocalPathItem = uploadRef.current?.addLocalPathItem;
-      if (!addLocalPathItem) {
-        throw new Error("Upload panel is not ready yet.");
+      setYoutubeProgress(typeof startPayload.progress === "number" ? Math.round(startPayload.progress) : null);
+      setYoutubeImportStatus(startPayload.status ?? null);
+      setYoutubeImportId(downloadId);
+      if (startPayload.status === "completed") {
+        const file = startPayload?.file;
+        if (!file?.path || !file?.name) {
+          throw new Error("Download failed. Please try again.");
+        }
+        const addLocalPathItem = uploadRef.current?.addLocalPathItem;
+        if (!addLocalPathItem) {
+          throw new Error("Upload panel is not ready yet.");
+        }
+        if (isCompact) {
+          setIsLeftDrawerOpen(true);
+        }
+        const displayName = startPayload?.source?.title?.trim() || undefined;
+        addLocalPathItem({
+          path: file.path,
+          name: file.name,
+          size: typeof file.size === "number" ? file.size : null,
+          mime: file.mime ?? null,
+          displayName,
+          durationSec: typeof startPayload?.duration_sec === "number" ? startPayload.duration_sec : null,
+          previewUrl: startPayload?.stream_url ?? null,
+          streamUrl: startPayload?.stream_url ?? null,
+          externalSource: {
+            type: "youtube",
+            url: startPayload?.source?.url ?? url,
+            streamUrl: startPayload?.stream_url ?? null,
+            title: startPayload?.source?.title ?? null,
+            id: startPayload?.source?.id ?? null
+          },
+          transcriptionKind: "audio"
+        });
+        setYoutubeProgress(100);
+        setShowOpenModal(false);
+        setYoutubeUrl("");
+        notify("YouTube media loaded.", "success");
+        setYoutubeImporting(false);
+        setYoutubeImportId(null);
+        setYoutubeProgress(null);
+        setYoutubeImportTitle(null);
+        setYoutubeImportStatus(null);
       }
-      if (isCompact) {
-        setIsLeftDrawerOpen(true);
-      }
-      const displayName = payload?.source?.title?.trim() || undefined;
-      addLocalPathItem({
-        path: file.path,
-        name: file.name,
-        size: typeof file.size === "number" ? file.size : null,
-        mime: file.mime ?? null,
-        displayName,
-        durationSec: typeof payload?.duration_sec === "number" ? payload.duration_sec : null,
-        previewUrl: payload?.stream_url ?? null,
-        streamUrl: payload?.stream_url ?? null,
-        externalSource: {
-          type: "youtube",
-          url: payload?.source?.url ?? url,
-          streamUrl: payload?.stream_url ?? null,
-          title: payload?.source?.title ?? null,
-          id: payload?.source?.id ?? null
-        },
-        transcriptionKind: "audio"
-      });
-      setYoutubeProgress(100);
-      setShowOpenModal(false);
-      setYoutubeUrl("");
-      notify("YouTube media loaded.", "success");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setYoutubeError(message || "Failed to load YouTube media.");
       notify(message || "Failed to load YouTube media.", "error");
       setShowOpenModal(true);
-    } finally {
       setYoutubeImporting(false);
-      if (youtubeProgressTimerRef.current) {
-        window.clearInterval(youtubeProgressTimerRef.current);
-        youtubeProgressTimerRef.current = null;
-      }
+      setYoutubeImportId(null);
       setYoutubeProgress(null);
+      setYoutubeImportTitle(null);
+      setYoutubeImportStatus(null);
+    } finally {
+      // Polling effect handles the in-progress state.
     }
   }, [isCompact, notify, youtubeUrl]);
 
@@ -3972,6 +4050,16 @@ export function App() {
     </>
   );
 
+  const isYoutubeIndeterminate =
+    youtubeImportStatus === "processing" || youtubeImportStatus === "queued" || youtubeProgress === null;
+  const youtubeProgressValue =
+    typeof youtubeProgress === "number"
+      ? Math.max(
+          0,
+          Math.min(youtubeImportStatus && youtubeImportStatus !== "completed" ? 99 : 100, youtubeProgress)
+        )
+      : 0;
+
   return (
     <>
       <div className="flex h-full w-full flex-col bg-[#0b0b0b] text-slate-100">
@@ -4758,8 +4846,8 @@ export function App() {
                   disabled={youtubeImporting}
                 >
                   <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#111827] text-[#60a5fa]">
-                      <AppIcon name="folderOpen" className="text-[14px]" />
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#111827] text-white">
+                      <AppIcon name="video" className="text-[16px]" />
                     </div>
                     <div>
                       <div className="text-[12px] font-semibold text-slate-100">Import video / audio</div>
@@ -4771,19 +4859,8 @@ export function App() {
                 </button>
                 <div className={cn("group w-full rounded-xl px-4 py-3 transition", youtubeImporting ? "" : "hover:bg-[#151515]")}>
                   <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#111827] text-[#ef4444]">
-                      <svg
-                        viewBox="0 0 24 24"
-                        className="h-6 w-6"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <rect x="3" y="6" width="18" height="12" rx="3" />
-                        <path d="M10 9.5l5 2.5-5 2.5z" fill="currentColor" stroke="none" />
-                      </svg>
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#111827] text-[#ff0000]">
+                      <AppIcon name="youtube" className="text-[18px]" />
                     </div>
                     <div className="flex-1">
                       <div className="text-[12px] font-semibold text-slate-100">From YouTube</div>
@@ -4853,41 +4930,29 @@ export function App() {
             aria-modal="true"
           >
             <div className="p-5">
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#111827] text-[#ef4444]">
-                  <AppIcon name="youtube" className="text-[16px]" />
+              <div className="flex flex-col items-center gap-4">
+                <AppIcon name="youtube" className="text-[28px] text-[#ff0000]" />
+                <div className="w-full max-w-[360px] truncate text-center text-[11px] font-semibold text-slate-200">
+                  {youtubeImportTitle ? youtubeImportTitle : "Loading YouTube media..."}
                 </div>
-                <div>
-                  <div className="text-sm font-semibold text-slate-100">Loading YouTube media</div>
-                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-                    Preparing your YouTube media. Please wait...
-                  </p>
-                </div>
-              </div>
-              <div className="mt-4 rounded-lg border border-slate-700/70 bg-[#0b0b0b] px-3 py-2 text-[11px] text-slate-400">
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex h-4 w-4 items-center justify-center">
-                    <svg
-                      className="h-4 w-4 animate-spin text-slate-300"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                    >
-                      <path d="M12 2a10 10 0 0 1 10 10" />
-                    </svg>
-                  </span>
-                  Loading YouTube media...
-                </div>
-                <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#1b1b22]">
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#1b1b22]">
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-[#ef4444] via-[#f97316] to-[#facc15] transition-all"
-                    style={{ width: `${Math.max(4, Math.min(100, youtubeProgress ?? 12))}%` }}
+                    className={cn(
+                      "h-full rounded-full transition-all",
+                      isYoutubeIndeterminate ? "youtube-progress-active" : "bg-white"
+                    )}
+                    style={{
+                      width: `${
+                        Math.max(
+                          0,
+                          Math.min(
+                            100,
+                            youtubeProgressValue
+                          )
+                        )
+                      }%`
+                    }}
                   />
-                </div>
-                <div className="mt-2 text-right text-[10px] font-semibold text-slate-300">
-                  {youtubeProgress !== null ? `${youtubeProgress}%` : "Loading..."}
                 </div>
               </div>
             </div>

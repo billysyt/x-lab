@@ -4,6 +4,7 @@ import type {
   JobStatusResponse,
   PollResponse,
   PreprocessResponse,
+  YoutubeImportStatus,
   YoutubeImportResponse,
   WhisperModelDownload,
   WhisperModelStatus,
@@ -234,4 +235,16 @@ export async function apiImportYoutube(url: string): Promise<YoutubeImportRespon
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url })
   });
+}
+
+export async function apiStartYoutubeImport(url: string): Promise<YoutubeImportStatus> {
+  return fetchJson<YoutubeImportStatus>("/import/youtube/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url })
+  });
+}
+
+export async function apiGetYoutubeImport(downloadId: string): Promise<YoutubeImportStatus> {
+  return fetchJson<YoutubeImportStatus>(`/import/youtube/${downloadId}`);
 }

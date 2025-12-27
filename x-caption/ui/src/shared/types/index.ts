@@ -209,3 +209,11 @@ export type YoutubeImportResponse = {
   duration_sec?: number | null;
   error?: string;
 };
+
+export type YoutubeImportStatus = YoutubeImportResponse & {
+  download_id?: string;
+  status?: string;
+  progress?: number | null;
+  message?: string | null;
+  error?: string | null;
+};
