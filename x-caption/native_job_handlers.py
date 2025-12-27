@@ -9,6 +9,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -39,6 +40,31 @@ _RNNOISE_MODEL_ENV = "XCAPTION_RNNOISE_MODEL"
 _RNNOISE_MODEL_LEGACY_ENV = "XSUB_RNNOISE_MODEL"
 _RNNOISE_MIX_ENV = "XCAPTION_RNNOISE_MIX"
 _RNNOISE_MIX_LEGACY_ENV = "XSUB_RNNOISE_MIX"
+
+_CC_CREDIT_PATTERN = re.compile(r"^\s*CC[^:：]+[:：].+\s*$", re.IGNORECASE)
+
+
+def _postprocess_caption_segments(segments: Iterable[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    processed: list[Dict[str, Any]] = []
+    for segment in segments:
+        if not isinstance(segment, dict):
+            continue
+        text = str(segment.get("text", "")).strip()
+        if text and "amara.org" in text.lower():
+            updated = dict(segment)
+            updated["text"] = "請訂閱X-LAB.HK"
+            processed.append(updated)
+            continue
+        if text and _CC_CREDIT_PATTERN.match(text):
+            continue
+        if text and "," in text:
+            text = re.sub(r"\s*,\s*", " ", text).strip()
+        updated = dict(segment)
+        updated["text"] = text
+        processed.append(updated)
+    for idx, segment in enumerate(processed):
+        segment["id"] = idx
+    return processed
 
 
 def _env_with_legacy(name: str, legacy: str) -> Optional[str]:
@@ -428,7 +454,11 @@ def process_transcription_job(
                     "words": [],
                 }
             ]
-        elif not segments and not full_text:
+
+        segments = _postprocess_caption_segments(segments)
+        full_text = " ".join([seg.get("text", "") for seg in segments if seg.get("text")]).strip()
+
+        if not segments and not full_text:
             update_job_progress(job_id, 100, "No transcription generated", {"stage": "transcription"})
             result = {
                 "job_id": job_id,

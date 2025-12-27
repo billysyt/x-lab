@@ -216,6 +216,10 @@ class NativeJobQueue:
         if job_id is None:
             job_id = str(uuid.uuid4())
 
+        # Clear stale in-memory updates when reusing a job id.
+        if job_id in self.job_updates:
+            del self.job_updates[job_id]
+
         # Create job object
         job = Job(job_id=job_id, func=func, kwargs=kwargs, queue_name=self.name)
 

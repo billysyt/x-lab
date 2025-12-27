@@ -1695,6 +1695,13 @@ def create_app():
                 room_name = f"job:{job_id}"
                 with job_update_lock:
                     job_update_queues.pop(room_name, None)
+                # Clear any stale job cache/meta across queues for reused job ids.
+                for queue_name in ["high", "default", "low"]:
+                    try:
+                        queue = get_queue(queue_name)
+                        queue.remove_job(job_id)
+                    except Exception:
+                        continue
 
             if not filename:
                 filename = secure_filename(file.filename) if file else None

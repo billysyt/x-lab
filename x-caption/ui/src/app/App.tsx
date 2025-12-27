@@ -3623,8 +3623,7 @@ export function App() {
           buttonId="languageSelect"
           value={String(settings.language)}
           options={[
-            { value: "auto", label: "Auto Detect" },
-            { value: "yue", label: "Cantonese" },
+            { value: "auto", label: "Cantonese" },
             { value: "zh", label: "Mandarin" },
             { value: "en", label: "English" }
           ]}
@@ -3681,7 +3680,7 @@ export function App() {
           buttonId="secondCaptionLanguageSelect"
           value={secondCaptionLanguage}
           options={[
-            { value: "yue", label: "Cantonese" },
+            { value: "auto", label: "Cantonese" },
             { value: "zh", label: "Mandarin" },
             { value: "en", label: "English" }
           ]}
