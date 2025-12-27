@@ -772,6 +772,7 @@ def open_browser(port: int = 11220, width: int = 1480, height: int = 900) -> str
                     return {"success": False, "error": str(exc)}
                 return {"success": False, "error": "unsupported"}
 
+
             def window_get_on_top(self):
                 if not self._window:
                     return {"success": False, "error": "window_not_ready"}
@@ -792,6 +793,27 @@ def open_browser(port: int = 11220, width: int = 1480, height: int = 900) -> str
                 except Exception as exc:  # pragma: no cover - defensive
                     return {"success": False, "error": str(exc)}
                 return {"success": False, "error": "unsupported"}
+
+            def window_start_drag(self):
+                if not self._window:
+                    return {"success": False, "error": "window_not_ready"}
+                try:
+                    if sys.platform != "darwin":
+                        return {"success": False, "error": "unsupported"}
+                    native_window = getattr(self._window, "native", None)
+                    if not native_window or not hasattr(native_window, "performWindowDragWithEvent_"):
+                        return {"success": False, "error": "unsupported"}
+                    try:
+                        from AppKit import NSApp
+                    except Exception as exc:
+                        return {"success": False, "error": str(exc)}
+                    event = NSApp.currentEvent()
+                    if not event:
+                        return {"success": False, "error": "no_event"}
+                    native_window.performWindowDragWithEvent_(event)
+                    return {"success": True}
+                except Exception as exc:  # pragma: no cover - defensive
+                    return {"success": False, "error": str(exc)}
 
             def open_external(self, url: str):
                 if not url:

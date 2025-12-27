@@ -230,10 +230,12 @@ export function App() {
   const showCustomWindowControls = isWindows || isMac;
   const [useCustomDrag, setUseCustomDrag] = useState(false);
 
-  // Custom drag for macOS to avoid app-region issues on rotated/hiDPI monitors.
+  // Custom drag for macOS using native window drag event to avoid cross-display drift.
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!isMac) return;
+    const win = window as any;
+    const forceNativeRegion = Boolean(win?.__USE_NATIVE_DRAG__);
     let teardown: (() => void) | null = null;
     let enabled = false;
 
@@ -242,9 +244,10 @@ export function App() {
       const win = window as any;
       const api = win?.pywebview?.api;
       if (!api) return;
-      const getPosition = api.window_get_position || api.windowGetPosition || api.window_getPosition;
-      const moveWindow = api.window_move || api.windowMove || api.window_moveWindow;
-      if (typeof getPosition !== "function" || typeof moveWindow !== "function") return;
+      if (forceNativeRegion) return;
+      const startDrag =
+        api.window_start_drag || api.windowStartDrag || api.window_startDrag || api.windowStartdrag;
+      if (typeof startDrag !== "function") return;
 
       enabled = true;
       setUseCustomDrag(true);
@@ -252,29 +255,9 @@ export function App() {
 
       let dragState: {
         pointerId: number;
-        startX: number;
-        startY: number;
-        winX: number;
-        winY: number;
-        ready: boolean;
         dragging: boolean;
         captureEl: Element | null;
       } | null = null;
-
-      let rafId = 0;
-      let pendingX = 0;
-      let pendingY = 0;
-      const DRAG_THRESHOLD_PX = 3;
-
-      const scheduleMove = (x: number, y: number) => {
-        pendingX = x;
-        pendingY = y;
-        if (rafId) return;
-        rafId = window.requestAnimationFrame(() => {
-          rafId = 0;
-          moveWindow(pendingX, pendingY);
-        });
-      };
 
       const endDrag = (event: PointerEvent) => {
         if (!dragState || dragState.pointerId !== event.pointerId) return;
@@ -286,10 +269,6 @@ export function App() {
           }
         }
         dragState = null;
-        if (rafId) {
-          window.cancelAnimationFrame(rafId);
-          rafId = 0;
-        }
       };
 
       const onPointerDown = (event: PointerEvent) => {
@@ -303,54 +282,17 @@ export function App() {
 
         dragState = {
           pointerId: event.pointerId,
-          startX: event.screenX,
-          startY: event.screenY,
-          winX: window.screenX || 0,
-          winY: window.screenY || 0,
-          ready: false,
           dragging: false,
           captureEl: region
         };
-
-        Promise.resolve(getPosition())
-          .then((result: any) => {
-            if (!dragState || dragState.pointerId !== event.pointerId) return;
-            if (!result || result.success === false) {
-              endDrag(event);
-              return;
-            }
-            dragState.winX = Number(result.x) || 0;
-            dragState.winY = Number(result.y) || 0;
-            dragState.ready = true;
-          })
-          .catch(() => {
-            endDrag(event);
-          });
-      };
-
-      const onPointerMove = (event: PointerEvent) => {
-        if (!dragState || dragState.pointerId !== event.pointerId || !dragState.ready) return;
-        const dx = event.screenX - dragState.startX;
-        const dy = event.screenY - dragState.startY;
-        if (!dragState.dragging) {
-          if (Math.abs(dx) + Math.abs(dy) < DRAG_THRESHOLD_PX) return;
-          dragState.dragging = true;
-          if (dragState.captureEl && "setPointerCapture" in dragState.captureEl) {
-            try {
-              dragState.captureEl.setPointerCapture(event.pointerId);
-            } catch {
-              // ignore
-            }
-          }
+        try {
+          startDrag();
+        } catch {
+          // ignore
         }
-        const nextX = Math.round(dragState.winX + dx);
-        const nextY = Math.round(dragState.winY + dy);
-        scheduleMove(nextX, nextY);
-        event.preventDefault();
       };
 
       document.addEventListener("pointerdown", onPointerDown, true);
-      document.addEventListener("pointermove", onPointerMove, true);
       document.addEventListener("pointerup", endDrag, true);
       document.addEventListener("pointercancel", endDrag, true);
 
@@ -358,13 +300,8 @@ export function App() {
         setUseCustomDrag(false);
         document.documentElement.classList.remove("pywebview-custom-drag");
         document.removeEventListener("pointerdown", onPointerDown, true);
-        document.removeEventListener("pointermove", onPointerMove, true);
         document.removeEventListener("pointerup", endDrag, true);
         document.removeEventListener("pointercancel", endDrag, true);
-        if (rafId) {
-          window.cancelAnimationFrame(rafId);
-          rafId = 0;
-        }
       };
     };
 
@@ -379,7 +316,6 @@ export function App() {
       }
     };
   }, [isMac]);
-
 
 
   const [alertModal, setAlertModal] = useState<{
