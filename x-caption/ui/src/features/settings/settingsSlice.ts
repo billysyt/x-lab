@@ -1,7 +1,7 @@
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 
 export type SettingsState = {
-  language: "auto" | "zh" | "en";
+  language: string;
   noiseSuppression: boolean;
   model: "whisper";
   chineseStyle: "spoken" | "written";
@@ -11,7 +11,7 @@ const initialState: SettingsState = {
   language: "auto",
   noiseSuppression: false,
   model: "whisper",
-  chineseStyle: "spoken"
+  chineseStyle: "written"
 };
 
 const slice = createSlice({

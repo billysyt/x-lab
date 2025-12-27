@@ -64,6 +64,118 @@ function formatBytes(value?: number | null) {
   return `${size.toFixed(size >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
 }
 
+const PRIMARY_LANGUAGE_OPTIONS = [
+  { value: "auto", label: "Cantonese" },
+  { value: "zh", label: "Mandarin" },
+  { value: "en", label: "English" }
+];
+
+const OTHER_LANGUAGE_OPTIONS = [
+  { value: "af", label: "Afrikaans" },
+  { value: "am", label: "Amharic" },
+  { value: "ar", label: "Arabic" },
+  { value: "as", label: "Assamese" },
+  { value: "az", label: "Azerbaijani" },
+  { value: "ba", label: "Bashkir" },
+  { value: "be", label: "Belarusian" },
+  { value: "bg", label: "Bulgarian" },
+  { value: "bn", label: "Bengali" },
+  { value: "bo", label: "Tibetan" },
+  { value: "br", label: "Breton" },
+  { value: "bs", label: "Bosnian" },
+  { value: "ca", label: "Catalan" },
+  { value: "cs", label: "Czech" },
+  { value: "cy", label: "Welsh" },
+  { value: "da", label: "Danish" },
+  { value: "de", label: "German" },
+  { value: "el", label: "Greek" },
+  { value: "es", label: "Spanish" },
+  { value: "et", label: "Estonian" },
+  { value: "eu", label: "Basque" },
+  { value: "fa", label: "Persian" },
+  { value: "fi", label: "Finnish" },
+  { value: "fo", label: "Faroese" },
+  { value: "fr", label: "French" },
+  { value: "gl", label: "Galician" },
+  { value: "gu", label: "Gujarati" },
+  { value: "ha", label: "Hausa" },
+  { value: "haw", label: "Hawaiian" },
+  { value: "he", label: "Hebrew" },
+  { value: "hi", label: "Hindi" },
+  { value: "hr", label: "Croatian" },
+  { value: "ht", label: "Haitian Creole" },
+  { value: "hu", label: "Hungarian" },
+  { value: "hy", label: "Armenian" },
+  { value: "id", label: "Indonesian" },
+  { value: "is", label: "Icelandic" },
+  { value: "it", label: "Italian" },
+  { value: "ja", label: "Japanese" },
+  { value: "jw", label: "Javanese" },
+  { value: "ka", label: "Georgian" },
+  { value: "kk", label: "Kazakh" },
+  { value: "km", label: "Khmer" },
+  { value: "kn", label: "Kannada" },
+  { value: "ko", label: "Korean" },
+  { value: "la", label: "Latin" },
+  { value: "lb", label: "Luxembourgish" },
+  { value: "ln", label: "Lingala" },
+  { value: "lo", label: "Lao" },
+  { value: "lt", label: "Lithuanian" },
+  { value: "lv", label: "Latvian" },
+  { value: "mg", label: "Malagasy" },
+  { value: "mi", label: "Maori" },
+  { value: "mk", label: "Macedonian" },
+  { value: "ml", label: "Malayalam" },
+  { value: "mn", label: "Mongolian" },
+  { value: "mr", label: "Marathi" },
+  { value: "ms", label: "Malay" },
+  { value: "mt", label: "Maltese" },
+  { value: "my", label: "Myanmar" },
+  { value: "ne", label: "Nepali" },
+  { value: "nl", label: "Dutch" },
+  { value: "nn", label: "Norwegian Nynorsk" },
+  { value: "no", label: "Norwegian" },
+  { value: "oc", label: "Occitan" },
+  { value: "pa", label: "Punjabi" },
+  { value: "pl", label: "Polish" },
+  { value: "ps", label: "Pashto" },
+  { value: "pt", label: "Portuguese" },
+  { value: "ro", label: "Romanian" },
+  { value: "ru", label: "Russian" },
+  { value: "sa", label: "Sanskrit" },
+  { value: "sd", label: "Sindhi" },
+  { value: "si", label: "Sinhala" },
+  { value: "sk", label: "Slovak" },
+  { value: "sl", label: "Slovenian" },
+  { value: "sn", label: "Shona" },
+  { value: "so", label: "Somali" },
+  { value: "sq", label: "Albanian" },
+  { value: "sr", label: "Serbian" },
+  { value: "su", label: "Sundanese" },
+  { value: "sv", label: "Swedish" },
+  { value: "sw", label: "Swahili" },
+  { value: "ta", label: "Tamil" },
+  { value: "te", label: "Telugu" },
+  { value: "tg", label: "Tajik" },
+  { value: "th", label: "Thai" },
+  { value: "tk", label: "Turkmen" },
+  { value: "tl", label: "Tagalog" },
+  { value: "tr", label: "Turkish" },
+  { value: "tt", label: "Tatar" },
+  { value: "uk", label: "Ukrainian" },
+  { value: "ur", label: "Urdu" },
+  { value: "uz", label: "Uzbek" },
+  { value: "vi", label: "Vietnamese" },
+  { value: "yi", label: "Yiddish" },
+  { value: "yo", label: "Yoruba" }
+];
+
+const LANGUAGE_OPTIONS = [
+  ...PRIMARY_LANGUAGE_OPTIONS,
+  { value: "divider", label: "--------", disabled: true },
+  ...OTHER_LANGUAGE_OPTIONS
+];
+
 function parseSrtTimestamp(raw: string) {
   const match = raw.trim().match(/(\d{2}):(\d{2}):(\d{2})[,.](\d{1,3})/);
   if (!match) return 0;
@@ -160,22 +272,25 @@ function baseFilename(value: string | null | undefined) {
   return safe || "transcript";
 }
 
-const MACHINE_ID_STORAGE_KEY = "x-caption-machine-id";
+function getLocalMachineId(): string | null {
+  return null;
+}
 
-function getLocalMachineId() {
-  if (typeof window === "undefined") return "unknown";
-  try {
-    const stored = window.localStorage.getItem(MACHINE_ID_STORAGE_KEY);
-    if (stored) return stored;
-    const generated =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-    window.localStorage.setItem(MACHINE_ID_STORAGE_KEY, generated);
-    return generated;
-  } catch {
-    return "unknown";
+function normalizeVersion(value: string) {
+  return value.trim().replace(/^v/i, "");
+}
+
+function compareVersions(a: string, b: string) {
+  const left = normalizeVersion(a).split(/[^0-9]+/).filter(Boolean).map(Number);
+  const right = normalizeVersion(b).split(/[^0-9]+/).filter(Boolean).map(Number);
+  const maxLen = Math.max(left.length, right.length);
+  for (let i = 0; i < maxLen; i += 1) {
+    const la = left[i] ?? 0;
+    const lb = right[i] ?? 0;
+    if (la > lb) return 1;
+    if (la < lb) return -1;
   }
+  return 0;
 }
 
 function findSegmentAtTime<T extends { start: number; end: number }>(segments: T[], time: number): T | null {
@@ -216,6 +331,7 @@ const normalizeClips = <T extends { startSec: number; durationSec: number }>(cli
 export function App() {
   const settings = useAppSelector((s) => s.settings);
   const exportLanguage = useAppSelector((s) => s.transcript.exportLanguage);
+  const appVersion = useAppSelector((s) => s.app.version);
   const dispatch = useAppDispatch();
 
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -354,7 +470,9 @@ export function App() {
   const [showPremiumModal, setShowPremiumModal] = useState(false);
   const [machineId, setMachineId] = useState<string | null>(null);
   const [machineIdLoading, setMachineIdLoading] = useState(false);
+  const [machineIdCopied, setMachineIdCopied] = useState(false);
   const [premiumKey, setPremiumKey] = useState("");
+  const [updateModal, setUpdateModal] = useState<{ version: string; url: string } | null>(null);
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [youtubeImporting, setYoutubeImporting] = useState(false);
   const [youtubeError, setYoutubeError] = useState<string | null>(null);
@@ -363,6 +481,7 @@ export function App() {
   const [youtubeImportTitle, setYoutubeImportTitle] = useState<string | null>(null);
   const [youtubeImportStatus, setYoutubeImportStatus] = useState<string | null>(null);
   const youtubeProgressTimerRef = useRef<number | null>(null);
+  const machineIdCopyTimerRef = useRef<number | null>(null);
   const [isAltPressed, setIsAltPressed] = useState(false);
   const [isWindowFocused, setIsWindowFocused] = useState(() => {
     if (typeof document === "undefined") return true;
@@ -538,6 +657,12 @@ export function App() {
   const [secondCaptionEnabled, setSecondCaptionEnabled] = useState(false);
   const [secondCaptionLanguage, setSecondCaptionLanguage] = useState<"yue" | "zh" | "en">("en");
   const [localMedia, setLocalMedia] = useState<MediaItem[]>([]);
+
+  useEffect(() => {
+    if (secondCaptionEnabled) {
+      setSecondCaptionEnabled(false);
+    }
+  }, [secondCaptionEnabled]);
   const [timelineZoom, setTimelineZoom] = useState(DEFAULT_TIMELINE_ZOOM);
   const [isCompact, setIsCompact] = useState(false);
   const [isHeaderCompact, setIsHeaderCompact] = useState(false);
@@ -604,6 +729,10 @@ export function App() {
     }
     return null;
   }, [activeMedia?.jobId, activeMedia?.source, jobsById, selectedJob]);
+  const isActiveJobProcessing = Boolean(
+    activeJob && (activeJob.status === "queued" || activeJob.status === "processing")
+  );
+  const isAnotherJobProcessing = isTranscribing && !isActiveJobProcessing;
   const activeJobProgress = useMemo(() => {
     const value = sanitizeProgressValue(activeJob?.progress);
     return value !== null ? Math.round(value) : null;
@@ -630,8 +759,8 @@ export function App() {
   const activePreviewKind = getPreviewKind(activeMedia);
   const captionMenuPosition = useMemo(() => {
     if (!captionMenu || typeof window === "undefined") return null;
-    const width = 160;
-    const height = 44;
+    const width = 180;
+    const height = 76;
     const maxLeft = Math.max(8, window.innerWidth - width - 8);
     const maxTop = Math.max(8, window.innerHeight - height - 8);
     return {
@@ -806,6 +935,34 @@ export function App() {
     }
     dispatch(bootstrapJobs()).catch(() => undefined);
   }, [dispatch]);
+
+  useEffect(() => {
+    if (!appVersion) return;
+    const updateUrl = (import.meta as any)?.env?.VITE_UPDATE_CHECK_URL;
+    if (!updateUrl || typeof updateUrl !== "string") return;
+    let cancelled = false;
+    const checkUpdate = async () => {
+      try {
+        const response = await fetch(updateUrl, { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (cancelled || !payload) return;
+        const latestVersion =
+          payload.version ?? payload.latest ?? payload.latestVersion ?? payload.latest_version;
+        const downloadUrl = payload.url ?? payload.link ?? payload.download_url;
+        if (typeof latestVersion !== "string" || typeof downloadUrl !== "string") return;
+        if (compareVersions(latestVersion, appVersion) > 0) {
+          setUpdateModal({ version: latestVersion, url: downloadUrl });
+        }
+      } catch {
+        // Offline or blocked: skip update check silently.
+      }
+    };
+    void checkUpdate();
+    return () => {
+      cancelled = true;
+    };
+  }, [appVersion]);
 
   useEffect(() => {
     const inFlight = new Set<string>();
@@ -1894,6 +2051,22 @@ export function App() {
     return null;
   }, []);
 
+  const openExternalUrl = useCallback(
+    (url: string) => {
+      if (!url) return;
+      const win = typeof window !== "undefined" ? (window as any) : null;
+      const api = win?.pywebview?.api;
+      const result = callApiMethod(api, ["open_external", "openExternal"], url);
+      if (result) return;
+      try {
+        window.open(url, "_blank", "noopener");
+      } catch {
+        // Ignore.
+      }
+    },
+    [callApiMethod]
+  );
+
   const fetchMachineId = useCallback(async () => {
     const win = typeof window !== "undefined" ? (window as any) : null;
     const api = win?.pywebview?.api;
@@ -1913,6 +2086,7 @@ export function App() {
     if (!showPremiumModal) return;
     let active = true;
     setMachineIdLoading(true);
+    setMachineIdCopied(false);
     fetchMachineId()
       .then((id) => {
         if (!active) return;
@@ -1930,6 +2104,53 @@ export function App() {
       active = false;
     };
   }, [fetchMachineId, showPremiumModal]);
+
+  const handleCopyMachineId = useCallback(async () => {
+    if (!machineId || machineIdLoading) return;
+    const text = machineId;
+    let copied = false;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      }
+    } catch {
+      copied = false;
+    }
+    if (!copied) {
+      try {
+        const input = document.createElement("textarea");
+        input.value = text;
+        input.setAttribute("readonly", "true");
+        input.style.position = "fixed";
+        input.style.opacity = "0";
+        document.body.appendChild(input);
+        input.select();
+        copied = document.execCommand("copy");
+        document.body.removeChild(input);
+      } catch {
+        copied = false;
+      }
+    }
+    if (copied) {
+      setMachineIdCopied(true);
+      if (machineIdCopyTimerRef.current) {
+        window.clearTimeout(machineIdCopyTimerRef.current);
+      }
+      machineIdCopyTimerRef.current = window.setTimeout(() => {
+        setMachineIdCopied(false);
+      }, 1600);
+    }
+  }, [machineId, machineIdLoading]);
+
+  useEffect(() => {
+    return () => {
+      if (machineIdCopyTimerRef.current) {
+        window.clearTimeout(machineIdCopyTimerRef.current);
+        machineIdCopyTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const handleWindowZoomToggle = useCallback(async () => {
     const win = typeof window !== "undefined" ? (window as any) : null;
@@ -3394,6 +3615,44 @@ export function App() {
     [activeJob?.id, dispatch]
   );
 
+  const handleSplitCaption = useCallback(
+    (segment: TranscriptSegment | null) => {
+      if (!segment || !activeJob?.id) return;
+      const jobId = activeJob.id;
+      const start = Number(segment.start) || 0;
+      const end = Number(segment.end) || 0;
+      if (end - start <= minCaptionDuration * 2) {
+        notify("Caption is too short to split.", "info");
+        return;
+      }
+      let cutAt = playback.currentTime;
+      if (cutAt <= start + minCaptionDuration || cutAt >= end - minCaptionDuration) {
+        cutAt = (start + end) / 2;
+      }
+      cutAt = clamp(cutAt, start + minCaptionDuration, end - minCaptionDuration);
+      const maxId = sortedSegments.reduce((max, seg) => Math.max(max, Number(seg.id) || 0), 0);
+      const nextId = maxId + 1;
+      const rawText = String(segment.originalText ?? segment.text ?? "");
+      const nextSegment: TranscriptSegment = {
+        id: nextId,
+        start: cutAt,
+        end,
+        text: rawText,
+        originalText: rawText
+      };
+      dispatch(updateSegmentTiming({ jobId, segmentId: Number(segment.id), start, end: cutAt }));
+      dispatch(addSegment({ jobId, segment: nextSegment }));
+      void apiUpdateSegmentTiming({
+        jobId,
+        segmentId: Number(segment.id),
+        start,
+        end: cutAt
+      }).catch(() => undefined);
+      void apiAddSegment({ jobId, segmentId: nextId, start: cutAt, end, text: rawText }).catch(() => undefined);
+    },
+    [activeJob?.id, dispatch, minCaptionDuration, notify, playback.currentTime, sortedSegments]
+  );
+
   const handleCaptionHoverMove = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       if (captionDragRef.current) return;
@@ -3694,6 +3953,16 @@ export function App() {
     ? "grid min-h-0 overflow-hidden grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto]"
     : "grid min-h-0 overflow-hidden grid-cols-[minmax(160px,240px)_minmax(0,1fr)_minmax(240px,340px)] 2xl:grid-cols-[minmax(200px,280px)_minmax(0,1fr)_minmax(280px,380px)] grid-rows-[minmax(0,1fr)_auto]";
 
+  const captionControlsDisabled = isTranscribing;
+  const isCantoneseLanguage = settings.language === "yue" || settings.language === "auto";
+  const generateCaptionLabel = isActiveJobProcessing
+    ? "Processing"
+    : isAnotherJobProcessing
+      ? "Another job processing..."
+      : modelDownload.status === "downloading"
+        ? "Downloading model..."
+        : "AI Generate Caption";
+
   const captionSetupPanel = (
     <div className="space-y-4">
       <div className="space-y-2">
@@ -3701,32 +3970,30 @@ export function App() {
           Language
         </label>
         <Select
-          className="stt-select-dark"
+          className={cn("stt-select-dark", captionControlsDisabled && "opacity-60")}
           id="language"
           buttonId="languageSelect"
           value={String(settings.language)}
-          options={[
-            { value: "auto", label: "Cantonese" },
-            { value: "zh", label: "Mandarin" },
-            { value: "en", label: "English" }
-          ]}
+          options={LANGUAGE_OPTIONS}
           onChange={(value) => dispatch(setLanguage(value as any))}
+          disabled={captionControlsDisabled}
         />
       </div>
       <div className="space-y-2">
         <label className="text-[11px] font-semibold text-slate-400" htmlFor="chineseStyleSelect">
-          Chinese Output Style
+          Cantonese Output Style
         </label>
         <Select
-          className="stt-select-dark"
+          className={cn("stt-select-dark", (!isCantoneseLanguage || captionControlsDisabled) && "opacity-60")}
           id="chineseStyle"
           buttonId="chineseStyleSelect"
           value={String(settings.chineseStyle)}
           options={[
-            { value: "spoken", label: "Spoken (Cantonese)" },
-            { value: "written", label: "Written" }
+            { value: "written", label: "Written (書面語)" },
+            { value: "spoken", label: "Spoken (口語)" }
           ]}
           onChange={(value) => dispatch(setChineseStyle(value as any))}
+          disabled={!isCantoneseLanguage || captionControlsDisabled}
         />
       </div>
       <div className="space-y-2">
@@ -3737,38 +4004,39 @@ export function App() {
           <button
             className={cn(
               "inline-flex items-center gap-2 text-[10px] font-medium transition",
-              secondCaptionEnabled ? "text-slate-200" : "text-slate-500"
+              "text-slate-500 opacity-60"
             )}
-            onClick={() => setSecondCaptionEnabled((prev) => !prev)}
+            onClick={() => undefined}
             type="button"
+            disabled
           >
             <span
               className={cn(
                 "relative inline-flex h-4 w-7 items-center rounded-full border transition",
-                secondCaptionEnabled ? "border-slate-500 bg-[#1b1b22]" : "border-slate-700 bg-[#151515]"
+                "border-slate-700 bg-[#151515]"
               )}
             >
               <span
                 className={cn(
                   "absolute h-3 w-3 rounded-full bg-white transition",
-                  secondCaptionEnabled ? "translate-x-3" : "translate-x-1"
+                  "translate-x-1"
                 )}
               />
             </span>
           </button>
         </div>
         <Select
-          className={cn("stt-select-dark", !secondCaptionEnabled && "opacity-60")}
+          className="stt-select-dark opacity-60"
           id="secondCaptionLanguage"
           buttonId="secondCaptionLanguageSelect"
           value={secondCaptionLanguage}
           options={[
-            { value: "auto", label: "Cantonese" },
+            { value: "yue", label: "Cantonese" },
             { value: "zh", label: "Mandarin" },
             { value: "en", label: "English" }
           ]}
           onChange={(value) => setSecondCaptionLanguage(value as "yue" | "zh" | "en")}
-          disabled={!secondCaptionEnabled}
+          disabled
         />
       </div>
       <div className="pt-2">
@@ -3789,11 +4057,7 @@ export function App() {
           }
           type="button"
         >
-          {isTranscribing
-            ? "Processing..."
-            : modelDownload.status === "downloading"
-              ? "Downloading model..."
-              : "AI Generate Caption"}
+          {generateCaptionLabel}
         </button>
       </div>
     </div>
@@ -4517,7 +4781,7 @@ export function App() {
           {!isCompact ? (
             <aside className="row-start-1 row-end-2 flex min-h-0 flex-col overflow-hidden bg-[#0b0b0b]">
               <div className={cn(dragRegionClass, "flex items-center justify-between px-4 py-3 text-xs font-semibold text-slate-200")}>
-                <span>Caption</span>
+                <span>Caption Setting</span>
                 {segments.length > 0 ? (
                   <button
                     className={cn(
@@ -4574,25 +4838,33 @@ export function App() {
               <div className="flex items-center gap-2">
                 {segments.length > 0 ? (
                   <button
-                    className="inline-flex h-7 items-center gap-1.5 rounded-md bg-[#1b1b22] px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-[#26262f]"
+                    className={cn(
+                      isCompact
+                        ? "inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-200 transition hover:bg-white/10"
+                        : "inline-flex h-7 items-center gap-1.5 rounded-md bg-[#1b1b22] px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-[#26262f]"
+                    )}
                     onClick={handleClearCaptions}
                     type="button"
                     aria-label="Clear captions"
                     title="Clear captions"
                   >
-                    <AppIcon name="trashAlt" className="text-[10px]" />
-                    Clear captions
+                    <AppIcon name="trashAlt" className={cn("text-[10px]", isCompact && "text-[14px]")} />
+                    {isCompact ? null : "Clear captions"}
                   </button>
                 ) : (
                   <button
-                    className="inline-flex h-7 items-center gap-1.5 rounded-md bg-[#1b1b22] px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-[#26262f]"
+                    className={cn(
+                      isCompact
+                        ? "inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-200 transition hover:bg-white/10"
+                        : "inline-flex h-7 items-center gap-1.5 rounded-md bg-[#1b1b22] px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-[#26262f]"
+                    )}
                     onClick={handleLoadSrt}
                     type="button"
                     aria-label="Load Caption File"
                     title="Load Caption File"
                   >
-                    <AppIcon name="fileImport" className="text-[10px]" />
-                    Load Caption File
+                    <AppIcon name="fileImport" className={cn("text-[10px]", isCompact && "text-[14px]")} />
+                    {isCompact ? null : "Load Caption File"}
                   </button>
                 )}
                 <button
@@ -4622,6 +4894,19 @@ export function App() {
                     title="Increase subtitle size"
                   >
                     T+
+                  </button>
+                  <button
+                    className={cn(
+                      "inline-flex h-8 w-8 items-center justify-center rounded-md text-[12px] text-slate-200 transition hover:bg-white/10",
+                      !activeSubtitleSegment && "cursor-not-allowed opacity-50 hover:bg-transparent"
+                    )}
+                    onClick={() => handleSplitCaption(activeSubtitleSegment)}
+                    type="button"
+                    aria-label="Split caption"
+                    title="Split caption"
+                    disabled={!activeSubtitleSegment}
+                  >
+                    <AppIcon name="cut" className="text-[13px]" />
                   </button>
                 </div>
               </div>
@@ -4785,7 +5070,7 @@ export function App() {
             <div className="flex min-h-0 flex-1">{renderPlayerPanel(true)}</div>
             <aside className="flex min-h-0 w-full flex-col border-t border-slate-800/60 bg-[#0b0b0b] lg:w-[380px] lg:border-l lg:border-t-0">
               <div className="flex items-center justify-between px-4 py-3 text-xs font-semibold text-slate-200">
-                <span>Caption</span>
+                <span>Caption Setting</span>
                 {segments.length > 0 ? (
                   <button
                     className={cn(
@@ -4841,10 +5126,20 @@ export function App() {
           }}
         >
           <div
-            className="absolute w-40 overflow-hidden rounded-lg border border-slate-700/60 bg-[#121212] shadow-[0_16px_40px_rgba(0,0,0,0.55)]"
+            className="absolute w-[180px] overflow-hidden rounded-lg border border-slate-700/60 bg-[#121212] shadow-[0_16px_40px_rgba(0,0,0,0.55)]"
             style={{ left: `${captionMenuPosition.left}px`, top: `${captionMenuPosition.top}px` }}
             onClick={(event) => event.stopPropagation()}
           >
+            <button
+              className="w-full px-3 py-2 text-left text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
+              onClick={() => {
+                handleSplitCaption(captionMenu.segment);
+                setCaptionMenu(null);
+              }}
+              type="button"
+            >
+              Split caption
+            </button>
             <button
               className="w-full px-3 py-2 text-left text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
               onClick={() => {
@@ -5070,50 +5365,102 @@ export function App() {
           onClick={() => setShowPremiumModal(false)}
         >
           <div
-            className="w-full max-w-[520px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
+            className="w-full max-w-[720px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
+            role="dialog"
+            aria-modal="true"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex h-[70vh] w-full flex-col">
+              <div className="px-4 pt-4 pb-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0 text-[11px] font-semibold text-slate-200">
+                    <span className="text-slate-400">Machine ID:</span>{" "}
+                    <span className="break-all font-mono">
+                      {machineIdLoading ? "Loading..." : machineId ?? "Unknown"}
+                    </span>
+                  </div>
+                  <button
+                    className={cn(
+                      "inline-flex h-7 items-center gap-2 rounded-full px-3 text-[10px] font-semibold transition",
+                      machineIdCopied
+                        ? "bg-emerald-500/15 text-emerald-300"
+                        : "bg-white/10 text-slate-200 hover:bg-white/15"
+                    )}
+                    onClick={handleCopyMachineId}
+                    type="button"
+                    disabled={!machineId || machineIdLoading}
+                  >
+                    <AppIcon name={machineIdCopied ? "check" : "copy"} className="text-[11px]" />
+                    {machineIdCopied ? "Copied" : "Copy"}
+                  </button>
+                </div>
+                <div className="mt-3 flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={premiumKey}
+                    onChange={(event) => setPremiumKey(event.target.value)}
+                    placeholder="Enter your key"
+                    className="w-full flex-1 rounded-full border-0 bg-[#151515] px-4 py-2 text-[11px] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-[#3b82f6]/60"
+                  />
+                  <button
+                    className="rounded-full bg-white px-4 py-2 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95 disabled:opacity-60"
+                    type="button"
+                    disabled={!premiumKey.trim()}
+                  >
+                    Confirm
+                  </button>
+                </div>
+              </div>
+              <iframe
+                title="Premium Webview"
+                src={`/premium/webview?url=${encodeURIComponent("https://www.google.com")}`}
+                className="h-full w-full flex-1 border-0 bg-black"
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {updateModal ? (
+        <div
+          className="fixed inset-0 z-[140] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          onClick={() => setUpdateModal(null)}
+        >
+          <div
+            className="w-full max-w-[420px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
             role="dialog"
             aria-modal="true"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="p-5">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold text-slate-100">Get Premium</div>
-                <button
-                  className="rounded-md bg-transparent px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
-                  onClick={() => setShowPremiumModal(false)}
-                  type="button"
-                >
-                  Close
-                </button>
-              </div>
-              <div className="mt-4 space-y-2">
-                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Machine ID</div>
-                <div className="rounded-md border border-slate-700 bg-[#0b0b0b] px-3 py-2 text-[11px] font-mono text-slate-200 break-all">
-                  {machineIdLoading ? "Loading..." : machineId ?? "Unknown"}
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#111827] text-[#60a5fa]">
+                  <AppIcon name="download" className="text-[16px]" />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-slate-100">New version available</div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                    Version {updateModal.version} is ready. You're on {appVersion ?? "current"}.
+                  </p>
                 </div>
               </div>
-              <div className="mt-4 space-y-2">
-                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Webview</div>
-                <iframe
-                  title="Premium Webview"
-                  src="https://www.google.com"
-                  className="h-40 w-full rounded-lg border border-slate-700/60 bg-black"
-                />
-              </div>
-              <div className="mt-4 flex items-center gap-2">
-                <input
-                  type="text"
-                  value={premiumKey}
-                  onChange={(event) => setPremiumKey(event.target.value)}
-                  placeholder="Enter premium key"
-                  className="w-full flex-1 rounded-md border border-slate-700 bg-[#0b0b0b] px-3 py-2 text-[11px] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-[#3b82f6]/60"
-                />
+              <div className="mt-5 flex items-center justify-end gap-2">
                 <button
-                  className="rounded-md bg-white px-3 py-2 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95 disabled:opacity-60"
+                  className="rounded-md bg-transparent px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
+                  onClick={() => setUpdateModal(null)}
                   type="button"
-                  disabled={!premiumKey.trim()}
                 >
-                  Confirm
+                  Later
+                </button>
+                <button
+                  className="rounded-md bg-white px-3 py-1.5 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95"
+                  onClick={() => {
+                    openExternalUrl(updateModal.url);
+                    setUpdateModal(null);
+                  }}
+                  type="button"
+                >
+                  Update
                 </button>
               </div>
             </div>

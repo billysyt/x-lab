@@ -14,8 +14,10 @@ import time
 import shutil
 import mimetypes
 import contextlib
+import re
 from urllib.parse import urlparse
 import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Callable
 from collections import defaultdict
@@ -26,7 +28,7 @@ try:
 except ImportError:
     OpenCC = None
 
-from flask import Flask, request, jsonify, send_file, render_template, send_from_directory
+from flask import Flask, request, jsonify, send_file, render_template, send_from_directory, Response
 from werkzeug.utils import secure_filename
 
 # Set up environment first
@@ -109,6 +111,26 @@ def is_youtube_url(raw_url: str) -> bool:
         return False
     host = (parsed.hostname or "").lower()
     return host.endswith("youtube.com") or host.endswith("youtu.be") or host.endswith("music.youtube.com")
+
+
+def _sanitize_embed_html(html: str, base_url: str) -> str:
+    html = re.sub(
+        r'<meta[^>]+http-equiv=[\"\']Content-Security-Policy[\"\'][^>]*>',
+        "",
+        html,
+        flags=re.IGNORECASE,
+    )
+    html = re.sub(
+        r'<meta[^>]+http-equiv=[\"\']X-Frame-Options[\"\'][^>]*>',
+        "",
+        html,
+        flags=re.IGNORECASE,
+    )
+    match = re.search(r"<head[^>]*>", html, flags=re.IGNORECASE)
+    if match:
+        insert_at = match.end()
+        html = f"{html[:insert_at]}<base href=\"{base_url}\">{html[insert_at:]}"
+    return html
 
 
 def _resolve_youtube_download(downloads_dir: Path, download_id: str) -> Path:
@@ -655,6 +677,44 @@ def create_app():
                 "success": False,
                 "error": "Failed to convert text"
             }), 500
+
+    @app.route('/premium/webview', methods=['GET'])
+    def premium_webview():
+        target_url = request.args.get("url", "").strip()
+        if not target_url:
+            return "Missing url", 400
+        parsed = urlparse(target_url)
+        if parsed.scheme not in ("http", "https"):
+            return "Invalid url", 400
+        try:
+            req = urllib.request.Request(
+                target_url,
+                headers={
+                    "User-Agent": "Mozilla/5.0",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=8) as response:
+                content_type = response.headers.get("Content-Type", "text/html; charset=utf-8")
+                payload = response.read()
+        except Exception as exc:
+            logger.warning("Premium webview fetch failed: %s", exc)
+            return "Unable to load webview content.", 502
+
+        if "text/html" in content_type.lower():
+            charset = "utf-8"
+            match = re.search(r"charset=([^;]+)", content_type, flags=re.IGNORECASE)
+            if match:
+                charset = match.group(1).strip()
+            try:
+                html = payload.decode(charset, errors="replace")
+            except Exception:
+                html = payload.decode("utf-8", errors="replace")
+            html = _sanitize_embed_html(html, target_url)
+            payload = html.encode("utf-8")
+            content_type = "text/html; charset=utf-8"
+
+        return Response(payload, content_type=content_type)
 
     @app.route('/api/segment/edit', methods=['POST'])
     def edit_segment():
