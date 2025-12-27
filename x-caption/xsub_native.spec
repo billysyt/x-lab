@@ -32,6 +32,7 @@ _add_if_exists(datas, "data/sample", "data/sample")
 _add_if_exists(datas, "sample", "sample")
 _add_if_exists(datas, "ffmpeg", "ffmpeg")
 _add_if_exists(datas, "whisper", "whisper")
+_add_if_exists(datas, "merge", "merge")
 
 icon_path = None
 if sys.platform == "win32":

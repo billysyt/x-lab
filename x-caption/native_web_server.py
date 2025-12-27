@@ -1671,6 +1671,7 @@ def create_app():
             # Get parameters
             model = request.form.get('model', 'whisper')
             language = request.form.get('language', 'auto')
+            chinese_style = request.form.get('chinese_style')
             display_name = request.form.get('display_name')
             device = request.form.get('device', 'auto') or 'auto'
             compute_type = request.form.get('compute_type', None)
@@ -1755,6 +1756,7 @@ def create_app():
                 'file_path': input_path,
                 'model_path': model,
                 'language': language,
+                'chinese_style': chinese_style,
                 'device': device,
                 'compute_type': compute_type,
                 'vad_filter': vad_filter,

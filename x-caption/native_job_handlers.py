@@ -23,7 +23,7 @@ import soundfile as sf
 
 from whisper_cpp_runtime import transcribe_whisper_cpp, resolve_whisper_model
 
-from native_config import get_models_dir, get_transcriptions_dir, get_uploads_dir, setup_environment
+from native_config import get_models_dir, get_transcriptions_dir, get_uploads_dir, get_bundle_dir, setup_environment
 from native_ffmpeg import get_ffmpeg_path, get_audio_duration
 import native_history
 
@@ -42,6 +42,12 @@ _RNNOISE_MIX_ENV = "XCAPTION_RNNOISE_MIX"
 _RNNOISE_MIX_LEGACY_ENV = "XSUB_RNNOISE_MIX"
 
 _CC_CREDIT_PATTERN = re.compile(r"^\s*CC[^:：]+[:：].+\s*$", re.IGNORECASE)
+_WRITTEN_PREFIX_ENV = "XCAPTION_WRITTEN_PREFIX_AUDIO"
+_SPOKEN_PREFIX_ENV = "XCAPTION_SPOKEN_PREFIX_AUDIO"
+_DEFAULT_WRITTEN_PREFIX_RELATIVE = Path("merge") / "written.mp3"
+_DEFAULT_SPOKEN_PREFIX_RELATIVE = Path("merge") / "spoken.mp3"
+_PREFIX_SILENCE_SECONDS = 5.0
+_DEFAULT_PREFIX_SECONDS = 15.0
 
 
 def _postprocess_caption_segments(segments: Iterable[Dict[str, Any]]) -> list[Dict[str, Any]]:
@@ -59,12 +65,153 @@ def _postprocess_caption_segments(segments: Iterable[Dict[str, Any]]) -> list[Di
             continue
         if text and "," in text:
             text = re.sub(r"\s*,\s*", " ", text).strip()
+        if text and ("(" in text or ")" in text):
+            text = text.replace("(", "").replace(")", "").strip()
+            text = re.sub(r"\s{2,}", " ", text)
         updated = dict(segment)
         updated["text"] = text
         processed.append(updated)
     for idx, segment in enumerate(processed):
         segment["id"] = idx
     return processed
+
+
+def _should_apply_cantonese_prefix(language: str, chinese_style: Optional[str]) -> bool:
+    if not chinese_style:
+        return False
+    normalized_style = chinese_style.strip().lower()
+    if normalized_style not in {"written", "spoken"}:
+        return False
+    normalized_language = (language or "").strip().lower()
+    return normalized_language in {"auto", "yue"}
+
+
+def _resolve_prefix_path(chinese_style: Optional[str]) -> Optional[Path]:
+    normalized_style = (chinese_style or "").strip().lower()
+    if normalized_style == "written":
+        env_key = _WRITTEN_PREFIX_ENV
+        default_relative = _DEFAULT_WRITTEN_PREFIX_RELATIVE
+    elif normalized_style == "spoken":
+        env_key = _SPOKEN_PREFIX_ENV
+        default_relative = _DEFAULT_SPOKEN_PREFIX_RELATIVE
+    else:
+        return None
+
+    env_path = os.environ.get(env_key, "").strip()
+    if env_path:
+        candidate = Path(env_path)
+        if not candidate.is_absolute():
+            candidate = get_bundle_dir() / candidate
+        if candidate.exists():
+            return candidate
+        logger.warning("Prefix audio not found at %s", candidate)
+
+    default_path = get_bundle_dir() / default_relative
+    if default_path.exists():
+        return default_path
+    return None
+
+
+def _concat_prefix_audio(
+    *,
+    job_id: str,
+    prefix_path: Path,
+    audio_path: Path,
+    prefix_seconds: Optional[float] = None,
+    silence_seconds: float = 0.0,
+    cleanup_paths: Optional[list] = None,
+) -> Optional[Path]:
+    ffmpeg_path = get_ffmpeg_path()
+    temp_dir = Path(tempfile.mkdtemp(prefix=f"xsub_prefix_{job_id}_"))
+    output_path = temp_dir / f"{job_id}_prefixed.wav"
+
+    prefix_filter = "aformat=sample_fmts=s16:sample_rates=16000:channel_layouts=mono"
+    if prefix_seconds and prefix_seconds > 0:
+        prefix_filter = f"atrim=0:{prefix_seconds},{prefix_filter}"
+
+    if silence_seconds and silence_seconds > 0:
+        filter_str = (
+            f"[0:a]{prefix_filter}[a0];"
+            "[1:a]aformat=sample_fmts=s16:sample_rates=16000:channel_layouts=mono[a1];"
+            f"anullsrc=r=16000:cl=mono:d={silence_seconds}[s];"
+            "[a0][s][a1]concat=n=3:v=0:a=1[a]"
+        )
+    else:
+        filter_str = (
+            f"[0:a]{prefix_filter}[a0];"
+            "[1:a]aformat=sample_fmts=s16:sample_rates=16000:channel_layouts=mono[a1];"
+            "[a0][a1]concat=n=2:v=0:a=1[a]"
+        )
+    cmd = [
+        ffmpeg_path,
+        "-y",
+        "-i",
+        str(prefix_path),
+        "-i",
+        str(audio_path),
+        "-filter_complex",
+        filter_str,
+        "-map",
+        "[a]",
+        "-acodec",
+        "pcm_s16le",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        str(output_path),
+    ]
+    process = subprocess.run(cmd, capture_output=True, text=True)
+    if process.returncode != 0 or not output_path.exists():
+        error_output = (process.stderr or process.stdout or "").strip()
+        logger.warning("Failed to apply written prefix audio: %s", error_output)
+        with contextlib.suppress(Exception):
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        return None
+
+    if cleanup_paths is not None:
+        cleanup_paths.append(str(temp_dir))
+    return output_path
+
+
+def _trim_prefixed_segments(
+    segments: list[Dict[str, Any]],
+    prefix_seconds: float,
+) -> list[Dict[str, Any]]:
+    if prefix_seconds <= 0:
+        return segments
+    trimmed: list[Dict[str, Any]] = []
+    for segment in segments:
+        start = float(segment.get("start", 0.0))
+        end = float(segment.get("end", 0.0))
+        if end <= prefix_seconds:
+            continue
+        new_start = max(0.0, start - prefix_seconds)
+        new_end = max(0.0, end - prefix_seconds)
+        if new_end <= 0.0:
+            continue
+        updated = dict(segment)
+        updated["start"] = new_start
+        updated["end"] = new_end
+        words = updated.get("words")
+        if isinstance(words, list):
+            adjusted_words = []
+            for word in words:
+                if not isinstance(word, dict):
+                    continue
+                w_start = word.get("start")
+                w_end = word.get("end")
+                if w_end is not None and float(w_end) <= prefix_seconds:
+                    continue
+                new_word = dict(word)
+                if w_start is not None:
+                    new_word["start"] = max(0.0, float(w_start) - prefix_seconds)
+                if w_end is not None:
+                    new_word["end"] = max(0.0, float(w_end) - prefix_seconds)
+                adjusted_words.append(new_word)
+            updated["words"] = adjusted_words
+        trimmed.append(updated)
+    return trimmed
 
 
 def _env_with_legacy(name: str, legacy: str) -> Optional[str]:
@@ -348,6 +495,7 @@ def process_transcription_job(
     file_path: str,
     model_path: str = "whisper",
     language: str = "auto",
+    chinese_style: Optional[str] = None,
     device: Optional[str] = None,
     compute_type: Optional[str] = None,
     vad_filter: bool = True,
@@ -365,6 +513,8 @@ def process_transcription_job(
     """Process audio transcription job using the selected backend."""
     prepared_audio_path_obj: Optional[Path] = None
     was_transcoded = False
+    if cleanup_paths is None:
+        cleanup_paths = []
     try:
         start_time = time.time()
         update_job_progress(job_id, 0, "Starting transcription...", {"stage": "transcription"})
@@ -394,6 +544,31 @@ def process_transcription_job(
             if candidate.exists():
                 inference_path_obj = candidate
 
+        transcribe_path_obj = inference_path_obj
+        prefix_trim_seconds = 0.0
+        if _should_apply_cantonese_prefix(language, chinese_style):
+            prefix_path = _resolve_prefix_path(chinese_style)
+            if prefix_path and prefix_path.exists():
+                update_job_progress(job_id, 8, "Applying Cantonese prefix...", {"stage": "preprocessing"})
+                prefix_duration = get_audio_duration(str(prefix_path))
+                if not prefix_duration or prefix_duration <= 0:
+                    prefix_duration = _DEFAULT_PREFIX_SECONDS
+                else:
+                    prefix_duration = min(prefix_duration, _DEFAULT_PREFIX_SECONDS)
+                prefixed_path = _concat_prefix_audio(
+                    job_id=job_id,
+                    prefix_path=prefix_path,
+                    audio_path=inference_path_obj,
+                    prefix_seconds=prefix_duration,
+                    silence_seconds=_PREFIX_SILENCE_SECONDS,
+                    cleanup_paths=cleanup_paths,
+                )
+                if prefixed_path:
+                    transcribe_path_obj = prefixed_path
+                    prefix_trim_seconds = max(0.0, prefix_duration + _PREFIX_SILENCE_SECONDS)
+            else:
+                logger.warning("Cantonese prefix audio not available; skipping prefix merge.")
+
         model_label = "Whisper.cpp"
         model_candidate = resolve_whisper_model(model_path)
         if model_candidate:
@@ -409,7 +584,7 @@ def process_transcription_job(
 
         update_job_progress(job_id, 10, "Running Whisper transcription...", {"stage": "transcription"})
         transcription = transcribe_whisper_cpp(
-            Path(inference_path_obj),
+            Path(transcribe_path_obj),
             model_path=model_path,
             language=language,
             output_dir=output_dir_path,
@@ -438,22 +613,35 @@ def process_transcription_job(
         full_text = transcription.get("text", "").strip()
         detected_language = transcription.get("language") or (language or "auto")
         duration = transcription.get("duration")
+        effective_prefix_trim = prefix_trim_seconds
+        if prefix_trim_seconds and isinstance(duration, (int, float)) and media_duration is not None:
+            inferred_prefix = max(0.0, float(duration) - float(media_duration))
+            if inferred_prefix > 0.5:
+                effective_prefix_trim = inferred_prefix
+        if effective_prefix_trim and isinstance(duration, (int, float)):
+            duration = max(0.0, float(duration) - effective_prefix_trim)
         effective_duration: Optional[float] = None
         if isinstance(duration, (int, float)):
             effective_duration = float(duration)
         if media_duration is not None:
             effective_duration = media_duration
 
+        if effective_prefix_trim:
+            segments = _trim_prefixed_segments(segments, effective_prefix_trim)
+
         if not segments and full_text:
-            segments = [
-                {
-                    "id": 0,
-                    "start": 0.0,
-                    "end": round(float(effective_duration) if effective_duration else 0.0, 2),
-                    "text": full_text,
-                    "words": [],
-                }
-            ]
+            if effective_prefix_trim:
+                full_text = ""
+            else:
+                segments = [
+                    {
+                        "id": 0,
+                        "start": 0.0,
+                        "end": round(float(effective_duration) if effective_duration else 0.0, 2),
+                        "text": full_text,
+                        "words": [],
+                    }
+                ]
 
         segments = _postprocess_caption_segments(segments)
         full_text = " ".join([seg.get("text", "") for seg in segments if seg.get("text")]).strip()
@@ -567,6 +755,7 @@ def process_full_pipeline_job(
     file_path: str,
     model_path: str = "whisper",
     language: str = "auto",
+    chinese_style: Optional[str] = None,
     device: Optional[str] = None,
     compute_type: Optional[str] = None,
     vad_filter: bool = True,
@@ -605,6 +794,7 @@ def process_full_pipeline_job(
                 file_path=file_path,
                 model_path=model_path,
                 language=language,
+                chinese_style=chinese_style,
                 device=device,
                 compute_type=compute_type,
                 vad_filter=vad_filter,
