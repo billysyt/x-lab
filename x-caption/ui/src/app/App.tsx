@@ -337,6 +337,10 @@ export function App() {
   const [youtubeProgress, setYoutubeProgress] = useState<number | null>(null);
   const youtubeProgressTimerRef = useRef<number | null>(null);
   const [isAltPressed, setIsAltPressed] = useState(false);
+  const [isWindowFocused, setIsWindowFocused] = useState(() => {
+    if (typeof document === "undefined") return true;
+    return document.hasFocus();
+  });
   const [isPinned, setIsPinned] = useState(false);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [isPlayerModalOpen, setIsPlayerModalOpen] = useState(false);
@@ -441,15 +445,21 @@ export function App() {
         setIsAltPressed(false);
       }
     };
-    const handleBlur = () => setIsAltPressed(false);
+    const handleBlur = () => {
+      setIsAltPressed(false);
+      setIsWindowFocused(false);
+    };
+    const handleFocus = () => setIsWindowFocused(true);
 
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
     window.addEventListener("blur", handleBlur);
+    window.addEventListener("focus", handleFocus);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("blur", handleBlur);
+      window.removeEventListener("focus", handleFocus);
     };
   }, []);
 
@@ -3972,16 +3982,22 @@ export function App() {
         >
           <div className="flex min-w-0 items-center gap-2">
             {isMac ? (
-              <div className="group mr-3 flex items-center gap-2">
+              <div className="group ml-1 mr-3 flex items-center gap-2">
                 <button
-                  className="pywebview-no-drag relative flex h-3 w-3 cursor-default items-center justify-center rounded-full bg-[#ff5f57] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)] transition group-hover:brightness-95"
+                  className={cn(
+                    "pywebview-no-drag relative flex h-3 w-3 cursor-default items-center justify-center rounded-full shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)] transition",
+                    isWindowFocused ? "bg-[#ff5f57] group-hover:brightness-95" : "bg-[#525252]"
+                  )}
                   onClick={() => handleWindowAction("close")}
                   type="button"
                   aria-label="Close"
                 >
                   <svg
                     viewBox="0 0 8 8"
-                    className="h-2 w-2 stroke-black/60 opacity-0 transition group-hover:opacity-80"
+                    className={cn(
+                      "h-2 w-2 stroke-black/60 transition",
+                      isWindowFocused ? "opacity-0 group-hover:opacity-80" : "opacity-0"
+                    )}
                     strokeWidth="1.2"
                     strokeLinecap="round"
                   >
@@ -3990,14 +4006,20 @@ export function App() {
                   </svg>
                 </button>
                 <button
-                  className="pywebview-no-drag relative flex h-3 w-3 cursor-default items-center justify-center rounded-full bg-[#febc2e] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)] transition group-hover:brightness-95"
+                  className={cn(
+                    "pywebview-no-drag relative flex h-3 w-3 cursor-default items-center justify-center rounded-full shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)] transition",
+                    isWindowFocused ? "bg-[#febc2e] group-hover:brightness-95" : "bg-[#525252]"
+                  )}
                   onClick={() => handleWindowAction("minimize")}
                   type="button"
                   aria-label="Minimize"
                 >
                   <svg
                     viewBox="0 0 8 8"
-                    className="h-2 w-2 stroke-black/60 opacity-0 transition group-hover:opacity-80"
+                    className={cn(
+                      "h-2 w-2 stroke-black/60 transition",
+                      isWindowFocused ? "opacity-0 group-hover:opacity-80" : "opacity-0"
+                    )}
                     strokeWidth="1.2"
                     strokeLinecap="round"
                   >
@@ -4005,7 +4027,10 @@ export function App() {
                   </svg>
                 </button>
                 <button
-                  className="pywebview-no-drag relative flex h-3 w-3 cursor-default items-center justify-center rounded-full bg-[#28c840] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)] transition group-hover:brightness-95"
+                  className={cn(
+                    "pywebview-no-drag relative flex h-3 w-3 cursor-default items-center justify-center rounded-full shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)] transition",
+                    isWindowFocused ? "bg-[#28c840] group-hover:brightness-95" : "bg-[#525252]"
+                  )}
                   onClick={() => handleWindowAction(isAltPressed ? "zoom" : "fullscreen")}
                   type="button"
                   aria-label="Zoom"
@@ -4013,7 +4038,10 @@ export function App() {
                   {isAltPressed ? (
                     <svg
                       viewBox="0 0 8 8"
-                      className="h-2 w-2 stroke-black/70 opacity-0 transition group-hover:opacity-90"
+                      className={cn(
+                        "h-2 w-2 stroke-black/70 transition",
+                        isWindowFocused ? "opacity-0 group-hover:opacity-90" : "opacity-0"
+                      )}
                       strokeWidth="1.5"
                       strokeLinecap="round"
                     >
@@ -4023,12 +4051,15 @@ export function App() {
                   ) : (
                     <svg
                       viewBox="0 0 8 8"
-                      className="h-2 w-2 rotate-180 stroke-black/70 opacity-0 transition group-hover:opacity-90"
-                      strokeWidth="1.4"
+                      className={cn(
+                        "h-2 w-2 rotate-90 stroke-black/70 transition",
+                        isWindowFocused ? "opacity-0 group-hover:opacity-90" : "opacity-0"
+                      )}
+                      strokeWidth="1.6"
                       strokeLinecap="round"
                     >
-                      <path d="M4.6 1.5 H6.5 V3.4" />
-                      <path d="M3.4 6.5 H1.5 V4.6" />
+                      <path d="M4.7 2.1 H6.3 V3.3" />
+                      <path d="M3.3 5.9 H1.7 V4.7" />
                     </svg>
                   )}
                 </button>
@@ -4054,7 +4085,7 @@ export function App() {
             {isHeaderCompact ? (
               <button
                 ref={headerMenuButtonRef}
-                className="pywebview-no-drag inline-flex h-7 items-center gap-1.5 rounded-md border border-slate-700 bg-[#151515] px-2 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500"
+                className="pywebview-no-drag inline-flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-[#151515] text-[10px] text-slate-200 transition hover:border-slate-500"
                 onClick={(event) => {
                   event.stopPropagation();
                   setIsHeaderMenuOpen((prev) => !prev);
@@ -4064,7 +4095,6 @@ export function App() {
                 title="Menu"
               >
                 <AppIcon name="bars" className="text-[11px]" />
-                Menu
               </button>
             ) : (
               <>
