@@ -160,6 +160,24 @@ function baseFilename(value: string | null | undefined) {
   return safe || "transcript";
 }
 
+const MACHINE_ID_STORAGE_KEY = "x-caption-machine-id";
+
+function getLocalMachineId() {
+  if (typeof window === "undefined") return "unknown";
+  try {
+    const stored = window.localStorage.getItem(MACHINE_ID_STORAGE_KEY);
+    if (stored) return stored;
+    const generated =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    window.localStorage.setItem(MACHINE_ID_STORAGE_KEY, generated);
+    return generated;
+  } catch {
+    return "unknown";
+  }
+}
+
 function findSegmentAtTime<T extends { start: number; end: number }>(segments: T[], time: number): T | null {
   if (!segments.length || !Number.isFinite(time)) return null;
   let lo = 0;
@@ -330,8 +348,13 @@ export function App() {
     setAlertModal({ title, message, tone: type });
   }, []);
   const [showOpenModal, setShowOpenModal] = useState(false);
+  const [showYoutubeModal, setShowYoutubeModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const [machineId, setMachineId] = useState<string | null>(null);
+  const [machineIdLoading, setMachineIdLoading] = useState(false);
+  const [premiumKey, setPremiumKey] = useState("");
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [youtubeImporting, setYoutubeImporting] = useState(false);
   const [youtubeError, setYoutubeError] = useState<string | null>(null);
@@ -709,7 +732,7 @@ export function App() {
             transcriptionKind: "audio"
           });
           setYoutubeProgress(100);
-          setShowOpenModal(false);
+          setShowYoutubeModal(false);
           setYoutubeUrl("");
           notify("YouTube media loaded.", "success");
           setYoutubeImporting(false);
@@ -724,8 +747,7 @@ export function App() {
         if (cancelled) return;
         const message = error instanceof Error ? error.message : String(error);
         setYoutubeError(message || "Failed to load YouTube media.");
-        notify(message || "Failed to load YouTube media.", "error");
-        setShowOpenModal(true);
+        setShowYoutubeModal(true);
         setYoutubeImporting(false);
         setYoutubeImportId(null);
         setYoutubeProgress(null);
@@ -1176,10 +1198,6 @@ export function App() {
     };
   }, []);
 
-  const waitlistUrl =
-    typeof window !== "undefined" && typeof (window as any).__WAITLIST_URL__ === "string"
-      ? String((window as any).__WAITLIST_URL__)
-      : "";
   const saveTextFile = useCallback(async (filename: string, content: string) => {
     const win = typeof window !== "undefined" ? (window as any) : null;
     const api = win?.pywebview?.api;
@@ -1306,20 +1324,9 @@ export function App() {
     }
   }, [exportSegments, notify, openCcConverter, saveTextFile, selectedJob?.filename]);
 
-  const handleJoinWaitlist = useCallback(() => {
-    const url = waitlistUrl.trim();
-    if (!url) {
-      notify("Waitlist link not configured.", "info");
-      return;
-    }
-    const win = typeof window !== "undefined" ? (window as any) : null;
-    const api = win?.pywebview?.api;
-    if (api && typeof api.open_external === "function") {
-      api.open_external(url);
-      return;
-    }
-    window.open(url, "_blank", "noopener,noreferrer");
-  }, [notify, waitlistUrl]);
+  const handleOpenPremiumModal = useCallback(() => {
+    setShowPremiumModal(true);
+  }, []);
 
   const handleOpenFiles = useCallback(() => {
     if (isCompact) {
@@ -1334,6 +1341,7 @@ export function App() {
     setYoutubeImportId(null);
     setYoutubeImportTitle(null);
     setYoutubeImportStatus(null);
+    setShowYoutubeModal(false);
     setShowOpenModal(true);
   }, []);
 
@@ -1342,6 +1350,12 @@ export function App() {
     handleOpenFiles();
   }, [handleOpenFiles]);
 
+  const handleOpenYoutubeModal = useCallback(() => {
+    setShowOpenModal(false);
+    setYoutubeError(null);
+    setShowYoutubeModal(true);
+  }, []);
+
   const handleImportYoutube = useCallback(async () => {
     const url = youtubeUrl.trim();
     if (!url) {
@@ -1349,7 +1363,7 @@ export function App() {
       return;
     }
     setYoutubeError(null);
-    setShowOpenModal(false);
+    setShowYoutubeModal(true);
     setYoutubeImporting(true);
     setYoutubeImportTitle(null);
     setYoutubeImportStatus(null);
@@ -1394,7 +1408,7 @@ export function App() {
           transcriptionKind: "audio"
         });
         setYoutubeProgress(100);
-        setShowOpenModal(false);
+        setShowYoutubeModal(false);
         setYoutubeUrl("");
         notify("YouTube media loaded.", "success");
         setYoutubeImporting(false);
@@ -1406,8 +1420,7 @@ export function App() {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setYoutubeError(message || "Failed to load YouTube media.");
-      notify(message || "Failed to load YouTube media.", "error");
-      setShowOpenModal(true);
+      setShowYoutubeModal(true);
       setYoutubeImporting(false);
       setYoutubeImportId(null);
       setYoutubeProgress(null);
@@ -1455,9 +1468,6 @@ export function App() {
     },
     [isPinned, setWindowOnTop]
   );
-
-
-
 
   const orderedClips = useMemo(
     () => [...timelineClips].sort((a, b) => a.startSec - b.startSec),
@@ -1883,6 +1893,43 @@ export function App() {
     }
     return null;
   }, []);
+
+  const fetchMachineId = useCallback(async () => {
+    const win = typeof window !== "undefined" ? (window as any) : null;
+    const api = win?.pywebview?.api;
+    if (api) {
+      const result = await Promise.resolve(callApiMethod(api, ["get_machine_id", "getMachineId"]));
+      if (result && result.success !== false) {
+        const id = result.id ?? result.machine_id ?? result.machineId;
+        if (typeof id === "string" && id.trim()) {
+          return id.trim();
+        }
+      }
+    }
+    return getLocalMachineId();
+  }, [callApiMethod]);
+
+  useEffect(() => {
+    if (!showPremiumModal) return;
+    let active = true;
+    setMachineIdLoading(true);
+    fetchMachineId()
+      .then((id) => {
+        if (!active) return;
+        setMachineId(id);
+      })
+      .catch(() => {
+        if (!active) return;
+        setMachineId(getLocalMachineId());
+      })
+      .finally(() => {
+        if (!active) return;
+        setMachineIdLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [fetchMachineId, showPremiumModal]);
 
   const handleWindowZoomToggle = useCallback(async () => {
     const win = typeof window !== "undefined" ? (window as any) : null;
@@ -2361,6 +2408,31 @@ export function App() {
       // Ignore.
     }
   }, [audioPreviewSrc]);
+  useEffect(() => {
+    if (!activeVideoSrc) return;
+    const videoEl = getActiveVideoEl();
+    if (!videoEl) return;
+    setPreviewPoster(null);
+    previewPosterModeRef.current = null;
+    const handleLoaded = () => {
+      if (playbackRef.current.isPlaying) return;
+      try {
+        videoEl.currentTime = 0;
+      } catch {
+        // Ignore.
+      }
+      capturePreviewPoster(videoEl);
+    };
+    videoEl.addEventListener("loadeddata", handleLoaded);
+    try {
+      videoEl.load();
+    } catch {
+      // Ignore.
+    }
+    return () => {
+      videoEl.removeEventListener("loadeddata", handleLoaded);
+    };
+  }, [activeVideoSrc, capturePreviewPoster, getActiveVideoEl]);
   const shouldShowPreviewPoster = Boolean(previewPoster);
   const nextVideoTarget = useMemo(() => {
     if (!nextClip) return null;
@@ -2860,6 +2932,7 @@ export function App() {
     }
     const mediaEl = getActiveMediaEl();
     if (!mediaEl) {
+      pendingPlayRef.current = !playback.isPlaying;
       setPlayback((prev) => ({ ...prev, isPlaying: !prev.isPlaying }));
       return;
     }
@@ -2881,6 +2954,16 @@ export function App() {
       }
     }
     if (mediaEl.paused) {
+      if (mediaEl.readyState < 2) {
+        pendingPlayRef.current = true;
+        setPlayback((prev) => ({ ...prev, isPlaying: true }));
+        try {
+          mediaEl.load();
+        } catch {
+          // Ignore.
+        }
+        return;
+      }
       void safePlay(mediaEl)
         .then((ok) => {
           setPlayback((prev) => ({ ...prev, isPlaying: ok }));
@@ -4001,9 +4084,10 @@ export function App() {
                 className="flex h-8 w-8 items-center justify-center rounded-md text-slate-200 transition hover:bg-white/10"
                 onClick={toggleFullscreen}
                 type="button"
-                aria-label="Fullscreen"
+                aria-label={isModal ? "縮小" : "Zoom"}
+                title={isModal ? "縮小" : "Zoom"}
               >
-                <AppIcon name="expand" className="text-[12px]" />
+                <AppIcon name={isModal ? "compress" : "expand"} className="text-[12px]" />
               </button>
             </div>
           </>
@@ -4211,10 +4295,10 @@ export function App() {
                 </button>
                 <button
                   className="pywebview-no-drag inline-flex h-7 items-center justify-center rounded-md bg-gradient-to-r from-[#2563eb] via-[#4338ca] to-[#6d28d9] px-2 text-[11px] font-semibold text-white shadow-[0_10px_24px_rgba(76,29,149,0.35)] transition hover:brightness-110"
-                  onClick={handleJoinWaitlist}
+                  onClick={handleOpenPremiumModal}
                   type="button"
                 >
-                  Join the Waitlist
+                  Get Premium
                 </button>
                 {showCustomWindowControls && !isMac ? (
                   <div className="ml-2 flex items-center gap-1 pl-2">
@@ -4286,12 +4370,12 @@ export function App() {
                 className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#1b1b22]"
                 onClick={() => {
                   setIsHeaderMenuOpen(false);
-                  handleJoinWaitlist();
+                  handleOpenPremiumModal();
                 }}
                 type="button"
               >
-                <AppIcon name="users" />
-                Join the Waitlist
+                <AppIcon name="sparkle" />
+                Get Premium
               </button>
               <button
                 className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#1b1b22]"
@@ -4688,14 +4772,14 @@ export function App() {
         <div className="fixed inset-0 z-[140] flex flex-col bg-[#0b0b0b]">
           <div {...getHeaderDragProps("flex items-center justify-between border-b border-slate-800/60 px-4 py-3")}>
             <div className="text-xs font-semibold text-slate-200">Player Focus</div>
-            <button
-              className="pywebview-no-drag inline-flex h-7 items-center gap-1.5 rounded-md border border-slate-700 bg-[#151515] px-2 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500"
-              onClick={() => setIsPlayerModalOpen(false)}
-              type="button"
-            >
-              <AppIcon name="times" className="text-[10px]" />
-              Close
-            </button>
+              <button
+                className="pywebview-no-drag inline-flex h-7 items-center gap-1.5 rounded-md bg-[#1b1b22] px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-[#26262f]"
+                onClick={() => setIsPlayerModalOpen(false)}
+                type="button"
+              >
+                <AppIcon name="times" className="text-[10px]" />
+                Close
+              </button>
           </div>
           <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
             <div className="flex min-h-0 flex-1">{renderPlayerPanel(true)}</div>
@@ -4807,7 +4891,7 @@ export function App() {
               </div>
               <div className="mt-5 flex items-center justify-end gap-2">
                 <button
-                  className="rounded-md border border-slate-700 bg-[#151515] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500"
+                  className="inline-flex h-7 items-center justify-center rounded-md bg-[#1b1b22] px-3 text-[11px] font-semibold text-slate-200 transition hover:bg-[#26262f]"
                   onClick={() => setAlertModal(null)}
                   type="button"
                 >
@@ -4831,7 +4915,7 @@ export function App() {
               <div>
                 <div className="text-sm font-semibold text-slate-100">Open</div>
                 <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-                  Import a local file or load YouTube media for transcription.
+                  Import a local file or load YouTube media.
                 </p>
               </div>
               <div className="mt-4 space-y-3">
@@ -4851,12 +4935,20 @@ export function App() {
                     <div>
                       <div className="text-[12px] font-semibold text-slate-100">Import video / audio</div>
                       <p className="mt-1 text-[11px] text-slate-400">
-                        Choose a local media file to add to the timeline.
+                        Choose a local media file to continue.
                       </p>
                     </div>
                   </div>
                 </button>
-                <div className={cn("group w-full rounded-xl px-4 py-3 transition", youtubeImporting ? "" : "hover:bg-[#151515]")}>
+                <button
+                  className={cn(
+                    "group w-full rounded-xl px-4 py-3 text-left transition",
+                    youtubeImporting ? "cursor-not-allowed opacity-50" : "hover:bg-[#151515]"
+                  )}
+                  onClick={handleOpenYoutubeModal}
+                  type="button"
+                  disabled={youtubeImporting}
+                >
                   <div className="flex items-start gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#111827] text-[#ff0000]">
                       <AppIcon name="youtube" className="text-[18px]" />
@@ -4864,48 +4956,11 @@ export function App() {
                     <div className="flex-1">
                       <div className="text-[12px] font-semibold text-slate-100">From YouTube</div>
                       <p className="mt-1 text-[11px] text-slate-400">
-                        We load YouTube media to generate captions.
+                        Load from Youtube media.
                       </p>
                     </div>
                   </div>
-                  <div className="mt-3 flex items-center gap-2">
-                    <input
-                      type="url"
-                      value={youtubeUrl}
-                      onChange={(event) => {
-                        setYoutubeUrl(event.target.value);
-                        if (youtubeError) {
-                          setYoutubeError(null);
-                        }
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          if (!youtubeImporting) {
-                            void handleImportYoutube();
-                          }
-                        }
-                      }}
-                      placeholder="Paste a YouTube link"
-                      className={cn(
-                        "w-full flex-1 rounded-md border border-slate-700 bg-[#0b0b0b] px-3 py-2 text-[11px] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-[#3b82f6]/60",
-                        youtubeImporting && "cursor-not-allowed opacity-60"
-                      )}
-                      disabled={youtubeImporting}
-                    />
-                    <button
-                      className="rounded-md bg-white px-3 py-2 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95 disabled:opacity-60"
-                      onClick={() => void handleImportYoutube()}
-                      type="button"
-                      disabled={youtubeImporting || !youtubeUrl.trim()}
-                    >
-                      {youtubeImporting ? "Importing..." : "Import"}
-                    </button>
-                  </div>
-                  {youtubeError ? (
-                    <p className="mt-2 text-[11px] text-rose-400">{youtubeError}</p>
-                  ) : null}
-                </div>
+                </button>
               </div>
               <div className="mt-5 flex items-center justify-end gap-2">
                 <button
@@ -4921,38 +4976,145 @@ export function App() {
         </div>
       ) : null}
 
-      {youtubeImporting ? (
-        <div className="fixed inset-0 z-[135] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      {showYoutubeModal || youtubeImporting ? (
+        <div
+          className="fixed inset-0 z-[135] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          onClick={() => {
+            if (!youtubeImporting) {
+              setShowYoutubeModal(false);
+            }
+          }}
+        >
           <div
-            className="w-full max-w-[420px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
+            className="w-full max-w-[460px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
             role="dialog"
             aria-modal="true"
+            onClick={(event) => event.stopPropagation()}
           >
             <div className="p-5">
-              <div className="flex flex-col items-center gap-4">
-                <AppIcon name="youtube" className="text-[28px] text-[#ff0000]" />
-                <div className="w-full max-w-[360px] truncate text-center text-[11px] font-semibold text-slate-200">
-                  {youtubeImportTitle ? youtubeImportTitle : "Loading YouTube media..."}
+              <div className="flex items-start gap-3">
+                <AppIcon name="youtube" className="text-[22px] text-[#ff0000]" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold text-slate-100 truncate">
+                    {youtubeImportTitle ? youtubeImportTitle : "Load YouTube media"}
+                  </div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                    Paste a YouTube link to import media.
+                  </p>
                 </div>
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#1b1b22]">
-                  <div
-                    className={cn(
-                      "h-full rounded-full transition-all",
-                      isYoutubeIndeterminate ? "youtube-progress-active" : "bg-white"
-                    )}
-                    style={{
-                      width: `${
-                        Math.max(
-                          0,
-                          Math.min(
-                            100,
-                            youtubeProgressValue
-                          )
-                        )
-                      }%`
+              </div>
+              <div className="mt-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="url"
+                    value={youtubeUrl}
+                    onChange={(event) => {
+                      setYoutubeUrl(event.target.value);
+                      if (youtubeError) {
+                        setYoutubeError(null);
+                      }
                     }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        if (!youtubeImporting) {
+                          void handleImportYoutube();
+                        }
+                      }
+                    }}
+                    placeholder="Paste a YouTube link"
+                    className={cn(
+                      "w-full flex-1 rounded-xl bg-[#0b0b0b] px-3 py-2 text-[11px] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-[#3b82f6]/60",
+                      youtubeImporting && "cursor-not-allowed opacity-60"
+                    )}
+                    disabled={youtubeImporting}
                   />
+                  {youtubeImporting ? (
+                    <div className="flex h-8 w-8 items-center justify-center">
+                      <AppIcon name="spinner" className="text-[14px] text-slate-200" spin />
+                    </div>
+                  ) : (
+                    <button
+                      className="rounded-md bg-white px-3 py-2 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95 disabled:opacity-60"
+                      onClick={() => void handleImportYoutube()}
+                      type="button"
+                      disabled={!youtubeUrl.trim()}
+                    >
+                      Import
+                    </button>
+                  )}
                 </div>
+                {youtubeError ? <p className="text-[11px] text-rose-400">{youtubeError}</p> : null}
+                {youtubeImporting ? (
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#1b1b22]">
+                    <div
+                      className={cn(
+                        "h-full rounded-full transition-all",
+                        isYoutubeIndeterminate ? "youtube-progress-active" : "bg-white"
+                      )}
+                      style={{
+                        width: `${Math.max(0, Math.min(100, youtubeProgressValue))}%`
+                      }}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showPremiumModal ? (
+        <div
+          className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          onClick={() => setShowPremiumModal(false)}
+        >
+          <div
+            className="w-full max-w-[520px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
+            role="dialog"
+            aria-modal="true"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="p-5">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold text-slate-100">Get Premium</div>
+                <button
+                  className="rounded-md bg-transparent px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
+                  onClick={() => setShowPremiumModal(false)}
+                  type="button"
+                >
+                  Close
+                </button>
+              </div>
+              <div className="mt-4 space-y-2">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Machine ID</div>
+                <div className="rounded-md border border-slate-700 bg-[#0b0b0b] px-3 py-2 text-[11px] font-mono text-slate-200 break-all">
+                  {machineIdLoading ? "Loading..." : machineId ?? "Unknown"}
+                </div>
+              </div>
+              <div className="mt-4 space-y-2">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Webview</div>
+                <iframe
+                  title="Premium Webview"
+                  src="https://www.google.com"
+                  className="h-40 w-full rounded-lg border border-slate-700/60 bg-black"
+                />
+              </div>
+              <div className="mt-4 flex items-center gap-2">
+                <input
+                  type="text"
+                  value={premiumKey}
+                  onChange={(event) => setPremiumKey(event.target.value)}
+                  placeholder="Enter premium key"
+                  className="w-full flex-1 rounded-md border border-slate-700 bg-[#0b0b0b] px-3 py-2 text-[11px] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-[#3b82f6]/60"
+                />
+                <button
+                  className="rounded-md bg-white px-3 py-2 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95 disabled:opacity-60"
+                  type="button"
+                  disabled={!premiumKey.trim()}
+                >
+                  Confirm
+                </button>
               </div>
             </div>
           </div>

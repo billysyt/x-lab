@@ -8,6 +8,7 @@ It serves the React UI and uses HTTP polling to emulate WebSocket-style updates.
 """
 import os
 import sys
+import hashlib
 import logging
 import logging.handlers
 import threading
@@ -20,9 +21,81 @@ import tempfile
 import warnings
 import base64
 import mimetypes
+import platform
+import subprocess
+import uuid
 from pathlib import Path
 
 IS_WINDOWS = sys.platform == "win32"
+
+
+def _read_text_first(paths):
+    for path in paths:
+        try:
+            value = Path(path).read_text(encoding="utf-8").strip()
+        except Exception:
+            continue
+        if value:
+            return value
+    return None
+
+
+def _read_machine_id_windows():
+    try:
+        import winreg  # type: ignore
+    except Exception:
+        return None
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\\Microsoft\\Cryptography") as key:
+            value, _ = winreg.QueryValueEx(key, "MachineGuid")
+            return str(value).strip() if value else None
+    except Exception:
+        return None
+
+
+def _read_machine_id_macos():
+    try:
+        output = subprocess.check_output(
+            ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return None
+    for line in output.splitlines():
+        if "IOPlatformUUID" in line:
+            parts = line.split("=", 1)
+            if len(parts) == 2:
+                value = parts[1].strip().strip('"')
+                return value or None
+    return None
+
+
+def _read_machine_id_linux():
+    return _read_text_first(["/etc/machine-id", "/var/lib/dbus/machine-id"])
+
+
+def _get_stable_machine_id():
+    raw_id = None
+    if sys.platform == "win32":
+        raw_id = _read_machine_id_windows()
+    elif sys.platform == "darwin":
+        raw_id = _read_machine_id_macos()
+    else:
+        raw_id = _read_machine_id_linux()
+
+    if not raw_id:
+        try:
+            node = uuid.getnode()
+            raw_id = f"{node:012x}"
+        except Exception:
+            raw_id = None
+
+    if not raw_id:
+        raw_id = platform.node() or "unknown"
+
+    digest = hashlib.sha256(str(raw_id).encode("utf-8")).hexdigest()
+    return digest
 
 # Fix Windows console encoding issues
 if IS_WINDOWS:
@@ -421,9 +494,19 @@ def open_browser(port: int = 11220, width: int = 1480, height: int = 900) -> str
             def __init__(self, webview_module):
                 self._webview = webview_module
                 self._window = None
+                self._machine_id = None
 
             def attach(self, window):
                 self._window = window
+
+            def get_machine_id(self):
+                if self._machine_id is None:
+                    self._machine_id = _get_stable_machine_id()
+                return {"success": True, "id": self._machine_id}
+
+            def getMachineId(self):
+                """Alias for camelCase access from JavaScript."""
+                return self.get_machine_id()
 
             def save_transcript(self, filename: str, content: str):
                 """
