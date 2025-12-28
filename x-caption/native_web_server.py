@@ -245,6 +245,43 @@ def _download_youtube_audio(
     }
 
 
+def _resolve_youtube_stream(url: str) -> Dict[str, Any]:
+    try:
+        from yt_dlp import YoutubeDL  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("YouTube import requires yt-dlp. Please install the dependency.") from exc
+
+    stream_opts = {
+        "format": "best[ext=mp4][acodec!=none][vcodec!=none]/best[acodec!=none][vcodec!=none]/best",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+    }
+    with YoutubeDL(stream_opts) as stream_ydl:
+        stream_info = stream_ydl.extract_info(url, download=False)
+
+    if not stream_info:
+        raise RuntimeError("Failed to fetch YouTube metadata.")
+    if "entries" in stream_info:
+        stream_info = next((entry for entry in stream_info.get("entries") or [] if entry), None)
+        if not stream_info:
+            raise RuntimeError("No playable YouTube entries found.")
+
+    stream_url = stream_info.get("url")
+    if not stream_url:
+        raise RuntimeError("Failed to resolve YouTube stream URL.")
+
+    return {
+        "stream_url": stream_url,
+        "source": {
+            "url": url,
+            "title": stream_info.get("title"),
+            "id": stream_info.get("id"),
+        },
+        "duration_sec": stream_info.get("duration") if isinstance(stream_info.get("duration"), (int, float)) else None,
+    }
+
+
 def _serialize_youtube_download(state: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "download_id": state.get("id"),
@@ -1615,6 +1652,23 @@ def create_app():
         except Exception as exc:
             logger.error("YouTube import failed: %s", exc, exc_info=True)
             return jsonify({"error": f"Failed to import YouTube audio: {exc}"}), 500
+
+    @app.route('/import/youtube/resolve', methods=['POST'])
+    def resolve_youtube_stream():
+        try:
+            payload = request.get_json(silent=True) or {}
+            url = str(payload.get("url") or "").strip()
+            if not url:
+                return jsonify({"error": "YouTube URL is required."}), 400
+            if not is_youtube_url(url):
+                return jsonify({"error": "Only YouTube links are supported."}), 400
+
+            result = _resolve_youtube_stream(url)
+            return jsonify(result), 200
+
+        except Exception as exc:
+            logger.error("YouTube stream resolve failed: %s", exc, exc_info=True)
+            return jsonify({"error": f"Failed to resolve YouTube stream: {exc}"}), 500
 
     @app.route('/import/youtube/start', methods=['POST'])
     def import_youtube_start():

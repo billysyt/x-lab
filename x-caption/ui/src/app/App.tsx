@@ -680,11 +680,13 @@ export function App() {
     }>
   >([]);
   const [activeMedia, setActiveMedia] = useState<MediaItem | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [isDisplayNameEditing, setIsDisplayNameEditing] = useState(false);
   const [displayNameDraft, setDisplayNameDraft] = useState("");
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
   const [activeClipId, setActiveClipId] = useState<string | null>(null);
   const pendingPlayRef = useRef(false);
+  const pendingPlayTargetRef = useRef<string | null>(null);
   const pendingSeekRef = useRef<number | null>(null);
   const scrubStateRef = useRef<{ pointerId: number; rect?: DOMRect } | null>(null);
   const playerScrubRef = useRef<{ wasPlaying: boolean } | null>(null);
@@ -692,6 +694,7 @@ export function App() {
   const pendingScrubRef = useRef<number | null>(null);
   const lastScrubValueRef = useRef<number | null>(null);
   const mediaRafActiveRef = useRef(false);
+  const pendingPlayRafRef = useRef<number | null>(null);
   const pendingSwapRef = useRef<string | null>(null);
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);
   const timelineTrackRef = useRef<HTMLDivElement | null>(null);
@@ -714,13 +717,25 @@ export function App() {
     startX: number;
     mode: "move" | "start" | "end";
   } | null>(null);
-  const [captionHover, setCaptionHover] = useState<{ start: number; end: number } | null>(null);
+  const [captionHover, setCaptionHover] = useState<{
+    start: number;
+    end: number;
+    gapStart: number;
+    gapEnd: number;
+  } | null>(null);
   const [forcedCaptionId, setForcedCaptionId] = useState<number | null>(null);
   const [captionMenu, setCaptionMenu] = useState<{
     x: number;
     y: number;
     segment: TranscriptSegment;
   } | null>(null);
+  const [gapMenu, setGapMenu] = useState<{
+    x: number;
+    y: number;
+    gapStart: number;
+    gapEnd: number;
+  } | null>(null);
+  const gapMenuOpenRef = useRef(false);
   const selectedJobUiStateRef = useRef<Record<string, any>>({});
   const activeJob = useMemo(() => {
     if (selectedJob) return selectedJob;
@@ -768,6 +783,22 @@ export function App() {
       top: Math.min(captionMenu.y, maxTop)
     };
   }, [captionMenu]);
+  const gapMenuPosition = useMemo(() => {
+    if (!gapMenu || typeof window === "undefined") return null;
+    const width = 180;
+    const height = 44;
+    const maxLeft = Math.max(8, window.innerWidth - width - 8);
+    const maxTop = Math.max(8, window.innerHeight - height - 8);
+    return {
+      left: Math.min(gapMenu.x, maxLeft),
+      top: Math.min(gapMenu.y, maxTop)
+    };
+  }, [gapMenu]);
+
+  const closeGapMenu = useCallback(() => {
+    gapMenuOpenRef.current = false;
+    setGapMenu(null);
+  }, []);
 
   useEffect(() => {
     if (!isHeaderCompact) {
@@ -1723,10 +1754,12 @@ export function App() {
 
   const safePlay = useCallback((mediaEl: HTMLMediaElement | null) => {
     if (!mediaEl) return Promise.resolve(false);
+    let threw = false;
     const attempt = () => {
       try {
         return mediaEl.play();
       } catch {
+        threw = true;
         return undefined;
       }
     };
@@ -1747,7 +1780,70 @@ export function App() {
           return false;
         });
     }
-    return Promise.resolve(true);
+    if (threw) {
+      return Promise.resolve(false);
+    }
+    return new Promise((resolve) => {
+      if (typeof window === "undefined") {
+        resolve(!mediaEl.paused);
+        return;
+      }
+      window.requestAnimationFrame(() => resolve(!mediaEl.paused));
+    });
+  }, []);
+
+  const schedulePendingPlay = useCallback(
+    (mediaEl: HTMLMediaElement | null) => {
+      if (!mediaEl) return;
+      if (pendingPlayRafRef.current !== null) return;
+      const step = () => {
+        pendingPlayRafRef.current = null;
+        if (!pendingPlayRef.current) return;
+        if (pendingPlayTargetRef.current && pendingPlayTargetRef.current !== activeMedia?.id) {
+          pendingPlayRef.current = false;
+          pendingPlayTargetRef.current = null;
+          return;
+        }
+        if (mediaEl.readyState < 2) {
+          if (typeof window !== "undefined") {
+            pendingPlayRafRef.current = window.requestAnimationFrame(step);
+          }
+          return;
+        }
+        void safePlay(mediaEl).then((ok) => {
+          pendingPlayRef.current = !ok;
+          if (!ok && typeof window !== "undefined") {
+            pendingPlayRafRef.current = window.requestAnimationFrame(step);
+          }
+        });
+      };
+      if (typeof window === "undefined") {
+        step();
+        return;
+      }
+      pendingPlayRafRef.current = window.requestAnimationFrame(step);
+    },
+    [activeMedia?.id, safePlay]
+  );
+
+  useEffect(() => {
+    if (pendingPlayTargetRef.current && pendingPlayTargetRef.current !== activeMedia?.id) {
+      pendingPlayRef.current = false;
+      pendingPlayTargetRef.current = null;
+      if (pendingPlayRafRef.current !== null && typeof window !== "undefined") {
+        window.cancelAnimationFrame(pendingPlayRafRef.current);
+        pendingPlayRafRef.current = null;
+      }
+    }
+  }, [activeMedia?.id]);
+
+  useEffect(() => {
+    return () => {
+      if (pendingPlayRafRef.current !== null && typeof window !== "undefined") {
+        window.cancelAnimationFrame(pendingPlayRafRef.current);
+        pendingPlayRafRef.current = null;
+      }
+    };
   }, []);
 
   const capturePreviewPoster = useCallback((mediaEl: HTMLMediaElement | null) => {
@@ -2445,8 +2541,13 @@ export function App() {
         pendingSeekRef.current = null;
       }
       if (pendingPlayRef.current) {
-        void safePlay(mediaEl);
         pendingPlayRef.current = false;
+        void safePlay(mediaEl).then((ok) => {
+          if (!ok) {
+            pendingPlayRef.current = true;
+            schedulePendingPlay(mediaEl);
+          }
+        });
       }
       clearPosterIfReady();
     };
@@ -2530,7 +2631,8 @@ export function App() {
     getActiveMediaEl,
     applyPlaybackRate,
     safePlay,
-    capturePreviewPoster
+    capturePreviewPoster,
+    schedulePendingPlay
   ]);
 
   useEffect(() => {
@@ -2592,6 +2694,10 @@ export function App() {
       setActivePreviewUrl(null);
       return;
     }
+    if (activeMedia.externalSource?.type === "youtube") {
+      setActivePreviewUrl(null);
+      return;
+    }
     if (activeMedia.source === "job" && activeMedia.jobId) {
       setActivePreviewUrl(`/audio/${activeMedia.jobId}?v=${Date.now()}`);
       return;
@@ -2608,8 +2714,47 @@ export function App() {
   }, [activeMedia]);
 
   const resolvedPreviewUrl = activeMedia?.previewUrl ?? activePreviewUrl;
+  useEffect(() => {
+    if (!pendingPlayRef.current) return;
+    const mediaEl = getActiveMediaEl();
+    if (!mediaEl) return;
+    schedulePendingPlay(mediaEl);
+  }, [getActiveMediaEl, activeMedia?.id, activePreviewKind, resolvedPreviewUrl, schedulePendingPlay]);
+  useEffect(() => {
+    if (!activeMedia) {
+      setPreviewLoading(false);
+      return;
+    }
+    if (activeMedia.isResolvingStream) {
+      setPreviewLoading(true);
+    }
+  }, [activeMedia?.id, activeMedia?.isResolvingStream]);
+
+  useEffect(() => {
+    const mediaEl = getActiveMediaEl();
+    if (!mediaEl) return;
+    const handleStart = () => setPreviewLoading(true);
+    const handleReady = () => {
+      setPreviewLoading(false);
+      if (pendingPlayRef.current) {
+        schedulePendingPlay(mediaEl);
+      }
+    };
+    mediaEl.addEventListener("loadstart", handleStart);
+    mediaEl.addEventListener("loadeddata", handleReady);
+    mediaEl.addEventListener("canplay", handleReady);
+    mediaEl.addEventListener("error", handleReady);
+    return () => {
+      mediaEl.removeEventListener("loadstart", handleStart);
+      mediaEl.removeEventListener("loadeddata", handleReady);
+      mediaEl.removeEventListener("canplay", handleReady);
+      mediaEl.removeEventListener("error", handleReady);
+    };
+  }, [getActiveMediaEl, activeMedia?.id, activePreviewKind, resolvedPreviewUrl, schedulePendingPlay]);
+
   const activeVideoSrc = resolvedPreviewUrl && activePreviewKind === "video" ? resolvedPreviewUrl : null;
   const audioPreviewSrc = activePreviewKind === "audio" ? resolvedPreviewUrl : null;
+  const showPreviewSpinner = previewLoading || Boolean(activeMedia?.isResolvingStream);
   useEffect(() => {
     const audioEl = audioRef.current;
     if (!audioEl) return;
@@ -2692,6 +2837,7 @@ export function App() {
   useEffect(() => {
     const target = pendingSeekRef.current;
     if (target === null) return;
+    if (activeMedia?.isResolvingStream) return;
     const mediaEl = getActiveMediaEl();
     if (!mediaEl) return;
     if (mediaEl.readyState >= 1) {
@@ -2704,11 +2850,16 @@ export function App() {
       if (pendingPlayRef.current) {
         pendingPlayRef.current = false;
         if (mediaEl.paused) {
-          void safePlay(mediaEl);
+          void safePlay(mediaEl).then((ok) => {
+            if (!ok) {
+              pendingPlayRef.current = true;
+              schedulePendingPlay(mediaEl);
+            }
+          });
         }
       }
     }
-  }, [activeClipId, activeMedia, getActiveMediaEl, safePlay]);
+  }, [activeClipId, activeMedia, getActiveMediaEl, safePlay, schedulePendingPlay]);
 
   useEffect(() => {
     if (activeClipId && !clipById.has(activeClipId)) {
@@ -2941,7 +3092,9 @@ export function App() {
   }, [activeMedia, clipTimeline.length, playback.isPlaying, timelineDuration]);
 
   const duration = clipTimeline.length ? timelineDuration : (playback.duration || 0);
-  const previewDisabled = !Number.isFinite(duration) || duration <= 0;
+  const hasPreviewSource =
+    Boolean(resolvedPreviewUrl) || clipTimeline.length > 0 || Boolean(activeMedia?.isResolvingStream);
+  const previewDisabled = !hasPreviewSource;
   const activeMediaEl = getActiveMediaEl();
   const isMediaPlaying = activeMediaEl ? !activeMediaEl.paused : playback.isPlaying;
   const handleOpenSubtitleEditor = useCallback(() => {
@@ -3107,6 +3260,12 @@ export function App() {
     if (!clipTimeline.length && !activeMedia) {
       return;
     }
+    if (!resolvedPreviewUrl && activeMedia?.externalSource?.type === "youtube") {
+      pendingPlayRef.current = true;
+      pendingPlayTargetRef.current = activeMedia?.id ?? null;
+      setPlayback((prev) => ({ ...prev, isPlaying: true }));
+      return;
+    }
     if (clipTimeline.length) {
       const range = timelineRanges.find(
         (r) => playback.currentTime >= r.startSec && playback.currentTime < r.startSec + r.durationSec
@@ -3154,6 +3313,7 @@ export function App() {
     const mediaEl = getActiveMediaEl();
     if (!mediaEl) {
       pendingPlayRef.current = !playback.isPlaying;
+      pendingPlayTargetRef.current = activeMedia?.id ?? null;
       setPlayback((prev) => ({ ...prev, isPlaying: !prev.isPlaying }));
       return;
     }
@@ -3175,21 +3335,20 @@ export function App() {
       }
     }
     if (mediaEl.paused) {
-      if (mediaEl.readyState < 2) {
-        pendingPlayRef.current = true;
-        setPlayback((prev) => ({ ...prev, isPlaying: true }));
-        try {
-          mediaEl.load();
-        } catch {
-          // Ignore.
-        }
-        return;
-      }
+      pendingPlayRef.current = true;
+      pendingPlayTargetRef.current = activeMedia?.id ?? null;
+      setPlayback((prev) => ({ ...prev, isPlaying: true }));
       void safePlay(mediaEl)
         .then((ok) => {
+          pendingPlayRef.current = !ok;
+          if (!ok) {
+            schedulePendingPlay(mediaEl);
+          }
           setPlayback((prev) => ({ ...prev, isPlaying: ok }));
         })
         .catch(() => {
+          pendingPlayRef.current = true;
+          schedulePendingPlay(mediaEl);
           setPlayback((prev) => ({ ...prev, isPlaying: false }));
         });
     } else {
@@ -3605,6 +3764,50 @@ export function App() {
     [activeJob?.id, dispatch, sortedSegments]
   );
 
+  const handleRemoveGap = useCallback(
+    (gapStart: number, gapEnd: number) => {
+      if (!activeJob?.id) return;
+      const delta = gapEnd - gapStart;
+      if (!Number.isFinite(delta) || delta <= minCaptionDuration) return;
+      const jobId = activeJob.id;
+      const updates: Array<{ segmentId: number; start: number; end: number }> = [];
+      const nextSegments = sortedSegments.map((seg) => {
+        const start = Number(seg.start) || 0;
+        const end = Number(seg.end) || 0;
+        if (start < gapEnd - 0.0001) {
+          return seg;
+        }
+        const length = Math.max(minCaptionDuration, end - start);
+        let nextStart = start - delta;
+        if (nextStart < 0) {
+          nextStart = 0;
+        }
+        const nextEnd = nextStart + length;
+        if (Math.abs(nextStart - start) > 0.0001 || Math.abs(nextEnd - end) > 0.0001) {
+          updates.push({ segmentId: Number(seg.id), start: nextStart, end: nextEnd });
+        }
+        return { ...seg, start: nextStart, end: nextEnd };
+      });
+      if (!updates.length) return;
+      dispatch(setJobSegments({ jobId, segments: nextSegments }));
+      updates.forEach((payload) => {
+        void apiUpdateSegmentTiming({ jobId, ...payload }).catch(() => undefined);
+      });
+      const mergedText = nextSegments
+        .map((seg) => String(seg.originalText ?? seg.text ?? "").trim())
+        .filter((text) => !isBlankAudioText(text))
+        .join(" ")
+        .trim();
+      void apiUpsertJobRecord({
+        job_id: jobId,
+        transcript_json: { job_id: jobId, segments: nextSegments, text: mergedText },
+        transcript_text: mergedText,
+        segment_count: nextSegments.length
+      }).catch(() => undefined);
+    },
+    [activeJob?.id, dispatch, minCaptionDuration, sortedSegments]
+  );
+
   const handleDeleteCaption = useCallback(
     (segment: TranscriptSegment) => {
       if (!activeJob?.id) return;
@@ -3686,9 +3889,34 @@ export function App() {
       const desired = Math.min(5, gapEnd - gapStart);
       const start = clamp(time, gapStart, gapEnd - desired);
       const end = start + desired;
-      setCaptionHover({ start, end });
+      setCaptionHover({ start, end, gapStart, gapEnd });
     },
     [activeJob?.id, duration, minCaptionDuration, pxPerSec, sortedDisplaySegments]
+  );
+
+  const handleGapContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (!captionHover) return;
+      const track = timelineTrackRef.current;
+      if (!track) return;
+      const rect = track.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const left = Math.max(0, captionHover.start * pxPerSec);
+      const width = Math.max(2, (captionHover.end - captionHover.start) * pxPerSec);
+      if (x < left || x > left + width) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setCaptionMenu(null);
+      gapMenuOpenRef.current = true;
+      setGapMenu({
+        x: event.clientX,
+        y: event.clientY,
+        gapStart: captionHover.gapStart,
+        gapEnd: captionHover.gapEnd
+      });
+      setCaptionHover(captionHover);
+    },
+    [captionHover, pxPerSec]
   );
 
   const onTrackPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -3814,6 +4042,19 @@ export function App() {
         notify("Skipped caption files. Only audio/video clips can be added to the timeline.", "info");
       }
       const item = supportedItems[0];
+
+      if (activeMedia && activeMedia.id === item.id && activeMedia.isResolvingStream && !item.isResolvingStream) {
+        if (pendingPlayRef.current || playbackRef.current.isPlaying) {
+          pendingPlayRef.current = true;
+          pendingPlayTargetRef.current = item.id;
+        }
+        setActiveMedia(item);
+        setTimelineClips((prev) =>
+          prev.map((clip) => (clip.media.id === item.id ? { ...clip, media: item } : clip))
+        );
+        return;
+      }
+
       const base = Number.isFinite(item.durationSec) && item.durationSec ? item.durationSec : 60;
       const clipId = `${item.id}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       setTimelineClips(
@@ -3840,7 +4081,7 @@ export function App() {
         dispatch(selectJob(null));
       }
     },
-    [dispatch, notify]
+    [activeMedia, dispatch, notify]
   );
 
   const handleTimelineScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
@@ -3920,6 +4161,7 @@ export function App() {
             onContextMenu={(event) => {
               event.preventDefault();
               event.stopPropagation();
+              closeGapMenu();
               setCaptionMenu({
                 x: event.clientX,
                 y: event.clientY,
@@ -3945,6 +4187,7 @@ export function App() {
       handleCaptionPointerMove,
       handleCaptionPointerUp,
       setCaptionMenu,
+      closeGapMenu,
       timelineSegments
     ]
   );
@@ -4229,6 +4472,11 @@ export function App() {
                         </div>
                       </div>
                     </div>
+                  </div>
+                ) : null}
+                {showPreviewSpinner ? (
+                  <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/35 backdrop-blur-[1px]">
+                    <AppIcon name="spinner" spin className="text-[20px] text-white/80" />
                   </div>
                 ) : null}
                 {subtitleEditor || currentSubtitle ? (
@@ -4991,24 +5239,49 @@ export function App() {
                         />
 
                         <div
-                          className="relative h-10 overflow-hidden rounded-md bg-transparent"
+                          className="relative h-10 overflow-visible rounded-md bg-transparent"
                           style={{ width: `${timelineWidth}px` }}
                           ref={timelineTrackRef}
                           onPointerDown={onTrackPointerDown}
                           onPointerMove={onTrackPointerMove}
                           onPointerUp={onTrackPointerUp}
                           onMouseMove={handleCaptionHoverMove}
-                          onMouseLeave={() => setCaptionHover(null)}
+                          onMouseLeave={() => {
+                            if (gapMenuOpenRef.current) return;
+                            setCaptionHover(null);
+                          }}
+                          onContextMenu={handleGapContextMenu}
                         >
                           {timelineSegmentEls}
                           {captionHover ? (
                             <div
-                              className="pointer-events-none absolute top-0 flex h-full items-center justify-center rounded-lg border border-dashed border-slate-500/40 bg-white/5 text-[10px] text-slate-200"
+                              className="pointer-events-none absolute top-0 z-10 flex h-full items-center justify-center rounded-lg border border-dashed border-slate-500/40 bg-white/5 text-[10px] text-slate-200 overflow-visible"
                               style={{
                                 left: `${Math.max(0, captionHover.start * pxPerSec)}px`,
                                 width: `${Math.max(2, (captionHover.end - captionHover.start) * pxPerSec)}px`
                               }}
                             >
+                              <button
+                                className="pointer-events-auto absolute right-1 top-0 z-20 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full text-[9px] font-semibold text-white/70 transition hover:bg-white/15 hover:text-white"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleRemoveGap(captionHover.gapStart, captionHover.gapEnd);
+                                  setCaptionHover(null);
+                                  closeGapMenu();
+                                }}
+                                onPointerDown={(event) => {
+                                  event.stopPropagation();
+                                  event.preventDefault();
+                                }}
+                                onPointerUp={(event) => {
+                                  event.stopPropagation();
+                                }}
+                                type="button"
+                                aria-label="Remove gap"
+                                title="Remove gap"
+                              >
+                                <AppIcon name="times" className="text-[9px]" />
+                              </button>
                               <button
                                 className="pointer-events-auto text-[12px] font-semibold text-white/90"
                                 onClick={(event) => {
@@ -5149,6 +5422,38 @@ export function App() {
               type="button"
             >
               Delete caption
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {gapMenu && gapMenuPosition ? (
+        <div
+          className="fixed inset-0 z-[125]"
+          onClick={() => {
+            closeGapMenu();
+            setCaptionHover(null);
+          }}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            closeGapMenu();
+          }}
+        >
+          <div
+            className="absolute w-max overflow-hidden rounded-lg border border-slate-700/60 bg-[#121212] shadow-[0_16px_40px_rgba(0,0,0,0.55)]"
+            style={{ left: `${gapMenuPosition.left}px`, top: `${gapMenuPosition.top}px` }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              className="w-full px-3 py-2 text-left text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
+              onClick={() => {
+                handleRemoveGap(gapMenu.gapStart, gapMenu.gapEnd);
+                closeGapMenu();
+                setCaptionHover(null);
+              }}
+              type="button"
+            >
+              Remove Gap
             </button>
           </div>
         </div>

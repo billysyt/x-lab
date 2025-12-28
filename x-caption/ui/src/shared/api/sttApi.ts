@@ -6,6 +6,7 @@ import type {
   PreprocessResponse,
   YoutubeImportStatus,
   YoutubeImportResponse,
+  YoutubeResolveResponse,
   WhisperModelDownload,
   WhisperModelStatus,
   RemoveJobResponse,
@@ -247,4 +248,12 @@ export async function apiStartYoutubeImport(url: string): Promise<YoutubeImportS
 
 export async function apiGetYoutubeImport(downloadId: string): Promise<YoutubeImportStatus> {
   return fetchJson<YoutubeImportStatus>(`/import/youtube/${downloadId}`);
+}
+
+export async function apiResolveYoutubeStream(url: string): Promise<YoutubeResolveResponse> {
+  return fetchJson<YoutubeResolveResponse>("/import/youtube/resolve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url })
+  });
 }

@@ -210,6 +210,17 @@ export type YoutubeImportResponse = {
   error?: string;
 };
 
+export type YoutubeResolveResponse = {
+  stream_url?: string | null;
+  source?: {
+    url?: string | null;
+    title?: string | null;
+    id?: string | null;
+  };
+  duration_sec?: number | null;
+  error?: string;
+};
+
 export type YoutubeImportStatus = YoutubeImportResponse & {
   download_id?: string;
   status?: string;

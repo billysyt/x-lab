@@ -23,7 +23,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { useAppDispatch, useAppSelector } from "../../../app/hooks";
 import { removeJob, setJobOrder, startTranscription, updateJobDisplayName, updateJobUiState } from "../../jobs/jobsSlice";
 import type { ToastType } from "../../../shared/components/ToastHost";
-import { apiRemoveJob, apiUpsertJobRecord } from "../../../shared/api/sttApi";
+import { apiRemoveJob, apiResolveYoutubeStream, apiUpsertJobRecord } from "../../../shared/api/sttApi";
 import { AppIcon } from "../../../shared/components/AppIcon";
 import { cn } from "../../../shared/lib/cn";
 import { stripFileExtension } from "../../../shared/lib/utils";
@@ -67,6 +67,7 @@ export type MediaItem = {
   previewUrl?: string | null;
   streamUrl?: string | null;
   externalSource?: MediaSourceInfo | null;
+  isResolvingStream?: boolean;
   thumbnailUrl?: string | null;
   thumbnailSource?: "saved" | "captured" | "none";
   createdAt?: number;
@@ -120,6 +121,7 @@ export const UploadTab = memo(forwardRef(function UploadTab(
   const exportLanguage = useAppSelector((s) => s.transcript.exportLanguage);
   const jobsById = useAppSelector((s) => s.jobs.jobsById);
   const jobOrder = useAppSelector((s) => s.jobs.order);
+  const selectedJobId = useAppSelector((s) => s.jobs.selectedJobId);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -145,6 +147,9 @@ export const UploadTab = memo(forwardRef(function UploadTab(
     item: MediaItem;
   } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedIdRef = useRef<string | null>(null);
+  const selectedJobIdRef = useRef<string | null>(selectedJobId ?? null);
+  const resolveTokenRef = useRef(0);
   const getPreviewKind = useCallback((item: MediaItem) => (item.streamUrl ? "video" : item.kind), []);
 
   const scheduleIdle = useCallback((task: () => void) => {
@@ -187,6 +192,62 @@ export const UploadTab = memo(forwardRef(function UploadTab(
         });
     },
     [dispatch, jobsById]
+  );
+
+  const resolveYoutubeStream = useCallback(
+    async (item: MediaItem): Promise<MediaItem | null> => {
+      if (item.externalSource?.type !== "youtube") {
+        return item;
+      }
+      const url = item.externalSource.url ?? null;
+      if (!url) {
+        props.notify("Missing YouTube URL for this item.", "error");
+        return null;
+      }
+      try {
+        const payload = await apiResolveYoutubeStream(url);
+        const streamUrl = typeof payload.stream_url === "string" ? payload.stream_url : null;
+        if (!streamUrl) {
+          throw new Error("Failed to resolve YouTube stream.");
+        }
+        const nextSource: MediaSourceInfo = {
+          type: "youtube",
+          url,
+          streamUrl,
+          title: payload.source?.title ?? item.externalSource.title ?? null,
+          id: payload.source?.id ?? item.externalSource.id ?? null
+        };
+        const updatedItem: MediaItem = {
+          ...item,
+          previewUrl: streamUrl,
+          streamUrl,
+          externalSource: nextSource,
+          isResolvingStream: false
+        };
+        if (item.source === "local") {
+          setLocalMedia((prev) => prev.map((entry) => (entry.id === item.id ? updatedItem : entry)));
+        }
+        if (item.jobId) {
+          const job = jobsById[item.jobId];
+          const existingUiState =
+            job?.uiState && typeof job.uiState === "object" ? (job.uiState as Record<string, any>) : {};
+          const nextUiState = {
+            ...existingUiState,
+            mediaSource: nextSource
+          };
+          if (job) {
+            dispatch(updateJobUiState({ jobId: item.jobId, uiState: nextUiState }));
+          }
+          void apiUpsertJobRecord({ job_id: item.jobId, ui_state: nextUiState }).catch(() => undefined);
+        }
+        return updatedItem;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        props.notify(message || "Failed to resolve YouTube stream.", "error");
+        return null;
+      }
+    },
+    [dispatch, jobsById, props.notify, setLocalMedia]
   );
 
   const formatTimestamp = useCallback((value?: number | null) => {
@@ -278,6 +339,14 @@ export const UploadTab = memo(forwardRef(function UploadTab(
   useEffect(() => {
     props.onSelectionChange?.(Boolean(selectedFile), selectedFile?.name ?? null, selectedFile ?? null);
   }, [selectedFile, props.onSelectionChange]);
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+
+  useEffect(() => {
+    selectedJobIdRef.current = selectedJobId ?? null;
+  }, [selectedJobId]);
 
 
   function clearSelectedFile() {
@@ -782,7 +851,52 @@ export const UploadTab = memo(forwardRef(function UploadTab(
               }
               return;
             }
+            const isYoutube = item.externalSource?.type === "youtube";
+            if (isYoutube) {
+              const existingStreamUrl = item.streamUrl ?? item.externalSource?.streamUrl ?? null;
+              if (existingStreamUrl) {
+                const stableSource = item.externalSource
+                  ? { ...item.externalSource, streamUrl: existingStreamUrl }
+                  : item.externalSource;
+                const stableItem: MediaItem = {
+                  ...item,
+                  previewUrl: item.previewUrl ?? existingStreamUrl,
+                  streamUrl: existingStreamUrl,
+                  externalSource: stableSource,
+                  isResolvingStream: false
+                };
+                setSelectedId(stableItem.id);
+                selectedIdRef.current = stableItem.id;
+                props.onAddToTimeline?.([stableItem]);
+                return;
+              }
+              const pendingSource = item.externalSource
+                ? { ...item.externalSource, streamUrl: null }
+                : item.externalSource;
+              const pendingItem: MediaItem = {
+                ...item,
+                previewUrl: null,
+                streamUrl: null,
+                externalSource: pendingSource,
+                isResolvingStream: true
+              };
+              setSelectedId(pendingItem.id);
+              selectedIdRef.current = pendingItem.id;
+              props.onAddToTimeline?.([pendingItem]);
+              const resolveToken = ++resolveTokenRef.current;
+              const requestedId = pendingItem.id;
+              const requestedJobId = item.source === "job" ? item.jobId ?? null : null;
+              void resolveYoutubeStream(item).then((refreshed) => {
+                if (!refreshed) return;
+                if (resolveTokenRef.current !== resolveToken) return;
+                if (selectedIdRef.current !== requestedId) return;
+                if (requestedJobId && selectedJobIdRef.current !== requestedJobId) return;
+                props.onAddToTimeline?.([refreshed]);
+              });
+              return;
+            }
             setSelectedId(item.id);
+            selectedIdRef.current = item.id;
             props.onAddToTimeline?.([item]);
           }}
           onContextMenu={(e) => {
