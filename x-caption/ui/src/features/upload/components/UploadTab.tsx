@@ -178,6 +178,11 @@ export const UploadTab = memo(forwardRef(function UploadTab(
     return true;
   }, []);
 
+  const isDataUrl = useCallback((value?: string | null) => {
+    if (!value) return false;
+    return value.startsWith("data:image/");
+  }, []);
+
   const resolveYoutubeThumbnailUrl = useCallback((item: MediaItem) => {
     const explicit = item.externalSource?.thumbnailUrl ?? null;
     if (explicit) return explicit;
@@ -475,6 +480,7 @@ export const UploadTab = memo(forwardRef(function UploadTab(
   }): MediaItem {
     const id = `local-path-${args.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const previewUrl = args.previewUrl ?? args.streamUrl ?? toFileUrl(args.path);
+    const externalThumb = args.externalSource?.thumbnailUrl ?? null;
     const jobId = buildImportedJobId(args.path, args.size);
     return {
       id,
@@ -489,7 +495,7 @@ export const UploadTab = memo(forwardRef(function UploadTab(
       previewUrl,
       streamUrl: args.streamUrl ?? args.previewUrl ?? null,
       externalSource: args.externalSource ?? null,
-      thumbnailUrl: null,
+      thumbnailUrl: externalThumb,
       createdAt: Date.now(),
       durationSec: typeof args.durationSec === "number" ? args.durationSec : null
     };
@@ -1002,6 +1008,7 @@ export const UploadTab = memo(forwardRef(function UploadTab(
     const isYoutube = item.externalSource?.type === "youtube";
     const previewKind = getPreviewKind(item);
     const fallbackIcon = isYoutube ? "youtube" : previewKind === "video" ? "video" : "volume";
+    const displayThumbnail = item.thumbnailUrl ?? item.externalSource?.thumbnailUrl ?? null;
 
     return (
       <div ref={setNodeRef} style={style}>
@@ -1092,9 +1099,9 @@ export const UploadTab = memo(forwardRef(function UploadTab(
           type="button"
         >
           <div className={cn("flex w-full items-center gap-3", isProcessingJob && "blur-[1.5px]")}>
-            {previewKind === "video" && item.thumbnailUrl ? (
+            {displayThumbnail && (previewKind === "video" || isYoutube) ? (
               <div className="relative h-10 w-16 overflow-hidden rounded-md bg-[#0f0f10]">
-                <img src={item.thumbnailUrl} alt="" className="h-full w-full object-cover" />
+                <img src={displayThumbnail} alt="" className="h-full w-full object-cover" />
                 {isYoutube ? (
                   <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded bg-black/60">
                     <AppIcon name="youtube" className="text-[9px] text-[#ff0000]" />
@@ -1188,8 +1195,11 @@ export const UploadTab = memo(forwardRef(function UploadTab(
   useEffect(() => {
     const youtubeItems = mediaItems.filter((item) => item.externalSource?.type === "youtube");
     youtubeItems.forEach((item) => {
-      const existingThumb = item.thumbnailUrl || jobPreviewMeta[item.id]?.thumbnailUrl;
-      if (existingThumb || youtubeThumbInFlight.current.has(item.id)) {
+      const cachedThumb = item.thumbnailUrl || jobPreviewMeta[item.id]?.thumbnailUrl;
+      if (cachedThumb && isDataUrl(cachedThumb)) {
+        return;
+      }
+      if (youtubeThumbInFlight.current.has(item.id)) {
         return;
       }
       const thumbnailUrl = resolveYoutubeThumbnailUrl(item);
@@ -1279,9 +1289,11 @@ export const UploadTab = memo(forwardRef(function UploadTab(
       job.uiState && typeof job.uiState === "object" && typeof (job.uiState as any)?.thumbnail?.data === "string"
         ? (job.uiState as any).thumbnail.data
         : null;
+    const hasCapturedThumb = Boolean(localMatch?.thumbnailUrl || meta?.thumbnailUrl);
+    const hasRemoteThumb = Boolean(externalSource?.thumbnailUrl);
     const thumbnailSource = persistedThumbnail
       ? "saved"
-      : localMatch?.thumbnailUrl || meta?.thumbnailUrl
+      : hasCapturedThumb || hasRemoteThumb
         ? "captured"
         : "none";
     return {
@@ -1298,7 +1310,12 @@ export const UploadTab = memo(forwardRef(function UploadTab(
       createdAt: job.startTime || Date.now(),
       durationSec:
         typeof jobDuration === "number" ? jobDuration : meta?.durationSec ?? localMatch?.durationSec ?? null,
-      thumbnailUrl: localMatch?.thumbnailUrl ?? meta?.thumbnailUrl ?? persistedThumbnail ?? null,
+      thumbnailUrl:
+        localMatch?.thumbnailUrl ??
+        meta?.thumbnailUrl ??
+        persistedThumbnail ??
+        externalSource?.thumbnailUrl ??
+        null,
       thumbnailSource,
       invalid: Boolean(job.mediaInvalid)
     };
