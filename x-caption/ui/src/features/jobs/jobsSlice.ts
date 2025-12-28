@@ -519,6 +519,17 @@ const slice = createSlice({
       const job = state.jobsById[action.payload.jobId];
       if (!job) return;
       const segment = action.payload.segment;
+      if (!job.result || !Array.isArray(job.result.segments)) {
+        job.result = { ...(job.result ?? {}), segments: [] };
+      }
+      if (job.status === "imported") {
+        job.status = "completed";
+        job.progress = 100;
+        job.completedAt = Date.now();
+        if (!job.message || job.message === "Media imported") {
+          job.message = "Captions updated";
+        }
+      }
       const apply = (result: TranscriptResult | null | undefined) => {
         if (!result) return;
         const segments = Array.isArray(result.segments) ? [...result.segments] : [];

@@ -3216,7 +3216,9 @@ export function App() {
     };
   }, [activeMedia, clipTimeline.length, playback.isPlaying, timelineDuration]);
 
-  const duration = clipTimeline.length ? timelineDuration : (playback.duration || 0);
+  const fallbackDuration =
+    Number.isFinite(activeMedia?.durationSec) && activeMedia?.durationSec ? activeMedia.durationSec : 0;
+  const duration = clipTimeline.length ? timelineDuration : (playback.duration || fallbackDuration || 0);
   const hasPreviewSource =
     Boolean(resolvedPreviewUrl) || clipTimeline.length > 0 || Boolean(activeMedia?.isResolvingStream);
   const previewDisabled = !hasPreviewSource;
@@ -3789,7 +3791,7 @@ export function App() {
   const handleCaptionPointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>, segment: TranscriptSegment) => {
       if (event.button !== 0) return;
-      if (!activeJob?.id) return;
+      if (!activeJob?.id && !activeMedia) return;
       event.stopPropagation();
       const target = event.target as HTMLElement;
       const handle = target.closest("[data-handle]") as HTMLElement | null;
@@ -3884,10 +3886,60 @@ export function App() {
     [computeCaptionTiming, dispatch, pxPerSec]
   );
 
+  const ensureCaptionJobId = useCallback(() => {
+    if (activeJob?.id) return activeJob.id;
+    if (!activeMedia) {
+      notify("Please select a media file to add captions.", "info");
+      return null;
+    }
+    const jobId = `manual-${activeMedia.id}`;
+    const existing = jobsById[jobId];
+    if (existing) {
+      dispatch(selectJob(jobId));
+      return jobId;
+    }
+    const filename = activeMedia.name || "media";
+    const displayName = stripFileExtension(filename) || filename;
+    const audioFile = activeMedia.file
+      ? {
+          name: activeMedia.file.name,
+          size: activeMedia.file.size,
+          path: null
+        }
+      : { name: filename, size: null, path: activeMedia.localPath ?? null };
+    const newJob: Job = {
+      id: jobId,
+      filename,
+      displayName,
+      status: "imported",
+      message: "",
+      progress: 0,
+      startTime: Date.now(),
+      audioFile,
+      result: null,
+      partialResult: null,
+      error: null,
+      currentStage: null
+    };
+    dispatch(addJob(newJob));
+    void apiUpsertJobRecord({
+      job_id: jobId,
+      filename,
+      display_name: displayName,
+      media_path: (activeMedia as any)?.localPath ?? null,
+      media_kind: activeMedia?.kind ?? null,
+      status: "imported",
+      transcript_json: { job_id: jobId, segments: [], text: "" },
+      transcript_text: "",
+      segment_count: 0
+    }).catch(() => undefined);
+    return jobId;
+  }, [activeJob?.id, activeMedia, dispatch, jobsById, notify]);
+
   const handleAddCaption = useCallback(
     (start: number, end: number) => {
-      if (!activeJob?.id) return;
-      const jobId = activeJob.id;
+      const jobId = ensureCaptionJobId();
+      if (!jobId) return;
       const maxId = sortedSegments.reduce((max, seg) => Math.max(max, Number(seg.id) || 0), 0);
       const nextId = maxId + 1;
       const text = "New Caption";
@@ -3901,7 +3953,7 @@ export function App() {
       dispatch(addSegment({ jobId, segment }));
       void apiAddSegment({ jobId, segmentId: nextId, start, end, text }).catch(() => undefined);
     },
-    [activeJob?.id, dispatch, sortedSegments]
+    [dispatch, ensureCaptionJobId, sortedSegments]
   );
 
   const applyTimelineShift = useCallback(
@@ -4063,7 +4115,7 @@ export function App() {
       const end = start + desired;
       setCaptionHover({ start, end, gapStart, gapEnd });
     },
-    [activeJob?.id, captionHover, duration, minCaptionDuration, pxPerSec, sortedDisplaySegments]
+    [activeJob?.id, activeMedia, captionHover, duration, minCaptionDuration, pxPerSec, sortedDisplaySegments]
   );
 
   const handleGapContextMenu = useCallback(
