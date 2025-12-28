@@ -1052,11 +1052,13 @@ export const UploadTab = memo(forwardRef(function UploadTab(
         <button
           data-media-row
           className={cn(
-            "relative w-full bg-[#141417] text-left transition hover:bg-[#1b1b22] focus:outline-none focus-visible:outline-none",
-            isListMode ? "rounded-md px-2 py-1.5" : "rounded-lg px-3 py-2",
+            "relative w-full text-left transition focus:outline-none focus-visible:outline-none",
+            isListMode
+              ? "rounded-md bg-transparent px-2 py-1.5 hover:bg-[rgba(255,255,255,0.04)]"
+              : "rounded-lg bg-transparent px-3 py-2 hover:bg-[rgba(255,255,255,0.04)]",
             canReorder && "cursor-grab active:cursor-grabbing",
             isDragging && "shadow-[0_12px_24px_rgba(0,0,0,0.35)]",
-            isSelected && "ring-1 ring-primary/40 bg-[#1b1b22]",
+            isSelected && (isListMode ? "ring-1 ring-primary/40" : "ring-1 ring-primary/40 bg-[#1b1b22]"),
             item.invalid && "ring-1 ring-rose-500/40"
           )}
           {...attributes}
@@ -1604,7 +1606,7 @@ export const UploadTab = memo(forwardRef(function UploadTab(
         >
           <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
             <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-              <div className={cn(viewMode === "list" ? "space-y-1" : "space-y-2")}>
+              <div className={cn(viewMode === "list" ? "space-y-px" : "space-y-2")}>
                 {filteredMediaItems.map((item) => {
                   const job = item.source === "job" && item.jobId ? jobsById[item.jobId] : null;
                   const updatedAt = job?.completedAt ?? job?.startTime ?? item.createdAt ?? null;
