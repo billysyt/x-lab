@@ -729,11 +729,20 @@ export function App() {
     y: number;
     segment: TranscriptSegment;
   } | null>(null);
+  const [captionMenuGapHighlight, setCaptionMenuGapHighlight] = useState(false);
   const [gapMenu, setGapMenu] = useState<{
     x: number;
     y: number;
     gapStart: number;
     gapEnd: number;
+  } | null>(null);
+  const [gapMenuHighlight, setGapMenuHighlight] = useState(false);
+  const [gapAdjustModal, setGapAdjustModal] = useState<{
+    segment: TranscriptSegment;
+    mode: "insert" | "remove";
+    ms: string;
+    maxRemoveMs: number;
+    hasGap: boolean;
   } | null>(null);
   const gapMenuOpenRef = useRef(false);
   const selectedJobUiStateRef = useRef<Record<string, any>>({});
@@ -775,7 +784,7 @@ export function App() {
   const captionMenuPosition = useMemo(() => {
     if (!captionMenu || typeof window === "undefined") return null;
     const width = 180;
-    const height = 76;
+    const height = 140;
     const maxLeft = Math.max(8, window.innerWidth - width - 8);
     const maxTop = Math.max(8, window.innerHeight - height - 8);
     return {
@@ -798,7 +807,14 @@ export function App() {
   const closeGapMenu = useCallback(() => {
     gapMenuOpenRef.current = false;
     setGapMenu(null);
+    setGapMenuHighlight(false);
   }, []);
+
+  useEffect(() => {
+    if (!captionMenu) {
+      setCaptionMenuGapHighlight(false);
+    }
+  }, [captionMenu]);
 
   useEffect(() => {
     if (!isHeaderCompact) {
@@ -3557,6 +3573,21 @@ export function App() {
     }
     return nextTicks;
   }, [rulerDuration, segmentSec]);
+  const captionMenuGapAfter = useMemo(() => {
+    if (!captionMenu) return null;
+    const segId = Number(captionMenu.segment.id);
+    const idx = sortedDisplaySegments.findIndex((seg) => Number(seg.id) === segId);
+    if (idx < 0) return null;
+    const current = sortedDisplaySegments[idx];
+    const next = sortedDisplaySegments[idx + 1] ?? null;
+    if (!next) {
+      return { hasNext: false, hasGap: false };
+    }
+    const gapStart = Number(current.end) || 0;
+    const gapEnd = Number(next.start) || 0;
+    const gap = gapEnd - gapStart;
+    return { hasNext: true, hasGap: gap > minCaptionDuration, gapStart, gapEnd };
+  }, [captionMenu, minCaptionDuration, sortedDisplaySegments]);
   const segmentPx = segmentSec * pxPerSec;
   const faintGridStyle = useMemo(() => ({
     backgroundImage: "linear-gradient(to right, rgba(15,23,42,0.3) 1px, transparent 1px)",
@@ -3764,28 +3795,19 @@ export function App() {
     [activeJob?.id, dispatch, sortedSegments]
   );
 
-  const handleRemoveGap = useCallback(
-    (gapStart: number, gapEnd: number) => {
+  const applyTimelineShift = useCallback(
+    (thresholdSec: number, deltaSec: number) => {
       if (!activeJob?.id) return;
-      const delta = gapEnd - gapStart;
-      if (!Number.isFinite(delta) || delta <= minCaptionDuration) return;
+      if (!Number.isFinite(deltaSec) || Math.abs(deltaSec) < 0.0001) return;
       const jobId = activeJob.id;
       const updates: Array<{ segmentId: number; start: number; end: number }> = [];
       const nextSegments = sortedSegments.map((seg) => {
         const start = Number(seg.start) || 0;
         const end = Number(seg.end) || 0;
-        if (start < gapEnd - 0.0001) {
-          return seg;
-        }
-        const length = Math.max(minCaptionDuration, end - start);
-        let nextStart = start - delta;
-        if (nextStart < 0) {
-          nextStart = 0;
-        }
-        const nextEnd = nextStart + length;
-        if (Math.abs(nextStart - start) > 0.0001 || Math.abs(nextEnd - end) > 0.0001) {
-          updates.push({ segmentId: Number(seg.id), start: nextStart, end: nextEnd });
-        }
+        if (start < thresholdSec - 0.0001) return seg;
+        const nextStart = start + deltaSec;
+        const nextEnd = end + deltaSec;
+        updates.push({ segmentId: Number(seg.id), start: nextStart, end: nextEnd });
         return { ...seg, start: nextStart, end: nextEnd };
       });
       if (!updates.length) return;
@@ -3805,7 +3827,40 @@ export function App() {
         segment_count: nextSegments.length
       }).catch(() => undefined);
     },
-    [activeJob?.id, dispatch, minCaptionDuration, sortedSegments]
+    [activeJob?.id, dispatch, sortedSegments]
+  );
+
+  const handleRemoveGap = useCallback(
+    (gapStart: number, gapEnd: number) => {
+      const delta = gapEnd - gapStart;
+      if (!Number.isFinite(delta) || delta <= minCaptionDuration) return;
+      applyTimelineShift(gapEnd, -delta);
+    },
+    [applyTimelineShift, minCaptionDuration]
+  );
+
+  const handleAdjustGapAfter = useCallback(
+    (segment: TranscriptSegment, mode: "insert" | "remove", msValue: number, maxRemoveMs: number) => {
+      const segId = Number(segment.id);
+      const idx = sortedDisplaySegments.findIndex((seg) => Number(seg.id) === segId);
+      if (idx < 0) return;
+      const current = sortedDisplaySegments[idx];
+      const next = sortedDisplaySegments[idx + 1];
+      if (!next) return;
+      const gapStart = Number(current.end) || 0;
+      const gapEnd = Number(next.start) || 0;
+      if (mode === "remove") {
+        const maxMs = Math.max(0, maxRemoveMs);
+        const ms = Math.min(Math.max(0, msValue), maxMs);
+        if (ms <= 0) return;
+        applyTimelineShift(gapEnd, -(ms / 1000));
+        return;
+      }
+      const ms = Math.max(0, msValue);
+      if (ms <= 0) return;
+      applyTimelineShift(gapStart, ms / 1000);
+    },
+    [applyTimelineShift, sortedDisplaySegments]
   );
 
   const handleDeleteCaption = useCallback(
@@ -3873,6 +3928,14 @@ export function App() {
           return;
         }
       }
+      if (captionHover) {
+        const hoverLeft = Math.max(0, captionHover.start * pxPerSec);
+        const hoverWidth = Math.max(2, (captionHover.end - captionHover.start) * pxPerSec);
+        const inset = 3;
+        if (x < hoverLeft + inset || x > hoverLeft + hoverWidth - inset) {
+          return;
+        }
+      }
       let gapStart = 0;
       let gapEnd = duration;
       for (const seg of sortedDisplaySegments) {
@@ -3887,11 +3950,11 @@ export function App() {
         return;
       }
       const desired = Math.min(5, gapEnd - gapStart);
-      const start = clamp(time, gapStart, gapEnd - desired);
+      const start = clamp(time - desired * 0.5, gapStart, gapEnd - desired);
       const end = start + desired;
       setCaptionHover({ start, end, gapStart, gapEnd });
     },
-    [activeJob?.id, duration, minCaptionDuration, pxPerSec, sortedDisplaySegments]
+    [activeJob?.id, captionHover, duration, minCaptionDuration, pxPerSec, sortedDisplaySegments]
   );
 
   const handleGapContextMenu = useCallback(
@@ -4162,6 +4225,7 @@ export function App() {
               event.preventDefault();
               event.stopPropagation();
               closeGapMenu();
+              setCaptionMenuGapHighlight(false);
               setCaptionMenu({
                 x: event.clientX,
                 y: event.clientY,
@@ -4188,6 +4252,7 @@ export function App() {
       handleCaptionPointerUp,
       setCaptionMenu,
       closeGapMenu,
+      setCaptionMenuGapHighlight,
       timelineSegments
     ]
   );
@@ -5253,46 +5318,46 @@ export function App() {
                           onContextMenu={handleGapContextMenu}
                         >
                           {timelineSegmentEls}
+                          {gapMenu && gapMenuHighlight ? (
+                            <div
+                              className="pointer-events-none absolute top-0 z-[5] flex h-full items-center justify-center rounded-lg border border-primary/60 bg-primary/10 text-[10px] text-slate-100"
+                              style={{
+                                left: `${Math.max(0, gapMenu.gapStart * pxPerSec)}px`,
+                                width: `${Math.max(2, (gapMenu.gapEnd - gapMenu.gapStart) * pxPerSec)}px`
+                              }}
+                            />
+                          ) : null}
+                          {captionMenuGapAfter &&
+                          captionMenuGapHighlight &&
+                          captionMenuGapAfter.hasGap &&
+                          typeof captionMenuGapAfter.gapStart === "number" &&
+                          typeof captionMenuGapAfter.gapEnd === "number" ? (
+                            <div
+                              className="pointer-events-none absolute top-0 z-[5] flex h-full items-center justify-center rounded-lg border border-primary/60 bg-primary/10 text-[10px] text-slate-100"
+                              style={{
+                                left: `${Math.max(0, captionMenuGapAfter.gapStart * pxPerSec)}px`,
+                                width: `${Math.max(2, (captionMenuGapAfter.gapEnd - captionMenuGapAfter.gapStart) * pxPerSec)}px`
+                              }}
+                            />
+                          ) : null}
                           {captionHover ? (
                             <div
-                              className="pointer-events-none absolute top-0 z-10 flex h-full items-center justify-center rounded-lg border border-dashed border-slate-500/40 bg-white/5 text-[10px] text-slate-200 overflow-visible"
+                              className="pointer-events-auto absolute top-0 z-10 flex h-full cursor-pointer items-center justify-center rounded-lg border border-dashed border-slate-500/40 bg-white/5 text-[10px] text-slate-200 overflow-visible"
                               style={{
                                 left: `${Math.max(0, captionHover.start * pxPerSec)}px`,
                                 width: `${Math.max(2, (captionHover.end - captionHover.start) * pxPerSec)}px`
                               }}
+                              onPointerDown={(event) => {
+                                event.stopPropagation();
+                              }}
+                              onMouseMove={handleCaptionHoverMove}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleAddCaption(captionHover.start, captionHover.end);
+                                setCaptionHover(null);
+                              }}
                             >
-                              <button
-                                className="pointer-events-auto absolute right-1 top-0 z-20 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full text-[9px] font-semibold text-white/70 transition hover:bg-white/15 hover:text-white"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  handleRemoveGap(captionHover.gapStart, captionHover.gapEnd);
-                                  setCaptionHover(null);
-                                  closeGapMenu();
-                                }}
-                                onPointerDown={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                }}
-                                onPointerUp={(event) => {
-                                  event.stopPropagation();
-                                }}
-                                type="button"
-                                aria-label="Remove gap"
-                                title="Remove gap"
-                              >
-                                <AppIcon name="times" className="text-[9px]" />
-                              </button>
-                              <button
-                                className="pointer-events-auto text-[12px] font-semibold text-white/90"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  handleAddCaption(captionHover.start, captionHover.end);
-                                  setCaptionHover(null);
-                                }}
-                                type="button"
-                              >
-                                +
-                              </button>
+                              <span className="pointer-events-none text-[12px] font-semibold text-white/90">+</span>
                             </div>
                           ) : null}
                         </div>
@@ -5414,6 +5479,40 @@ export function App() {
               Split caption
             </button>
             <button
+              className={cn(
+                "w-full px-3 py-2 text-left text-[11px] font-semibold transition",
+                captionMenuGapAfter?.hasNext
+                  ? "text-slate-200 hover:bg-[#1b1b22]"
+                  : "cursor-not-allowed text-slate-500"
+              )}
+              onClick={() => {
+                if (!captionMenuGapAfter?.hasNext) return;
+                const hasGap = Boolean(captionMenuGapAfter?.hasGap);
+                const maxRemoveMs = Math.max(
+                  0,
+                  Math.round(((captionMenuGapAfter?.gapEnd ?? 0) - (captionMenuGapAfter?.gapStart ?? 0)) * 1000)
+                );
+                setGapAdjustModal({
+                  segment: captionMenu.segment,
+                  mode: "insert",
+                  ms: "1000",
+                  maxRemoveMs,
+                  hasGap
+                });
+                setCaptionMenu(null);
+              }}
+              onMouseEnter={() => {
+                if (captionMenuGapAfter?.hasGap) {
+                  setCaptionMenuGapHighlight(true);
+                }
+              }}
+              onMouseLeave={() => setCaptionMenuGapHighlight(false)}
+              type="button"
+              disabled={!captionMenuGapAfter?.hasNext}
+            >
+              Insert/Remove Gap After…
+            </button>
+            <button
               className="w-full px-3 py-2 text-left text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
               onClick={() => {
                 handleDeleteCaption(captionMenu.segment);
@@ -5451,10 +5550,153 @@ export function App() {
                 closeGapMenu();
                 setCaptionHover(null);
               }}
+              onMouseEnter={() => setGapMenuHighlight(true)}
+              onMouseLeave={() => setGapMenuHighlight(false)}
               type="button"
             >
               Remove Gap
             </button>
+          </div>
+        </div>
+      ) : null}
+
+      {gapAdjustModal ? (
+        <div
+          className="fixed inset-0 z-[140] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          onClick={() => setGapAdjustModal(null)}
+        >
+          <div
+            className="w-full max-w-[420px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
+            role="dialog"
+            aria-modal="true"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="p-5">
+              <div>
+                <div className="text-sm font-semibold text-slate-100">Adjust Gap After</div>
+                <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                  Insert or remove time after this caption (milliseconds).
+                </p>
+              </div>
+              <div className="mt-4">
+                <div className="relative flex items-center rounded-full bg-[#151515] p-1 text-[11px] font-semibold">
+                  <span
+                    className={cn(
+                      "absolute inset-y-1 w-1/2 rounded-full bg-white transition-transform duration-200",
+                      gapAdjustModal.mode === "insert" ? "translate-x-0" : "translate-x-full"
+                    )}
+                  />
+                  <button
+                    className={cn(
+                      "relative z-10 inline-flex flex-1 items-center justify-center rounded-full px-3 py-1.5 transition",
+                      gapAdjustModal.mode === "insert" ? "text-[#0b0b0b]" : "text-slate-200"
+                    )}
+                    onClick={() => {
+                      if (gapAdjustModal.mode === "insert") return;
+                      const nextMs = gapAdjustModal.ms.trim() ? gapAdjustModal.ms : "1000";
+                      setGapAdjustModal({ ...gapAdjustModal, mode: "insert", ms: nextMs });
+                    }}
+                    type="button"
+                  >
+                    Insert
+                  </button>
+                  <button
+                    className={cn(
+                      "relative z-10 inline-flex flex-1 items-center justify-center rounded-full px-3 py-1.5 transition",
+                      gapAdjustModal.hasGap
+                        ? gapAdjustModal.mode === "remove"
+                          ? "text-[#0b0b0b]"
+                          : "text-slate-200"
+                        : "cursor-not-allowed text-slate-500"
+                    )}
+                    onClick={() => {
+                      if (!gapAdjustModal.hasGap) return;
+                      const currentMs = gapAdjustModal.ms.trim();
+                      const numeric = currentMs ? Number(currentMs) : Number.NaN;
+                      const clamped =
+                        Number.isFinite(numeric) && gapAdjustModal.maxRemoveMs > 0
+                          ? Math.min(Math.max(0, numeric), gapAdjustModal.maxRemoveMs)
+                          : gapAdjustModal.maxRemoveMs;
+                      setGapAdjustModal({
+                        ...gapAdjustModal,
+                        mode: "remove",
+                        ms: String(clamped)
+                      });
+                    }}
+                    type="button"
+                    disabled={!gapAdjustModal.hasGap}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+              <div className="mt-4 flex items-center gap-2">
+                <input
+                  type="number"
+                  min={0}
+                  step={100}
+                  max={gapAdjustModal.mode === "remove" ? gapAdjustModal.maxRemoveMs : undefined}
+                  value={gapAdjustModal.ms}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    if (nextValue === "") {
+                      setGapAdjustModal({ ...gapAdjustModal, ms: "" });
+                      return;
+                    }
+                    if (gapAdjustModal.mode === "remove") {
+                      const numeric = Number(nextValue);
+                      if (Number.isFinite(numeric) && gapAdjustModal.maxRemoveMs > 0) {
+                        const clamped = Math.min(Math.max(0, numeric), gapAdjustModal.maxRemoveMs);
+                        setGapAdjustModal({ ...gapAdjustModal, ms: String(clamped) });
+                        return;
+                      }
+                    }
+                    setGapAdjustModal({ ...gapAdjustModal, ms: nextValue });
+                  }}
+                  className="w-full flex-1 rounded-md bg-[#0b0b0b] px-3 py-2 text-[11px] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-[#3b82f6]/60"
+                  autoFocus
+                />
+                <span className="text-[11px] text-slate-500">ms</span>
+              </div>
+              {gapAdjustModal.mode === "remove" && gapAdjustModal.hasGap ? (
+                <p className="mt-2 text-[10px] text-slate-500">
+                  Max removable: {gapAdjustModal.maxRemoveMs} ms
+                </p>
+              ) : null}
+              <div className="mt-5 flex items-center justify-end gap-2">
+                <button
+                  className="rounded-md bg-transparent px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
+                  onClick={() => setGapAdjustModal(null)}
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button
+                  className="rounded-md bg-white px-3 py-1.5 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95"
+                  onClick={() => {
+                    const valueMs = gapAdjustModal.ms.trim() ? Number(gapAdjustModal.ms) : 0;
+                    if (!Number.isFinite(valueMs) || valueMs <= 0) {
+                      notify("Please enter a valid gap in milliseconds.", "error");
+                      return;
+                    }
+                    if (gapAdjustModal.mode === "remove" && valueMs > gapAdjustModal.maxRemoveMs) {
+                      notify("Remove gap exceeds the available gap.", "error");
+                      return;
+                    }
+                    handleAdjustGapAfter(
+                      gapAdjustModal.segment,
+                      gapAdjustModal.mode,
+                      valueMs,
+                      gapAdjustModal.maxRemoveMs
+                    );
+                    setGapAdjustModal(null);
+                  }}
+                  type="button"
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       ) : null}
