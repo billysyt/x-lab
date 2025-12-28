@@ -497,6 +497,7 @@ export function App() {
   const [isPinned, setIsPinned] = useState(false);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [isPlayerModalOpen, setIsPlayerModalOpen] = useState(false);
+  const [isPlayerModalVisible, setIsPlayerModalVisible] = useState(false);
   const headerMenuRef = useRef<HTMLDivElement | null>(null);
   const headerMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const premiumWebviewRef = useRef<HTMLIFrameElement | null>(null);
@@ -638,6 +639,12 @@ export function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isPlayerModalOpen]);
+
+  useEffect(() => {
+    if (isPlayerModalOpen) {
+      setIsPlayerModalVisible(true);
+    }
   }, [isPlayerModalOpen]);
 
   useEffect(() => {
@@ -4111,7 +4118,12 @@ export function App() {
   };
 
   const toggleFullscreen = () => {
-    setIsPlayerModalOpen((prev) => !prev);
+    if (isPlayerModalOpen) {
+      setIsPlayerModalOpen(false);
+      return;
+    }
+    setIsPlayerModalVisible(true);
+    window.requestAnimationFrame(() => setIsPlayerModalOpen(true));
   };
 
   const handleClearSelection = useCallback(() => {
@@ -4367,7 +4379,7 @@ export function App() {
   const isCantoneseLanguage = settings.language === "yue" || settings.language === "auto";
   const isSecondCaptionActive = secondCaptionEnabled;
   const generateCaptionLabel = isActiveJobProcessing
-    ? "Processing"
+    ? "Processing..."
     : isAnotherJobProcessing
       ? "Another job processing..."
       : modelDownload.status === "downloading"
@@ -5230,7 +5242,7 @@ export function App() {
                 </div>
               ) : null}
             </div>
-            {isPlayerModalOpen ? null : renderPlayerPanel(false)}
+            {isPlayerModalVisible ? null : renderPlayerPanel(false)}
           </section>
 
           {/* Right */}
@@ -5536,8 +5548,20 @@ export function App() {
         </>
       ) : null}
 
-      {isPlayerModalOpen ? (
-        <div className="fixed inset-0 z-[140] flex flex-col bg-[#0b0b0b]">
+      {isPlayerModalVisible ? (
+        <div
+          className={cn(
+            "fixed inset-0 z-[140] flex flex-col bg-[#0b0b0b] transform-gpu transition-[opacity,transform] duration-200 ease-out",
+            isPlayerModalOpen ? "opacity-100 scale-100" : "pointer-events-none opacity-0 scale-[0.98]"
+          )}
+          onTransitionEnd={(event) => {
+            if (event.currentTarget !== event.target) return;
+            if (!isPlayerModalOpen) {
+              setIsPlayerModalVisible(false);
+            }
+          }}
+          aria-hidden={!isPlayerModalOpen}
+        >
           <div {...getHeaderDragProps("flex items-center justify-between border-b border-slate-800/60 px-4 py-3")}>
             <div className="text-xs font-semibold text-slate-200">Player Focus</div>
               <button

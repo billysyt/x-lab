@@ -637,10 +637,15 @@ export const TranscriptPanel = memo(function TranscriptPanel(props: {
 
   const transcriptContainerClass = cn("min-h-0 flex-1 h-full overflow-y-auto pl-0 pr-2 py-1", "stt-scrollbar");
   const emptyStateClass = "py-6 text-center text-[11px] text-slate-500";
+  const shouldHideEmptyStatus =
+    Boolean(props.suppressEmptyState) &&
+    (!transcript || !transcript.segments || transcript.segments.length === 0);
 
   return (
     <div className="flex min-h-0 h-full flex-col" id="contentLayout">
-      {!job ? (
+      {shouldHideEmptyStatus ? (
+        <div className={transcriptContainerClass} id="transcriptContent" />
+      ) : !job ? (
         <div className={transcriptContainerClass} id="transcriptContent">
           {props.suppressEmptyState ? null : (
             <div className={emptyStateClass}>No transcript yet. Use Open in the header to add a file.</div>

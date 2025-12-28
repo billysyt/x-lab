@@ -86,7 +86,20 @@ export const bootstrapJobs = createAsyncThunk<
   try {
     const history = await apiGetHistory();
     const entries = Array.isArray(history.jobs) ? history.jobs : [];
-    const jobs = entries.map(convertHistoryEntry).filter(Boolean) as Job[];
+    const jobs = entries
+      .map(convertHistoryEntry)
+      .filter(Boolean)
+      .map((job) => {
+        if (job.status === "queued" || job.status === "processing") {
+          return {
+            ...job,
+            status: "imported",
+            progress: 0,
+            message: ""
+          };
+        }
+        return job;
+      }) as Job[];
     const jobsById: Record<string, Job> = {};
     jobs.forEach((job) => {
       jobsById[job.id] = job;

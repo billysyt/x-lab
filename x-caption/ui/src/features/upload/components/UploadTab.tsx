@@ -1139,7 +1139,7 @@ export const UploadTab = memo(forwardRef(function UploadTab(
           type="button"
         >
           {isListMode ? (
-            <div className={cn("flex w-full items-center gap-2", isProcessingJob && "blur-[1.5px]")}>
+            <div className="flex w-full items-center gap-2">
               <div
                 className={cn(
                   "flex h-7 w-7 items-center justify-center rounded-md bg-[#0f0f10]",
@@ -1158,7 +1158,7 @@ export const UploadTab = memo(forwardRef(function UploadTab(
               </span>
             </div>
           ) : (
-            <div className={cn("flex w-full items-center gap-3", isProcessingJob && "blur-[1.5px]")}>
+            <div className="flex w-full items-center gap-3">
               {displayThumbnail && (previewKind === "video" || isYoutube) ? (
                 <div className="relative h-10 w-16 overflow-hidden rounded-md bg-[#0f0f10]">
                   <img src={displayThumbnail} alt="" className="h-full w-full object-cover" />
@@ -1205,8 +1205,13 @@ export const UploadTab = memo(forwardRef(function UploadTab(
             </div>
           )}
           {isProcessingJob ? (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/30">
-              <AppIcon name="spinner" spin className="text-[16px] text-slate-100" />
+            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/35 backdrop-blur-[1px]">
+              <div className="processing-spinner" aria-hidden>
+                <span className="processing-bar processing-bar-1" />
+                <span className="processing-bar processing-bar-2" />
+                <span className="processing-bar processing-bar-3" />
+                <span className="processing-bar processing-bar-4" />
+              </div>
             </div>
           ) : null}
         </button>
