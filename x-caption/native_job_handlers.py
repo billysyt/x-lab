@@ -50,6 +50,10 @@ _DEFAULT_SPOKEN_PREFIX_RELATIVE = Path("merge") / "spoken.mp3"
 _DEFAULT_ENGLISH_TRANSLATE_PREFIX_RELATIVE = Path("merge") / "english_translate.mp3"
 _PREFIX_SILENCE_SECONDS = 5.0
 _DEFAULT_PREFIX_SECONDS = 15.0
+_PREFIX_TRIM_MIN_DURATION = 0.2
+_PREFIX_TRIM_BOUNDARY_TOLERANCE = 0.25
+_PREFIX_RECOVERY_MAX_OVERLAP = 2.0
+_PREFIX_RECOVERY_MAX_DURATION = 8.0
 
 
 def _postprocess_caption_segments(segments: Iterable[Dict[str, Any]]) -> list[Dict[str, Any]]:
@@ -205,6 +209,8 @@ def _concat_prefix_audio(
 def _trim_prefixed_segments(
     segments: list[Dict[str, Any]],
     prefix_seconds: float,
+    *,
+    strict: bool = True,
 ) -> list[Dict[str, Any]]:
     if prefix_seconds <= 0:
         return segments
@@ -212,17 +218,10 @@ def _trim_prefixed_segments(
     for segment in segments:
         start = float(segment.get("start", 0.0))
         end = float(segment.get("end", 0.0))
-        if end <= prefix_seconds:
+        if end <= prefix_seconds + _PREFIX_TRIM_MIN_DURATION:
             continue
-        new_start = max(0.0, start - prefix_seconds)
-        new_end = max(0.0, end - prefix_seconds)
-        if new_end <= 0.0:
-            continue
-        updated = dict(segment)
-        updated["start"] = new_start
-        updated["end"] = new_end
-        words = updated.get("words")
-        if isinstance(words, list):
+        words = segment.get("words")
+        if isinstance(words, list) and words:
             adjusted_words = []
             for word in words:
                 if not isinstance(word, dict):
@@ -237,9 +236,135 @@ def _trim_prefixed_segments(
                 if w_end is not None:
                     new_word["end"] = max(0.0, float(w_end) - prefix_seconds)
                 adjusted_words.append(new_word)
-            updated["words"] = adjusted_words
-        trimmed.append(updated)
+
+            if adjusted_words:
+                updated = dict(segment)
+                updated["words"] = adjusted_words
+                new_start = float(adjusted_words[0].get("start", 0.0))
+                new_end = float(adjusted_words[-1].get("end", 0.0))
+                if new_end - new_start < _PREFIX_TRIM_MIN_DURATION:
+                    continue
+                text_tokens = []
+                for word in adjusted_words:
+                    token = word.get("word") or word.get("text")
+                    if token is None:
+                        continue
+                    text_tokens.append(str(token))
+                if text_tokens:
+                    updated["text"] = "".join(text_tokens).strip()
+                updated["start"] = new_start
+                updated["end"] = new_end
+                trimmed.append(updated)
+            else:
+                continue
+        else:
+            if strict and start < prefix_seconds - _PREFIX_TRIM_BOUNDARY_TOLERANCE:
+                continue
+            updated = dict(segment)
+            new_start = max(0.0, start - prefix_seconds)
+            new_end = max(0.0, end - prefix_seconds)
+            if new_end - new_start < _PREFIX_TRIM_MIN_DURATION:
+                continue
+            updated["start"] = new_start
+            updated["end"] = new_end
+            trimmed.append(updated)
     return trimmed
+
+
+def _adjust_words_after_prefix(words: list[Dict[str, Any]], prefix_seconds: float) -> list[Dict[str, Any]]:
+    adjusted_words: list[Dict[str, Any]] = []
+    for word in words:
+        if not isinstance(word, dict):
+            continue
+        w_start = word.get("start")
+        w_end = word.get("end")
+        if w_end is not None and float(w_end) <= prefix_seconds:
+            continue
+        new_word = dict(word)
+        if w_start is not None:
+            new_word["start"] = max(0.0, float(w_start) - prefix_seconds)
+        if w_end is not None:
+            new_word["end"] = max(0.0, float(w_end) - prefix_seconds)
+        adjusted_words.append(new_word)
+    return adjusted_words
+
+
+def _recover_first_segment_after_prefix(
+    raw_segments: list[Dict[str, Any]],
+    trimmed_segments: list[Dict[str, Any]],
+    prefix_seconds: float,
+) -> list[Dict[str, Any]]:
+    if not raw_segments:
+        return trimmed_segments
+    if not trimmed_segments:
+        first_start = None
+    else:
+        first_start = float(trimmed_segments[0].get("start", 0.0))
+    if first_start is not None and first_start <= _PREFIX_TRIM_BOUNDARY_TOLERANCE:
+        return trimmed_segments
+
+    next_start = None
+    if trimmed_segments:
+        next_start = float(trimmed_segments[0].get("start", 0.0))
+
+    best_candidate = None
+    best_overlap = None
+    for seg in raw_segments:
+        if not isinstance(seg, dict):
+            continue
+        start = float(seg.get("start", 0.0))
+        end = float(seg.get("end", 0.0))
+        if end <= prefix_seconds:
+            continue
+        if start >= prefix_seconds:
+            continue
+        overlap = max(0.0, prefix_seconds - start)
+        if overlap > _PREFIX_RECOVERY_MAX_OVERLAP:
+            continue
+
+        words = seg.get("words")
+        updated = dict(seg)
+        if isinstance(words, list) and words:
+            adjusted_words = _adjust_words_after_prefix(words, prefix_seconds)
+            if not adjusted_words:
+                continue
+            new_start = float(adjusted_words[0].get("start", 0.0))
+            new_end = float(adjusted_words[-1].get("end", 0.0))
+            if new_end - new_start < _PREFIX_TRIM_MIN_DURATION:
+                continue
+            updated["words"] = adjusted_words
+            text_tokens = []
+            for word in adjusted_words:
+                token = word.get("word") or word.get("text")
+                if token is None:
+                    continue
+                text_tokens.append(str(token))
+            if text_tokens:
+                updated["text"] = "".join(text_tokens).strip()
+        else:
+            new_start = 0.0
+            new_end = max(0.0, end - prefix_seconds)
+            if new_end - new_start < _PREFIX_TRIM_MIN_DURATION:
+                continue
+        if new_end > _PREFIX_RECOVERY_MAX_DURATION:
+            continue
+        if next_start is not None and new_end > next_start:
+            new_end = max(new_start, next_start)
+            if new_end - new_start < _PREFIX_TRIM_MIN_DURATION:
+                continue
+
+        updated["start"] = new_start
+        updated["end"] = new_end
+        updated["start"] = max(0.0, float(updated["start"]))
+        updated["end"] = max(0.0, float(updated["end"]))
+        if best_candidate is None or overlap < (best_overlap or 0.0):
+            best_candidate = updated
+            best_overlap = overlap
+
+    if best_candidate is None:
+        return trimmed_segments
+
+    return [best_candidate, *trimmed_segments]
 
 
 def _env_with_legacy(name: str, legacy: str) -> Optional[str]:
@@ -654,7 +779,7 @@ def process_transcription_job(
         detected_language = transcription.get("language") or (language or "auto")
         duration = transcription.get("duration")
         effective_prefix_trim = prefix_trim_seconds
-        if prefix_trim_seconds and isinstance(duration, (int, float)) and media_duration is not None:
+        if not prefix_trim_seconds and isinstance(duration, (int, float)) and media_duration is not None:
             inferred_prefix = max(0.0, float(duration) - float(media_duration))
             if inferred_prefix > 0.5:
                 effective_prefix_trim = inferred_prefix
@@ -667,7 +792,14 @@ def process_transcription_job(
             effective_duration = media_duration
 
         if effective_prefix_trim:
-            segments = _trim_prefixed_segments(segments, effective_prefix_trim)
+            trimmed_segments = _trim_prefixed_segments(segments, effective_prefix_trim, strict=True)
+            if not trimmed_segments and segments:
+                logger.warning(
+                    "Prefix trim removed all segments (%.2fs); retrying with lenient trim.",
+                    effective_prefix_trim,
+                )
+                trimmed_segments = _trim_prefixed_segments(segments, effective_prefix_trim, strict=False)
+            segments = _recover_first_segment_after_prefix(segments, trimmed_segments, effective_prefix_trim)
 
         if not segments and full_text:
             if effective_prefix_trim:
