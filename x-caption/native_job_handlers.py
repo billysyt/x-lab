@@ -44,8 +44,10 @@ _RNNOISE_MIX_LEGACY_ENV = "XSUB_RNNOISE_MIX"
 _CC_CREDIT_PATTERN = re.compile(r"^\s*CC[^:：]+[:：].+\s*$", re.IGNORECASE)
 _WRITTEN_PREFIX_ENV = "XCAPTION_WRITTEN_PREFIX_AUDIO"
 _SPOKEN_PREFIX_ENV = "XCAPTION_SPOKEN_PREFIX_AUDIO"
+_ENGLISH_TRANSLATE_PREFIX_ENV = "XCAPTION_ENGLISH_TRANSLATE_PREFIX_AUDIO"
 _DEFAULT_WRITTEN_PREFIX_RELATIVE = Path("merge") / "written.mp3"
 _DEFAULT_SPOKEN_PREFIX_RELATIVE = Path("merge") / "spoken.mp3"
+_DEFAULT_ENGLISH_TRANSLATE_PREFIX_RELATIVE = Path("merge") / "english_translate.mp3"
 _PREFIX_SILENCE_SECONDS = 5.0
 _DEFAULT_PREFIX_SECONDS = 15.0
 
@@ -86,6 +88,16 @@ def _should_apply_cantonese_prefix(language: str, chinese_style: Optional[str]) 
     return normalized_language in {"auto", "yue"}
 
 
+def _should_apply_english_translate_prefix(language: str, second_caption_language: Optional[str]) -> bool:
+    if not second_caption_language:
+        return False
+    normalized_language = (second_caption_language or "").strip().lower()
+    if normalized_language != "en":
+        return False
+    source_language = (language or "").strip().lower()
+    return source_language in {"auto", "yue"}
+
+
 def _resolve_prefix_path(chinese_style: Optional[str]) -> Optional[Path]:
     normalized_style = (chinese_style or "").strip().lower()
     if normalized_style == "written":
@@ -107,6 +119,22 @@ def _resolve_prefix_path(chinese_style: Optional[str]) -> Optional[Path]:
         logger.warning("Prefix audio not found at %s", candidate)
 
     default_path = get_bundle_dir() / default_relative
+    if default_path.exists():
+        return default_path
+    return None
+
+
+def _resolve_english_translate_prefix_path() -> Optional[Path]:
+    env_path = os.environ.get(_ENGLISH_TRANSLATE_PREFIX_ENV, "").strip()
+    if env_path:
+        candidate = Path(env_path)
+        if not candidate.is_absolute():
+            candidate = get_bundle_dir() / candidate
+        if candidate.exists():
+            return candidate
+        logger.warning("English translate prefix audio not found at %s", candidate)
+
+    default_path = get_bundle_dir() / _DEFAULT_ENGLISH_TRANSLATE_PREFIX_RELATIVE
     if default_path.exists():
         return default_path
     return None
@@ -164,7 +192,7 @@ def _concat_prefix_audio(
     process = subprocess.run(cmd, capture_output=True, text=True)
     if process.returncode != 0 or not output_path.exists():
         error_output = (process.stderr or process.stdout or "").strip()
-        logger.warning("Failed to apply written prefix audio: %s", error_output)
+        logger.warning("Failed to apply prefix audio: %s", error_output)
         with contextlib.suppress(Exception):
             shutil.rmtree(temp_dir, ignore_errors=True)
         return None
@@ -496,6 +524,7 @@ def process_transcription_job(
     model_path: str = "whisper",
     language: str = "auto",
     chinese_style: Optional[str] = None,
+    second_caption_language: Optional[str] = None,
     device: Optional[str] = None,
     compute_type: Optional[str] = None,
     vad_filter: bool = True,
@@ -546,28 +575,35 @@ def process_transcription_job(
 
         transcribe_path_obj = inference_path_obj
         prefix_trim_seconds = 0.0
-        if _should_apply_cantonese_prefix(language, chinese_style):
+        prefix_path = None
+        prefix_label = None
+        if _should_apply_english_translate_prefix(language, second_caption_language):
+            prefix_path = _resolve_english_translate_prefix_path()
+            prefix_label = "English translate"
+        elif _should_apply_cantonese_prefix(language, chinese_style):
             prefix_path = _resolve_prefix_path(chinese_style)
-            if prefix_path and prefix_path.exists():
-                update_job_progress(job_id, 8, "Applying Cantonese prefix...", {"stage": "preprocessing"})
-                prefix_duration = get_audio_duration(str(prefix_path))
-                if not prefix_duration or prefix_duration <= 0:
-                    prefix_duration = _DEFAULT_PREFIX_SECONDS
-                else:
-                    prefix_duration = min(prefix_duration, _DEFAULT_PREFIX_SECONDS)
-                prefixed_path = _concat_prefix_audio(
-                    job_id=job_id,
-                    prefix_path=prefix_path,
-                    audio_path=inference_path_obj,
-                    prefix_seconds=prefix_duration,
-                    silence_seconds=_PREFIX_SILENCE_SECONDS,
-                    cleanup_paths=cleanup_paths,
-                )
-                if prefixed_path:
-                    transcribe_path_obj = prefixed_path
-                    prefix_trim_seconds = max(0.0, prefix_duration + _PREFIX_SILENCE_SECONDS)
+            prefix_label = "Cantonese"
+
+        if prefix_path and prefix_path.exists():
+            update_job_progress(job_id, 8, f"Applying {prefix_label} prefix...", {"stage": "preprocessing"})
+            prefix_duration = get_audio_duration(str(prefix_path))
+            if not prefix_duration or prefix_duration <= 0:
+                prefix_duration = _DEFAULT_PREFIX_SECONDS
             else:
-                logger.warning("Cantonese prefix audio not available; skipping prefix merge.")
+                prefix_duration = min(prefix_duration, _DEFAULT_PREFIX_SECONDS)
+            prefixed_path = _concat_prefix_audio(
+                job_id=job_id,
+                prefix_path=prefix_path,
+                audio_path=inference_path_obj,
+                prefix_seconds=prefix_duration,
+                silence_seconds=_PREFIX_SILENCE_SECONDS,
+                cleanup_paths=cleanup_paths,
+            )
+            if prefixed_path:
+                transcribe_path_obj = prefixed_path
+                prefix_trim_seconds = max(0.0, prefix_duration + _PREFIX_SILENCE_SECONDS)
+        elif prefix_label:
+            logger.warning("%s prefix audio not available; skipping prefix merge.", prefix_label)
 
         model_label = "Whisper.cpp"
         model_candidate = resolve_whisper_model(model_path)
@@ -582,11 +618,15 @@ def process_transcription_job(
             capped = max(10, min(numeric, 95))
             update_job_progress(job_id, capped, message, {"stage": "transcription"})
 
+        language_for_whisper = language
+        if second_caption_language:
+            language_for_whisper = (second_caption_language or "").strip().lower() or language_for_whisper
+
         update_job_progress(job_id, 10, "Running Whisper transcription...", {"stage": "transcription"})
         transcription = transcribe_whisper_cpp(
             Path(transcribe_path_obj),
             model_path=model_path,
-            language=language,
+            language=language_for_whisper,
             output_dir=output_dir_path,
             progress_callback=whisper_progress,
         )
@@ -756,6 +796,7 @@ def process_full_pipeline_job(
     model_path: str = "whisper",
     language: str = "auto",
     chinese_style: Optional[str] = None,
+    second_caption_language: Optional[str] = None,
     device: Optional[str] = None,
     compute_type: Optional[str] = None,
     vad_filter: bool = True,
@@ -795,6 +836,7 @@ def process_full_pipeline_job(
                 model_path=model_path,
                 language=language,
                 chinese_style=chinese_style,
+                second_caption_language=second_caption_language,
                 device=device,
                 compute_type=compute_type,
                 vad_filter=vad_filter,

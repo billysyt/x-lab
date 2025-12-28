@@ -83,6 +83,8 @@ type UploadTabProps = {
   localMedia?: MediaItem[];
   onLocalMediaChange?: Dispatch<SetStateAction<MediaItem[]>>;
   onRequestFilePicker?: (open: () => void) => void;
+  secondCaptionEnabled?: boolean;
+  secondCaptionLanguage?: "yue" | "zh" | "en";
 };
 
 const VIDEO_EXTENSIONS = new Set(["mp4", "m4v", "mov", "mkv", "avi", "webm", "flv", "mpg", "mpeg"]);
@@ -1091,6 +1093,9 @@ export const UploadTab = memo(forwardRef(function UploadTab(
       const transcriptionKind =
         selectedItem?.transcriptionKind ??
         (selectedItem?.kind === "audio" || selectedItem?.kind === "video" ? selectedItem.kind : undefined);
+      const secondCaptionEnabled = Boolean(props.secondCaptionEnabled);
+      const secondCaptionLanguage = secondCaptionEnabled ? props.secondCaptionLanguage ?? "en" : undefined;
+      const chineseStyle = secondCaptionEnabled ? undefined : settings.chineseStyle;
       const { job } = await dispatch(
         startTranscription({
           jobId: reuseJobId,
@@ -1102,8 +1107,10 @@ export const UploadTab = memo(forwardRef(function UploadTab(
           language: settings.language,
           model: settings.model,
           noiseSuppression: settings.noiseSuppression,
-          chineseStyle: settings.chineseStyle,
-          chineseScript: exportLanguage
+          chineseStyle,
+          chineseScript: exportLanguage,
+          secondCaptionEnabled,
+          secondCaptionLanguage
         })
       ).unwrap();
 

@@ -139,6 +139,8 @@ export const startTranscription = createAsyncThunk<
     noiseSuppression: boolean;
     chineseStyle?: "spoken" | "written";
     chineseScript?: "traditional" | "simplified";
+    secondCaptionEnabled?: boolean;
+    secondCaptionLanguage?: "yue" | "zh" | "en";
   },
   { state: RootState }
 >(
@@ -154,7 +156,9 @@ export const startTranscription = createAsyncThunk<
     model,
     noiseSuppression,
     chineseStyle,
-    chineseScript
+    chineseScript,
+    secondCaptionEnabled,
+    secondCaptionLanguage
   }) => {
     const result = await apiTranscribeAudio({
       jobId,
@@ -167,7 +171,9 @@ export const startTranscription = createAsyncThunk<
       language,
       noiseSuppression,
       chineseStyle,
-      chineseScript
+      chineseScript,
+      secondCaptionEnabled,
+      secondCaptionLanguage
     });
 
     const mediaHash = result.media_hash ?? null;

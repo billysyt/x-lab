@@ -80,6 +80,8 @@ export async function apiTranscribeAudio(args: {
   noiseSuppression: boolean;
   chineseStyle?: "spoken" | "written";
   chineseScript?: "traditional" | "simplified";
+  secondCaptionEnabled?: boolean;
+  secondCaptionLanguage?: "yue" | "zh" | "en";
 }): Promise<TranscribeResponse> {
   const formData = new FormData();
   if (args.jobId) {
@@ -109,6 +111,12 @@ export async function apiTranscribeAudio(args: {
   }
   if (args.chineseScript) {
     formData.append("chinese_script", args.chineseScript);
+  }
+  if (typeof args.secondCaptionEnabled === "boolean") {
+    formData.append("second_caption_enabled", String(args.secondCaptionEnabled));
+  }
+  if (args.secondCaptionLanguage) {
+    formData.append("second_caption_language", args.secondCaptionLanguage);
   }
   return fetchJson<TranscribeResponse>("/transcribe", { method: "POST", body: formData });
 }

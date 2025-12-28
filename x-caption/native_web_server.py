@@ -1786,12 +1786,20 @@ def create_app():
             model = request.form.get('model', 'whisper')
             language = request.form.get('language', 'auto')
             chinese_style = request.form.get('chinese_style')
+            second_caption_language = request.form.get('second_caption_language')
+            second_caption_enabled_raw = request.form.get('second_caption_enabled')
             display_name = request.form.get('display_name')
             device = request.form.get('device', 'auto') or 'auto'
             compute_type = request.form.get('compute_type', None)
             vad_filter = request.form.get('vad_filter', 'True').lower() == 'true'
             noise_suppression = request.form.get("noise_suppression")
             requested_noise_backend = _noise_suppression_backend(noise_suppression)
+
+            second_caption_enabled = None
+            if second_caption_enabled_raw is not None:
+                second_caption_enabled = str(second_caption_enabled_raw).strip().lower() in {"1", "true", "yes", "on"}
+                if not second_caption_enabled:
+                    second_caption_language = None
 
             if not resolve_whisper_model(model):
                 info = get_whisper_model_info(get_models_dir())
@@ -1871,6 +1879,7 @@ def create_app():
                 'model_path': model,
                 'language': language,
                 'chinese_style': chinese_style,
+                'second_caption_language': second_caption_language,
                 'device': device,
                 'compute_type': compute_type,
                 'vad_filter': vad_filter,

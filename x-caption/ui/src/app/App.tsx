@@ -655,14 +655,8 @@ export function App() {
     totalBytes: null
   });
   const [secondCaptionEnabled, setSecondCaptionEnabled] = useState(false);
-  const [secondCaptionLanguage, setSecondCaptionLanguage] = useState<"yue" | "zh" | "en">("en");
+  const [secondCaptionLanguage, setSecondCaptionLanguage] = useState<"yue" | "zh" | "en">("yue");
   const [localMedia, setLocalMedia] = useState<MediaItem[]>([]);
-
-  useEffect(() => {
-    if (secondCaptionEnabled) {
-      setSecondCaptionEnabled(false);
-    }
-  }, [secondCaptionEnabled]);
   const [timelineZoom, setTimelineZoom] = useState(DEFAULT_TIMELINE_ZOOM);
   const [isCompact, setIsCompact] = useState(false);
   const [isHeaderCompact, setIsHeaderCompact] = useState(false);
@@ -4263,6 +4257,7 @@ export function App() {
 
   const captionControlsDisabled = isTranscribing;
   const isCantoneseLanguage = settings.language === "yue" || settings.language === "auto";
+  const isSecondCaptionActive = secondCaptionEnabled;
   const generateCaptionLabel = isActiveJobProcessing
     ? "Processing"
     : isAnotherJobProcessing
@@ -4292,7 +4287,10 @@ export function App() {
           Cantonese Output Style
         </label>
         <Select
-          className={cn("stt-select-dark", (!isCantoneseLanguage || captionControlsDisabled) && "opacity-60")}
+          className={cn(
+            "stt-select-dark",
+            (!isCantoneseLanguage || captionControlsDisabled || isSecondCaptionActive) && "opacity-60"
+          )}
           id="chineseStyle"
           buttonId="chineseStyleSelect"
           value={String(settings.chineseStyle)}
@@ -4301,50 +4299,57 @@ export function App() {
             { value: "spoken", label: "Spoken (口語)" }
           ]}
           onChange={(value) => dispatch(setChineseStyle(value as any))}
-          disabled={!isCantoneseLanguage || captionControlsDisabled}
+          disabled={!isCantoneseLanguage || captionControlsDisabled || isSecondCaptionActive}
         />
       </div>
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label className="text-[11px] font-semibold text-slate-400" htmlFor="secondCaptionLanguageSelect">
-            Second Caption
+            Subtitles Translation
           </label>
           <button
             className={cn(
               "inline-flex items-center gap-2 text-[10px] font-medium transition",
-              "text-slate-500 opacity-60"
+              isSecondCaptionActive ? "text-slate-200" : "text-slate-500"
             )}
-            onClick={() => undefined}
+            onClick={() => {
+              if (captionControlsDisabled) return;
+              setSecondCaptionEnabled((prev) => {
+                const next = !prev;
+                if (next) {
+                  setSecondCaptionLanguage("yue");
+                }
+                return next;
+              });
+            }}
             type="button"
-            disabled
+            disabled={captionControlsDisabled}
           >
             <span
               className={cn(
                 "relative inline-flex h-4 w-7 items-center rounded-full border transition",
-                "border-slate-700 bg-[#151515]"
+                isSecondCaptionActive ? "border-slate-500 bg-[#1b1b22]" : "border-slate-700 bg-[#151515]"
               )}
             >
               <span
                 className={cn(
                   "absolute h-3 w-3 rounded-full bg-white transition",
-                  "translate-x-1"
+                  isSecondCaptionActive ? "translate-x-3" : "translate-x-1"
                 )}
               />
             </span>
           </button>
         </div>
         <Select
-          className="stt-select-dark opacity-60"
+          className={cn("stt-select-dark", (!isSecondCaptionActive || captionControlsDisabled) && "opacity-60")}
           id="secondCaptionLanguage"
           buttonId="secondCaptionLanguageSelect"
           value={secondCaptionLanguage}
           options={[
-            { value: "yue", label: "Cantonese" },
-            { value: "zh", label: "Mandarin" },
-            { value: "en", label: "English" }
+            { value: "yue", label: "English" }
           ]}
           onChange={(value) => setSecondCaptionLanguage(value as "yue" | "zh" | "en")}
-          disabled
+          disabled={!isSecondCaptionActive || captionControlsDisabled}
         />
       </div>
       <div className="pt-2">
@@ -4704,6 +4709,8 @@ export function App() {
             onAddToTimeline={handleAddToTimeline}
             onClearSelection={handleClearSelection}
             onRequestFilePicker={handleRequestFilePicker}
+            secondCaptionEnabled={secondCaptionEnabled}
+            secondCaptionLanguage={secondCaptionLanguage}
           />
         </div>
       </div>
