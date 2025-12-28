@@ -33,7 +33,28 @@ const initialState: JobsState = {
 };
 
 function sortOrder(jobsById: Record<string, Job>): string[] {
-  return Object.keys(jobsById).sort((a, b) => (jobsById[b]?.startTime ?? 0) - (jobsById[a]?.startTime ?? 0));
+  return Object.keys(jobsById).sort((a, b) => {
+    const jobA = jobsById[a];
+    const jobB = jobsById[b];
+    const indexA =
+      jobA?.uiState && typeof (jobA.uiState as any).media_order_index === "number"
+        ? Number((jobA.uiState as any).media_order_index)
+        : null;
+    const indexB =
+      jobB?.uiState && typeof (jobB.uiState as any).media_order_index === "number"
+        ? Number((jobB.uiState as any).media_order_index)
+        : null;
+    if (indexA !== null && indexB !== null) {
+      return indexA - indexB;
+    }
+    if (indexA !== null && indexB === null) {
+      return 1;
+    }
+    if (indexA === null && indexB !== null) {
+      return -1;
+    }
+    return (jobB?.startTime ?? 0) - (jobA?.startTime ?? 0);
+  });
 }
 
 function moveIdToFront(order: string[], jobId: string) {
@@ -649,7 +670,9 @@ const slice = createSlice({
       })
       .addCase(startTranscription.fulfilled, (state, action) => {
         state.jobsById[action.payload.job.id] = action.payload.job;
-        moveIdToFront(state.order, action.payload.job.id);
+        if (!state.order.includes(action.payload.job.id)) {
+          moveIdToFront(state.order, action.payload.job.id);
+        }
         state.selectedJobId = action.payload.job.id;
       });
   }

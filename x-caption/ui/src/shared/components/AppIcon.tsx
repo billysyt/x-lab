@@ -52,6 +52,7 @@ import {
   FaVolumeUp,
   FaYoutube
 } from "react-icons/fa";
+import { BsStars } from "react-icons/bs";
 
 const icons = {
   upload: FaUpload,
@@ -104,6 +105,7 @@ const icons = {
   volume: FaVolumeUp,
   captions: FaClosedCaptioning,
   sparkle: FaStar,
+  aiStar: BsStars,
   youtube: FaYoutube
 } as const satisfies Record<string, IconType>;
 

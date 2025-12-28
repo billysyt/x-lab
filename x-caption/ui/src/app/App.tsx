@@ -468,6 +468,8 @@ export function App() {
   const [showExportModal, setShowExportModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const [premiumWebviewStatus, setPremiumWebviewStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [premiumWebviewError, setPremiumWebviewError] = useState<string | null>(null);
   const [machineId, setMachineId] = useState<string | null>(null);
   const [machineIdLoading, setMachineIdLoading] = useState(false);
   const [machineIdCopied, setMachineIdCopied] = useState(false);
@@ -492,6 +494,7 @@ export function App() {
   const [isPlayerModalOpen, setIsPlayerModalOpen] = useState(false);
   const headerMenuRef = useRef<HTMLDivElement | null>(null);
   const headerMenuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const premiumWebviewRef = useRef<HTMLIFrameElement | null>(null);
 
   const [playback, setPlayback] = useState({
     currentTime: 0,
@@ -897,14 +900,14 @@ export function App() {
               url: status?.source?.url ?? youtubeUrl.trim(),
               streamUrl: status?.stream_url ?? null,
               title: status?.source?.title ?? null,
-              id: status?.source?.id ?? null
+              id: status?.source?.id ?? null,
+              thumbnailUrl: status?.thumbnail_url ?? null
             },
             transcriptionKind: "audio"
           });
           setYoutubeProgress(100);
           setShowYoutubeModal(false);
           setYoutubeUrl("");
-          notify("YouTube media loaded.", "success");
           setYoutubeImporting(false);
           setYoutubeImportId(null);
           setYoutubeProgress(null);
@@ -1422,7 +1425,7 @@ export function App() {
   }, []);
   const handleExportTranscript = useCallback(async () => {
     if (!exportSegments.length) {
-      notify("No transcript to export.", "info");
+      notify("Please select a job with caption to continue.", "info");
       return;
     }
 
@@ -1432,7 +1435,7 @@ export function App() {
       .join("\n");
 
     if (!rawText) {
-      notify("No transcript to export.", "info");
+      notify("Please select a job with caption to continue.", "info");
       return;
     }
 
@@ -1462,14 +1465,11 @@ export function App() {
       const filename = `${baseFilename(selectedJob?.filename)}_transcript${converted.suffix}.txt`;
       const response = await saveTextFile(filename, converted.text);
       if (response && response.success) {
-        notify("Transcript exported successfully.", "success");
         return;
       }
       if (response && response.cancelled) {
-        notify("Export cancelled.", "info");
         return;
       }
-      notify("Transcript exported successfully.", "success");
     } finally {
       setIsExporting(false);
     }
@@ -1477,7 +1477,7 @@ export function App() {
 
   const handleExportSrt = useCallback(async () => {
     if (!exportSegments.length) {
-      notify("No captions to export.", "info");
+      notify("Please select a job with caption to continue.", "info");
       return;
     }
     const content = exportSegments
@@ -1500,7 +1500,7 @@ export function App() {
       .join("\n");
 
     if (!content.trim()) {
-      notify("No captions to export.", "info");
+      notify("Please select a job with caption to continue.", "info");
       return;
     }
 
@@ -1509,14 +1509,11 @@ export function App() {
       const filename = `${baseFilename(selectedJob?.filename)}_captions.srt`;
       const response = await saveTextFile(filename, content);
       if (response && response.success) {
-        notify("Captions exported successfully.", "success");
         return;
       }
       if (response && response.cancelled) {
-        notify("Export cancelled.", "info");
         return;
       }
-      notify("Captions exported successfully.", "success");
     } finally {
       setIsExporting(false);
     }
@@ -1601,14 +1598,14 @@ export function App() {
             url: startPayload?.source?.url ?? url,
             streamUrl: startPayload?.stream_url ?? null,
             title: startPayload?.source?.title ?? null,
-            id: startPayload?.source?.id ?? null
+            id: startPayload?.source?.id ?? null,
+            thumbnailUrl: startPayload?.thumbnail_url ?? null
           },
           transcriptionKind: "audio"
         });
         setYoutubeProgress(100);
         setShowYoutubeModal(false);
         setYoutubeUrl("");
-        notify("YouTube media loaded.", "success");
         setYoutubeImporting(false);
         setYoutubeImportId(null);
         setYoutubeProgress(null);
@@ -2145,8 +2142,6 @@ export function App() {
     uploadRef.current?.submitTranscription?.();
   }, [ensureWhisperModelReady, timelineClips.length]);
 
-  const canExportCaptions = exportSegments.length > 0;
-
   const callApiMethod = useCallback((api: any, names: string[], ...args: any[]) => {
     for (const name of names) {
       const fn = api?.[name];
@@ -2210,6 +2205,45 @@ export function App() {
       active = false;
     };
   }, [fetchMachineId, showPremiumModal]);
+
+  useEffect(() => {
+    if (!showPremiumModal) {
+      setPremiumWebviewStatus("idle");
+      setPremiumWebviewError(null);
+      return;
+    }
+    setPremiumWebviewStatus("loading");
+    setPremiumWebviewError(null);
+  }, [showPremiumModal]);
+
+  const handlePremiumWebviewLoad = useCallback(() => {
+    const iframe = premiumWebviewRef.current;
+    if (iframe) {
+      try {
+        const bodyText = iframe.contentDocument?.body?.innerText?.trim() ?? "";
+        if (
+          bodyText.includes("Unable to load webview content.") ||
+          bodyText.includes("Missing url") ||
+          bodyText.includes("Invalid url") ||
+          bodyText.includes("public base URL")
+        ) {
+          const firstLine = bodyText.split("\n").find((line) => line.trim())?.trim() ?? bodyText;
+          const preview = firstLine.length > 160 ? `${firstLine.slice(0, 160)}…` : firstLine;
+          setPremiumWebviewStatus("error");
+          setPremiumWebviewError(preview);
+          return;
+        }
+      } catch {
+        // Ignore cross-origin or access errors.
+      }
+    }
+    setPremiumWebviewStatus("ready");
+  }, []);
+
+  const handlePremiumWebviewError = useCallback(() => {
+    setPremiumWebviewStatus("error");
+    setPremiumWebviewError("Failed to load webview content.");
+  }, []);
 
   const handleCopyMachineId = useCallback(async () => {
     if (!machineId || machineIdLoading) return;
@@ -4878,10 +4912,11 @@ export function App() {
                   Export
                 </button>
                 <button
-                  className="pywebview-no-drag inline-flex h-7 items-center justify-center rounded-md bg-gradient-to-r from-[#2563eb] via-[#4338ca] to-[#6d28d9] px-2 text-[11px] font-semibold text-white shadow-[0_10px_24px_rgba(76,29,149,0.35)] transition hover:brightness-110"
+                  className="pywebview-no-drag inline-flex h-7 items-center justify-center gap-1.5 rounded-md bg-gradient-to-r from-[#2563eb] via-[#4338ca] to-[#6d28d9] px-2 text-[11px] font-semibold text-white shadow-[0_10px_24px_rgba(76,29,149,0.35)] transition hover:brightness-110"
                   onClick={handleOpenPremiumModal}
                   type="button"
                 >
+                  <AppIcon name="aiStar" className="text-[11px]" />
                   Get Premium
                 </button>
                 {showCustomWindowControls && !isMac ? (
@@ -4958,7 +4993,7 @@ export function App() {
                 }}
                 type="button"
               >
-                <AppIcon name="sparkle" />
+                <AppIcon name="aiStar" />
                 Get Premium
               </button>
               <button
@@ -5778,7 +5813,7 @@ export function App() {
                   disabled={youtubeImporting}
                 >
                   <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#111827] text-white">
+                    <div className="flex h-10 w-10 items-center justify-center text-white">
                       <AppIcon name="video" className="text-[16px]" />
                     </div>
                     <div>
@@ -5799,7 +5834,7 @@ export function App() {
                   disabled={youtubeImporting}
                 >
                   <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#111827] text-[#ff0000]">
+                    <div className="flex h-10 w-10 items-center justify-center text-[#ff0000]">
                       <AppIcon name="youtube" className="text-[18px]" />
                     </div>
                     <div className="flex-1">
@@ -5925,27 +5960,49 @@ export function App() {
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex h-[70vh] w-full flex-col">
-              <div className="px-4 pt-4 pb-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0 text-[11px] font-semibold text-slate-200">
-                    <span className="text-slate-400">Machine ID:</span>{" "}
-                    <span className="break-all font-mono">
-                      {machineIdLoading ? "Loading..." : machineId ?? "Unknown"}
-                    </span>
+              <div className="relative flex-1">
+                <iframe
+                  ref={premiumWebviewRef}
+                  title="Premium Webview"
+                  src={`/premium/webview?url=${encodeURIComponent("https://www.google.com")}`}
+                  className="h-full w-full border-0 bg-black"
+                  onLoad={handlePremiumWebviewLoad}
+                  onError={handlePremiumWebviewError}
+                />
+                {premiumWebviewStatus === "loading" ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60 text-slate-200">
+                    <AppIcon name="spinner" className="text-[18px] text-white/80" spin />
+                    <div className="text-[11px] font-semibold">Loading webview…</div>
                   </div>
+                ) : null}
+                {premiumWebviewStatus === "error" ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/70 px-6 text-center text-slate-200">
+                    <AppIcon name="exclamationTriangle" className="text-[18px] text-amber-300" />
+                    <div className="text-[12px] font-semibold">Webview failed to load</div>
+                    <div className="text-[11px] text-slate-400">
+                      {premiumWebviewError ?? "Please check your connection and try again."}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              <div className="border-t border-slate-800/60 px-4 py-4">
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-slate-200">
+                  <span className="text-slate-400">Your machine code</span>
+                  <span className="break-all font-mono">
+                    {machineIdLoading ? "Loading..." : machineId ?? "Unknown"}
+                  </span>
                   <button
                     className={cn(
-                      "inline-flex h-7 items-center gap-2 rounded-full px-3 text-[10px] font-semibold transition",
-                      machineIdCopied
-                        ? "bg-emerald-500/15 text-emerald-300"
-                        : "bg-white/10 text-slate-200 hover:bg-white/15"
+                      "inline-flex h-5 w-5 items-center justify-center rounded-md text-[9px] text-slate-300 transition hover:bg-white/10 hover:text-white",
+                      machineIdCopied && "text-emerald-300"
                     )}
                     onClick={handleCopyMachineId}
                     type="button"
                     disabled={!machineId || machineIdLoading}
+                    aria-label={machineIdCopied ? "Copied" : "Copy machine code"}
+                    title={machineIdCopied ? "Copied" : "Copy"}
                   >
-                    <AppIcon name={machineIdCopied ? "check" : "copy"} className="text-[11px]" />
-                    {machineIdCopied ? "Copied" : "Copy"}
+                    <AppIcon name={machineIdCopied ? "check" : "copy"} className="text-[9px]" />
                   </button>
                 </div>
                 <div className="mt-3 flex items-center gap-2">
@@ -5965,11 +6022,6 @@ export function App() {
                   </button>
                 </div>
               </div>
-              <iframe
-                title="Premium Webview"
-                src={`/premium/webview?url=${encodeURIComponent("https://www.google.com")}`}
-                className="h-full w-full flex-1 border-0 bg-black"
-              />
             </div>
           </div>
         </div>
@@ -6044,32 +6096,19 @@ export function App() {
                 <button
                   className={cn(
                     "group w-full rounded-xl px-4 py-3 text-left transition",
-                    canExportCaptions ? "hover:bg-[#151515]" : "cursor-not-allowed opacity-50"
+                    isExporting ? "cursor-not-allowed opacity-50" : "hover:bg-[#151515]"
                   )}
                   onClick={() => {
-                    if (!canExportCaptions) return;
+                    if (isExporting) return;
                     setShowExportModal(false);
                     void handleExportSrt();
                   }}
-                  disabled={!canExportCaptions}
+                  disabled={isExporting}
                   type="button"
                 >
                   <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#111827] text-[#60a5fa]">
-                      <svg
-                        viewBox="0 0 24 24"
-                        className="h-6 w-6"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <rect x="3" y="4.5" width="18" height="11" rx="2" />
-                        <path d="M7 9.5h10" />
-                        <path d="M7 12.5h6" />
-                        <path d="M8 18.5h8" />
-                      </svg>
+                    <div className="flex h-10 w-10 items-center justify-center text-white">
+                      <AppIcon name="captions" className="text-[18px]" />
                     </div>
                     <div>
                       <div className="text-[12px] font-semibold text-slate-100">Standard SRT</div>
@@ -6082,33 +6121,19 @@ export function App() {
                 <button
                   className={cn(
                     "group w-full rounded-xl px-4 py-3 text-left transition",
-                    canExportCaptions ? "hover:bg-[#151515]" : "cursor-not-allowed opacity-50"
+                    isExporting ? "cursor-not-allowed opacity-50" : "hover:bg-[#151515]"
                   )}
                   onClick={() => {
-                    if (!canExportCaptions) return;
+                    if (isExporting) return;
                     setShowExportModal(false);
                     void handleExportTranscript();
                   }}
-                  disabled={!canExportCaptions}
+                  disabled={isExporting}
                   type="button"
                 >
                   <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#111827] text-[#f59e0b]">
-                      <svg
-                        viewBox="0 0 24 24"
-                        className="h-6 w-6"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M7 3.5h7l4 4v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-15a2 2 0 0 1 2-2z" />
-                        <path d="M14 3.5v4h4" />
-                        <path d="M9 12.5h6" />
-                        <path d="M9 15.5h6" />
-                        <path d="M9 18.5h4" />
-                      </svg>
+                    <div className="flex h-10 w-10 items-center justify-center text-white">
+                      <AppIcon name="edit" className="text-[17px]" />
                     </div>
                     <div>
                       <div className="text-[12px] font-semibold text-slate-100">Plain Text</div>

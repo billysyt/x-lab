@@ -200,6 +200,7 @@ export type YoutubeImportResponse = {
     size?: number | null;
     mime?: string | null;
   };
+  thumbnail_url?: string | null;
   source?: {
     url?: string | null;
     title?: string | null;
@@ -212,6 +213,7 @@ export type YoutubeImportResponse = {
 
 export type YoutubeResolveResponse = {
   stream_url?: string | null;
+  thumbnail_url?: string | null;
   source?: {
     url?: string | null;
     title?: string | null;

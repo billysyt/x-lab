@@ -52,6 +52,7 @@ export type MediaSourceInfo = {
   streamUrl?: string | null;
   title?: string | null;
   id?: string | null;
+  thumbnailUrl?: string | null;
 };
 
 export type MediaItem = {
@@ -142,6 +143,7 @@ export const UploadTab = memo(forwardRef(function UploadTab(
     Record<string, { thumbnailUrl?: string | null; durationSec?: number | null }>
   >({});
   const jobThumbInFlight = useRef<Set<string>>(new Set());
+  const youtubeThumbInFlight = useRef<Set<string>>(new Set());
   const thumbSaveInFlight = useRef<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -149,6 +151,7 @@ export const UploadTab = memo(forwardRef(function UploadTab(
     item: MediaItem;
   } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [mediaOrder, setMediaOrder] = useState<string[]>([]);
   const selectedIdRef = useRef<string | null>(null);
   const selectedJobIdRef = useRef<string | null>(selectedJobId ?? null);
   const resolveTokenRef = useRef(0);
@@ -164,6 +167,69 @@ export const UploadTab = memo(forwardRef(function UploadTab(
       win.requestIdleCallback(() => task());
     } else {
       window.setTimeout(task, 0);
+    }
+  }, []);
+
+  const areIdsEqual = useCallback((left: string[], right: string[]) => {
+    if (left.length !== right.length) return false;
+    for (let i = 0; i < left.length; i += 1) {
+      if (left[i] !== right[i]) return false;
+    }
+    return true;
+  }, []);
+
+  const resolveYoutubeThumbnailUrl = useCallback((item: MediaItem) => {
+    const explicit = item.externalSource?.thumbnailUrl ?? null;
+    if (explicit) return explicit;
+    const id = item.externalSource?.id ?? null;
+    if (id) {
+      return `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+    }
+    return null;
+  }, []);
+
+  const captureImageThumbnailFromUrl = useCallback(async (url: string) => {
+    try {
+      const response = await fetch(url, { cache: "force-cache" });
+      if (!response.ok) {
+        return null;
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      try {
+        const img = new Image();
+        img.decoding = "async";
+        img.src = objectUrl;
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = () => reject(new Error("Image load failed"));
+        });
+        const width = img.naturalWidth || img.width || 0;
+        const height = img.naturalHeight || img.height || 0;
+        if (!width || !height) {
+          return null;
+        }
+        const targetHeight = 40;
+        const targetWidth = 64;
+        const canvas = document.createElement("canvas");
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          return null;
+        }
+        const scale = Math.max(targetWidth / width, targetHeight / height);
+        const drawWidth = width * scale;
+        const drawHeight = height * scale;
+        const dx = (targetWidth - drawWidth) / 2;
+        const dy = (targetHeight - drawHeight) / 2;
+        ctx.drawImage(img, 0, 0, width, height, dx, dy, drawWidth, drawHeight);
+        return canvas.toDataURL("image/jpeg", 0.6);
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+    } catch {
+      return null;
     }
   }, []);
 
@@ -209,6 +275,7 @@ export const UploadTab = memo(forwardRef(function UploadTab(
       try {
         const payload = await apiResolveYoutubeStream(url);
         const streamUrl = typeof payload.stream_url === "string" ? payload.stream_url : null;
+        const thumbnailUrl = typeof payload.thumbnail_url === "string" ? payload.thumbnail_url : null;
         if (!streamUrl) {
           throw new Error("Failed to resolve YouTube stream.");
         }
@@ -217,7 +284,8 @@ export const UploadTab = memo(forwardRef(function UploadTab(
           url,
           streamUrl,
           title: payload.source?.title ?? item.externalSource.title ?? null,
-          id: payload.source?.id ?? item.externalSource.id ?? null
+          id: payload.source?.id ?? item.externalSource.id ?? null,
+          thumbnailUrl: thumbnailUrl ?? item.externalSource.thumbnailUrl ?? null
         };
         const updatedItem: MediaItem = {
           ...item,
@@ -250,6 +318,22 @@ export const UploadTab = memo(forwardRef(function UploadTab(
       }
     },
     [dispatch, jobsById, props.notify, setLocalMedia]
+  );
+
+  const persistMediaOrder = useCallback(
+    (order: string[]) => {
+      order.forEach((id, index) => {
+        const job = jobsById[id];
+        if (!job) return;
+        const existingUiState =
+          job.uiState && typeof job.uiState === "object" ? (job.uiState as Record<string, any>) : {};
+        if (existingUiState.media_order_index === index) return;
+        const nextUiState = { ...existingUiState, media_order_index: index };
+        dispatch(updateJobUiState({ jobId: id, uiState: nextUiState }));
+        void apiUpsertJobRecord({ job_id: id, ui_state: nextUiState }).catch(() => undefined);
+      });
+    },
+    [dispatch, jobsById]
   );
 
   const formatTimestamp = useCallback((value?: number | null) => {
@@ -684,7 +768,8 @@ export const UploadTab = memo(forwardRef(function UploadTab(
                 url: args.externalSource.url ?? null,
                 streamUrl: args.externalSource.streamUrl ?? null,
                 title: args.externalSource.title ?? null,
-                id: args.externalSource.id ?? null
+                id: args.externalSource.id ?? null,
+                thumbnailUrl: args.externalSource.thumbnailUrl ?? null
               }
             }
           : undefined;
@@ -742,12 +827,97 @@ export const UploadTab = memo(forwardRef(function UploadTab(
     }
   }
 
+  const jobItems = useMemo(
+    () => jobOrder.map((id) => buildJobItem(id)).filter(Boolean) as MediaItem[],
+    [jobOrder, localMedia, jobsById, jobPreviewMeta]
+  );
+
+  const mediaItemMap = useMemo(() => {
+    const map = new Map<string, MediaItem>();
+    localMedia.forEach((item) => map.set(item.id, item));
+    jobItems.forEach((item) => map.set(item.id, item));
+    return map;
+  }, [jobItems, localMedia]);
+
+  const createdAtById = useMemo(() => {
+    const map = new Map<string, number>();
+    mediaItemMap.forEach((item, id) => {
+      map.set(id, typeof item.createdAt === "number" ? item.createdAt : 0);
+    });
+    return map;
+  }, [mediaItemMap]);
+
   const mediaItems = useMemo(() => {
-    const jobItems = jobOrder
-      .map((id) => buildJobItem(id))
+    if (mediaItemMap.size === 0) return [];
+    if (!mediaOrder.length) {
+      return [...mediaItemMap.values()].sort(
+        (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)
+      );
+    }
+    const orderSet = new Set(mediaOrder);
+    const ordered = mediaOrder
+      .map((id) => mediaItemMap.get(id))
       .filter(Boolean) as MediaItem[];
-    return [...localMedia, ...jobItems];
-  }, [jobOrder, localMedia, jobsById, jobPreviewMeta]);
+    const missing = [...mediaItemMap.values()].filter((item) => !orderSet.has(item.id));
+    if (missing.length) {
+      missing.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+      return [...missing, ...ordered];
+    }
+    return ordered;
+  }, [mediaItemMap, mediaOrder]);
+
+  useEffect(() => {
+    if (mediaItemMap.size === 0) {
+      if (mediaOrder.length) {
+        setMediaOrder([]);
+      }
+      return;
+    }
+    if (!mediaOrder.length) {
+      const localIds = [...localMedia]
+        .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+        .map((item) => item.id);
+      const jobIds = jobOrder.filter((id) => mediaItemMap.has(id));
+      const known = new Set([...localIds, ...jobIds]);
+      const remaining = [...mediaItemMap.keys()].filter((id) => !known.has(id));
+      remaining.sort((a, b) => (createdAtById.get(b) ?? 0) - (createdAtById.get(a) ?? 0));
+      const next = [...localIds, ...jobIds, ...remaining];
+      if (!areIdsEqual(next, mediaOrder)) {
+        setMediaOrder(next);
+      }
+      return;
+    }
+    const localIdsInOrder = mediaOrder.filter((id) => !jobsById[id] && mediaItemMap.has(id));
+    const jobIdsInOrder = mediaOrder.filter((id) => jobsById[id]);
+    if (!areIdsEqual(jobIdsInOrder, jobOrder)) {
+      const jobIds = jobOrder.filter((id) => mediaItemMap.has(id));
+      const known = new Set([...localIdsInOrder, ...jobIds]);
+      const remaining = [...mediaItemMap.keys()].filter((id) => !known.has(id));
+      remaining.sort((a, b) => (createdAtById.get(b) ?? 0) - (createdAtById.get(a) ?? 0));
+      const next = [...localIdsInOrder, ...jobIds, ...remaining];
+      if (!areIdsEqual(next, mediaOrder)) {
+        setMediaOrder(next);
+      }
+      return;
+    }
+    const orderSet = new Set(mediaOrder);
+    const missing: string[] = [];
+    mediaItemMap.forEach((_item, id) => {
+      if (!orderSet.has(id)) {
+        missing.push(id);
+      }
+    });
+    const kept = mediaOrder.filter((id) => mediaItemMap.has(id));
+    if (!mediaOrder.length || missing.length || kept.length !== mediaOrder.length) {
+      missing.sort((a, b) => (createdAtById.get(b) ?? 0) - (createdAtById.get(a) ?? 0));
+      const next = [...missing, ...kept];
+      if (!areIdsEqual(next, mediaOrder)) {
+        setMediaOrder(next);
+      }
+    }
+  }, [areIdsEqual, createdAtById, jobOrder, jobsById, localMedia, mediaItemMap, mediaOrder]);
+
+  // Media order is the display source of truth. Job order updates happen on drag.
 
   const filteredMediaItems = useMemo(() => {
     let items = [...mediaItems];
@@ -777,28 +947,37 @@ export const UploadTab = memo(forwardRef(function UploadTab(
       const activeId = String(active.id);
       const overId = String(over.id);
       if (activeId === overId) return;
-
-      const activeItem = filteredMediaItems.find((item) => item.id === activeId);
-      const overItem = filteredMediaItems.find((item) => item.id === overId);
-      if (!activeItem || !overItem) return;
-      if (activeItem.source !== overItem.source) return;
-
-      if (activeItem.source === "job") {
-        const fromIndex = jobOrder.indexOf(activeId);
-        const toIndex = jobOrder.indexOf(overId);
-        if (fromIndex < 0 || toIndex < 0) return;
-        dispatch(setJobOrder(arrayMove(jobOrder, fromIndex, toIndex)));
-        return;
+      const fromIndex = mediaOrder.indexOf(activeId);
+      const toIndex = mediaOrder.indexOf(overId);
+      if (fromIndex < 0 || toIndex < 0) return;
+      const nextOrder = arrayMove(mediaOrder, fromIndex, toIndex);
+      setMediaOrder(nextOrder);
+      const nextJobOrder = nextOrder.filter((id) => Boolean(jobsById[id]));
+      if (!areIdsEqual(nextJobOrder, jobOrder)) {
+        dispatch(setJobOrder(nextJobOrder));
       }
-
-      if (activeItem.source === "local") {
-        const fromIndex = localMedia.findIndex((item) => item.id === activeId);
-        const toIndex = localMedia.findIndex((item) => item.id === overId);
-        if (fromIndex < 0 || toIndex < 0) return;
-        setLocalMedia(arrayMove(localMedia, fromIndex, toIndex));
+      const localMap = new Map(localMedia.map((item) => [item.id, item]));
+      const nextLocal = nextOrder
+        .filter((id) => localMap.has(id))
+        .map((id) => localMap.get(id) as MediaItem);
+      const currentLocalIds = localMedia.map((item) => item.id);
+      const nextLocalIds = nextLocal.map((item) => item.id);
+      if (!areIdsEqual(currentLocalIds, nextLocalIds)) {
+        setLocalMedia(nextLocal);
       }
+      persistMediaOrder(nextOrder);
     },
-    [canReorder, dispatch, filteredMediaItems, jobOrder, localMedia, setLocalMedia]
+    [
+      areIdsEqual,
+      canReorder,
+      dispatch,
+      jobOrder,
+      jobsById,
+      localMedia,
+      mediaOrder,
+      persistMediaOrder,
+      setLocalMedia
+    ]
   );
 
   const SortableMediaRow = ({
@@ -914,8 +1093,13 @@ export const UploadTab = memo(forwardRef(function UploadTab(
         >
           <div className={cn("flex w-full items-center gap-3", isProcessingJob && "blur-[1.5px]")}>
             {previewKind === "video" && item.thumbnailUrl ? (
-              <div className="h-10 w-16 overflow-hidden rounded-md bg-[#0f0f10]">
+              <div className="relative h-10 w-16 overflow-hidden rounded-md bg-[#0f0f10]">
                 <img src={item.thumbnailUrl} alt="" className="h-full w-full object-cover" />
+                {isYoutube ? (
+                  <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded bg-black/60">
+                    <AppIcon name="youtube" className="text-[9px] text-[#ff0000]" />
+                  </span>
+                ) : null}
               </div>
             ) : (
               <div
@@ -970,7 +1154,11 @@ export const UploadTab = memo(forwardRef(function UploadTab(
 
   useEffect(() => {
     const videoJobs = mediaItems.filter(
-      (item) => item.source === "job" && item.kind === "video" && item.previewUrl
+      (item) =>
+        item.source === "job" &&
+        item.kind === "video" &&
+        item.previewUrl &&
+        item.externalSource?.type !== "youtube"
     );
     videoJobs.forEach((item) => {
       if (item.thumbnailUrl || jobPreviewMeta[item.id] || jobThumbInFlight.current.has(item.id)) {
@@ -996,6 +1184,53 @@ export const UploadTab = memo(forwardRef(function UploadTab(
       });
     });
   }, [jobPreviewMeta, mediaItems, persistThumbnail, scheduleIdle]);
+
+  useEffect(() => {
+    const youtubeItems = mediaItems.filter((item) => item.externalSource?.type === "youtube");
+    youtubeItems.forEach((item) => {
+      const existingThumb = item.thumbnailUrl || jobPreviewMeta[item.id]?.thumbnailUrl;
+      if (existingThumb || youtubeThumbInFlight.current.has(item.id)) {
+        return;
+      }
+      const thumbnailUrl = resolveYoutubeThumbnailUrl(item);
+      if (!thumbnailUrl) return;
+      youtubeThumbInFlight.current.add(item.id);
+      scheduleIdle(() => {
+        void (async () => {
+          try {
+            const thumbnail = await captureImageThumbnailFromUrl(thumbnailUrl);
+            if (!thumbnail) return;
+            if (item.source === "local") {
+              setLocalMedia((prev) =>
+                prev.map((m) => (m.id === item.id ? { ...m, thumbnailUrl: thumbnail } : m))
+              );
+            } else {
+              setJobPreviewMeta((prev) => ({
+                ...prev,
+                [item.id]: {
+                  ...prev[item.id],
+                  thumbnailUrl: thumbnail ?? null
+                }
+              }));
+            }
+            if (item.jobId) {
+              persistThumbnail(item.jobId, thumbnail);
+            }
+          } finally {
+            youtubeThumbInFlight.current.delete(item.id);
+          }
+        })();
+      });
+    });
+  }, [
+    captureImageThumbnailFromUrl,
+    jobPreviewMeta,
+    mediaItems,
+    persistThumbnail,
+    resolveYoutubeThumbnailUrl,
+    scheduleIdle,
+    setLocalMedia
+  ]);
 
   async function handleRemoveJob(e: React.MouseEvent | null, id: string) {
     if (e) {
@@ -1034,7 +1269,8 @@ export const UploadTab = memo(forwardRef(function UploadTab(
             url: typeof rawSource.url === "string" ? rawSource.url : null,
             streamUrl: typeof rawSource.streamUrl === "string" ? rawSource.streamUrl : null,
             title: typeof rawSource.title === "string" ? rawSource.title : null,
-            id: typeof rawSource.id === "string" ? rawSource.id : null
+            id: typeof rawSource.id === "string" ? rawSource.id : null,
+            thumbnailUrl: typeof rawSource.thumbnailUrl === "string" ? rawSource.thumbnailUrl : null
           }
         : null;
     const streamUrl = externalSource?.streamUrl || null;
@@ -1114,6 +1350,18 @@ export const UploadTab = memo(forwardRef(function UploadTab(
         })
       ).unwrap();
 
+      if (selectedItem?.source === "local") {
+        const index = mediaOrder.indexOf(selectedItem.id);
+        if (index >= 0) {
+          const nextOrder = [...mediaOrder];
+          nextOrder[index] = job.id;
+          setMediaOrder(nextOrder);
+          const nextJobOrder = nextOrder.filter((id) => id === job.id || Boolean(jobsById[id]));
+          dispatch(setJobOrder(nextJobOrder));
+          persistMediaOrder(nextOrder);
+        }
+      }
+
       if (displayName) {
         dispatch(updateJobDisplayName({ jobId: job.id, displayName }));
         void apiUpsertJobRecord({ job_id: job.id, filename, display_name: displayName }).catch(() => undefined);
@@ -1128,7 +1376,8 @@ export const UploadTab = memo(forwardRef(function UploadTab(
             url: selectedItem.externalSource.url ?? null,
             streamUrl: selectedItem.externalSource.streamUrl ?? null,
             title: selectedItem.externalSource.title ?? null,
-            id: selectedItem.externalSource.id ?? null
+            id: selectedItem.externalSource.id ?? null,
+            thumbnailUrl: selectedItem.externalSource.thumbnailUrl ?? null
           }
         };
         dispatch(updateJobUiState({ jobId: job.id, uiState: nextUiState }));

@@ -41,6 +41,7 @@ export default defineConfig({
       "/audio": "http://127.0.0.1:11220",
       "/media": "http://127.0.0.1:11220",
       "/import": "http://127.0.0.1:11220",
+      "/premium": "http://127.0.0.1:11220",
       "/static/vendor": "http://127.0.0.1:11220"
     }
   }

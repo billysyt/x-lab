@@ -15,6 +15,7 @@ import shutil
 import mimetypes
 import contextlib
 import re
+import ssl
 from urllib.parse import urlparse
 import urllib.error
 import urllib.request
@@ -22,6 +23,11 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List, Callable
 from collections import defaultdict
 import threading
+
+try:
+    import certifi
+except ImportError:
+    certifi = None
 
 try:
     from opencc import OpenCC
@@ -192,6 +198,7 @@ def _download_youtube_audio(
     title = (info.get("title") or "youtube_audio").strip()
     video_id = info.get("id")
     duration = info.get("duration")
+    thumbnail_url = _pick_youtube_thumbnail(info)
     downloaded_path = _resolve_youtube_download(downloads_dir, download_id)
 
     stream_url = None
@@ -235,6 +242,7 @@ def _download_youtube_audio(
             "size": size,
             "mime": mime_type or "application/octet-stream",
         },
+        "thumbnail_url": thumbnail_url,
         "source": {
             "url": url,
             "title": title,
@@ -243,6 +251,36 @@ def _download_youtube_audio(
         "stream_url": stream_url,
         "duration_sec": duration if isinstance(duration, (int, float)) else None,
     }
+
+
+def _pick_youtube_thumbnail(info: Any) -> Optional[str]:
+    if not isinstance(info, dict):
+        return None
+    thumbnail = info.get("thumbnail")
+    if isinstance(thumbnail, str) and thumbnail.strip():
+        return thumbnail.strip()
+    thumbnails = info.get("thumbnails")
+    if isinstance(thumbnails, list) and thumbnails:
+        candidates = []
+        for item in thumbnails:
+            if not isinstance(item, dict):
+                continue
+            url = item.get("url")
+            if isinstance(url, str) and url:
+                candidates.append(item)
+        if candidates:
+            def score(entry: Dict[str, Any]) -> float:
+                width = entry.get("width") or 0
+                height = entry.get("height") or 0
+                try:
+                    return float(width) * float(height)
+                except Exception:
+                    return 0.0
+            best = max(candidates, key=score)
+            url = best.get("url")
+            if isinstance(url, str) and url:
+                return url
+    return None
 
 
 def _resolve_youtube_stream(url: str) -> Dict[str, Any]:
@@ -273,6 +311,7 @@ def _resolve_youtube_stream(url: str) -> Dict[str, Any]:
 
     return {
         "stream_url": stream_url,
+        "thumbnail_url": _pick_youtube_thumbnail(stream_info),
         "source": {
             "url": url,
             "title": stream_info.get("title"),
@@ -290,6 +329,7 @@ def _serialize_youtube_download(state: Dict[str, Any]) -> Dict[str, Any]:
         "message": state.get("message"),
         "error": state.get("error"),
         "file": state.get("file"),
+        "thumbnail_url": state.get("thumbnail_url"),
         "source": state.get("source"),
         "stream_url": state.get("stream_url"),
         "duration_sec": state.get("duration_sec"),
@@ -312,6 +352,7 @@ def _start_youtube_download(url: str) -> Dict[str, Any]:
         "message": "Starting YouTube download...",
         "error": None,
         "file": None,
+        "thumbnail_url": None,
         "source": {"url": url},
         "stream_url": None,
         "duration_sec": None,
@@ -330,6 +371,10 @@ def _start_youtube_download(url: str) -> Dict[str, Any]:
                 source = state.get("source") or {}
                 source["title"] = title
                 state["source"] = source
+            if isinstance(info, dict):
+                thumb = _pick_youtube_thumbnail(info)
+                if thumb and not state.get("thumbnail_url"):
+                    state["thumbnail_url"] = thumb
             if status == "downloading":
                 total = update.get("total_bytes")
                 if not total:
@@ -357,6 +402,7 @@ def _start_youtube_download(url: str) -> Dict[str, Any]:
                 state["file"] = result.get("file")
                 state["source"] = result.get("source")
                 state["stream_url"] = result.get("stream_url")
+                state["thumbnail_url"] = result.get("thumbnail_url")
                 state["duration_sec"] = result.get("duration_sec")
                 state["updated_at"] = time.time()
         except Exception as exc:
@@ -724,6 +770,12 @@ def create_app():
         if parsed.scheme not in ("http", "https"):
             return "Invalid url", 400
         try:
+            if os.environ.get("XCAPTION_WEBVIEW_INSECURE") == "1":
+                context = ssl._create_unverified_context()
+            elif certifi:
+                context = ssl.create_default_context(cafile=certifi.where())
+            else:
+                context = ssl.create_default_context()
             req = urllib.request.Request(
                 target_url,
                 headers={
@@ -731,7 +783,7 @@ def create_app():
                     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 },
             )
-            with urllib.request.urlopen(req, timeout=8) as response:
+            with urllib.request.urlopen(req, timeout=8, context=context) as response:
                 content_type = response.headers.get("Content-Type", "text/html; charset=utf-8")
                 payload = response.read()
         except Exception as exc:
