@@ -129,11 +129,11 @@ export const UploadTab = memo(forwardRef(function UploadTab(
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [sortMode, setSortMode] = useState<"recent" | "name">("recent");
+  const [viewMode, setViewMode] = useState<"list-view" | "list">("list-view");
   const [filterMode, setFilterMode] = useState<"all" | "video" | "audio">("all");
-  const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
-  const sortMenuRef = useRef<HTMLDivElement | null>(null);
+  const viewMenuRef = useRef<HTMLDivElement | null>(null);
   const filterMenuRef = useRef<HTMLDivElement | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -387,8 +387,8 @@ export const UploadTab = memo(forwardRef(function UploadTab(
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       const target = event.target as Node;
-      if (sortMenuRef.current && !sortMenuRef.current.contains(target)) {
-        setSortMenuOpen(false);
+      if (viewMenuRef.current && !viewMenuRef.current.contains(target)) {
+        setViewMenuOpen(false);
       }
       if (filterMenuRef.current && !filterMenuRef.current.contains(target)) {
         setFilterMenuOpen(false);
@@ -401,11 +401,11 @@ export const UploadTab = memo(forwardRef(function UploadTab(
       }
     }
 
-    if (sortMenuOpen || filterMenuOpen || contextMenu) {
+    if (viewMenuOpen || filterMenuOpen || contextMenu) {
       window.addEventListener("click", handleClickOutside);
       return () => window.removeEventListener("click", handleClickOutside);
     }
-  }, [contextMenu, filterMenuOpen, sortMenuOpen]);
+  }, [contextMenu, filterMenuOpen, viewMenuOpen]);
 
   const toFileUrl = useCallback((path: string) => {
     if (!path) return "";
@@ -968,14 +968,11 @@ export const UploadTab = memo(forwardRef(function UploadTab(
     if (filterMode !== "all") {
       items = items.filter((item) => getPreviewKind(item) === filterMode);
     }
-    if (sortMode === "name") {
-      items.sort((a, b) => a.name.localeCompare(b.name));
-    }
     return items;
-  }, [filterMode, getPreviewKind, mediaItems, sortMode]);
+  }, [filterMode, getPreviewKind, mediaItems]);
 
   const hasMediaItems = Boolean(filteredMediaItems.length);
-  const canReorder = sortMode === "recent" && filterMode === "all";
+  const canReorder = filterMode === "all";
   const sortableIds = useMemo(() => filteredMediaItems.map((item) => item.id), [filteredMediaItems]);
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -1043,21 +1040,24 @@ export const UploadTab = memo(forwardRef(function UploadTab(
       transform: CSS.Transform.toString(transform),
       transition
     };
+    const isListMode = viewMode === "list";
     const isYoutube = item.externalSource?.type === "youtube";
     const previewKind = getPreviewKind(item);
     const fallbackIcon = isYoutube ? "youtube" : previewKind === "video" ? "video" : "volume";
     const displayThumbnail = item.thumbnailUrl ?? item.externalSource?.thumbnailUrl ?? null;
+    const displayName = item.displayName ?? item.name;
 
     return (
       <div ref={setNodeRef} style={style}>
         <button
           data-media-row
           className={cn(
-            "relative w-full rounded-lg border border-slate-800/70 bg-[#141417] px-3 py-2 text-left transition hover:border-slate-600 focus:outline-none focus-visible:outline-none",
+            "relative w-full bg-[#141417] text-left transition hover:bg-[#1b1b22] focus:outline-none focus-visible:outline-none",
+            isListMode ? "rounded-md px-2 py-1.5" : "rounded-lg px-3 py-2",
             canReorder && "cursor-grab active:cursor-grabbing",
             isDragging && "shadow-[0_12px_24px_rgba(0,0,0,0.35)]",
-            isSelected && "border-primary/70 ring-1 ring-primary/30",
-            item.invalid && "border-rose-500/50"
+            isSelected && "ring-1 ring-primary/40 bg-[#1b1b22]",
+            item.invalid && "ring-1 ring-rose-500/40"
           )}
           {...attributes}
           {...listeners}
@@ -1136,51 +1136,72 @@ export const UploadTab = memo(forwardRef(function UploadTab(
           }}
           type="button"
         >
-          <div className={cn("flex w-full items-center gap-3", isProcessingJob && "blur-[1.5px]")}>
-            {displayThumbnail && (previewKind === "video" || isYoutube) ? (
-              <div className="relative h-10 w-16 overflow-hidden rounded-md bg-[#0f0f10]">
-                <img src={displayThumbnail} alt="" className="h-full w-full object-cover" />
-                {isYoutube ? (
-                  <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded bg-black/60">
-                    <AppIcon name="youtube" className="text-[9px] text-[#ff0000]" />
-                  </span>
-                ) : null}
-              </div>
-            ) : (
+          {isListMode ? (
+            <div className={cn("flex w-full items-center gap-2", isProcessingJob && "blur-[1.5px]")}>
               <div
                 className={cn(
-                  "flex h-10 w-16 items-center justify-center rounded-md bg-[#0f0f10]",
-                  isYoutube ? "text-[#ef4444]" : "text-slate-300"
+                  "flex h-7 w-7 items-center justify-center rounded-md bg-[#0f0f10]",
+                  isYoutube ? "text-[#ef4444]" : "text-slate-200"
                 )}
               >
-                <AppIcon name={fallbackIcon} className="text-[14px]" />
+                <AppIcon name={fallbackIcon} className="text-[13px]" />
               </div>
-            )}
-            <div className="min-w-0 flex-1">
               <span
-                className="block text-[12px] font-semibold leading-snug text-slate-100"
-                style={{
-                  display: "-webkit-box",
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: "vertical",
-                  overflow: "hidden"
-                }}
+                className={cn(
+                  "min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-100",
+                  item.invalid && "text-rose-300"
+                )}
               >
-                {item.displayName ?? item.name}
+                {displayName}
               </span>
-              {updatedAt || item.invalid ? (
-                <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-500" style={{ whiteSpace: "nowrap" }}>
-                  {updatedAt ? <span className="truncate">{formatTimestamp(updatedAt)}</span> : null}
-                  {item.invalid ? (
-                    <span className="inline-flex items-center gap-1 text-rose-400">
-                      <AppIcon name="exclamationTriangle" className="text-[10px]" />
-                      Invalid file
+            </div>
+          ) : (
+            <div className={cn("flex w-full items-center gap-3", isProcessingJob && "blur-[1.5px]")}>
+              {displayThumbnail && (previewKind === "video" || isYoutube) ? (
+                <div className="relative h-10 w-16 overflow-hidden rounded-md bg-[#0f0f10]">
+                  <img src={displayThumbnail} alt="" className="h-full w-full object-cover" />
+                  {isYoutube ? (
+                    <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded bg-black/60">
+                      <AppIcon name="youtube" className="text-[9px] text-[#ff0000]" />
                     </span>
                   ) : null}
                 </div>
-              ) : null}
+              ) : (
+                <div
+                  className={cn(
+                    "flex h-10 w-16 items-center justify-center rounded-md bg-[#0f0f10]",
+                    isYoutube ? "text-[#ef4444]" : "text-slate-300"
+                  )}
+                >
+                  <AppIcon name={fallbackIcon} className="text-[14px]" />
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <span
+                  className="block text-[12px] font-semibold leading-snug text-slate-100"
+                  style={{
+                    display: "-webkit-box",
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: "vertical",
+                    overflow: "hidden"
+                  }}
+                >
+                  {displayName}
+                </span>
+                {updatedAt || item.invalid ? (
+                  <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-500" style={{ whiteSpace: "nowrap" }}>
+                    {updatedAt ? <span className="truncate">{formatTimestamp(updatedAt)}</span> : null}
+                    {item.invalid ? (
+                      <span className="inline-flex items-center gap-1 text-rose-400">
+                        <AppIcon name="exclamationTriangle" className="text-[10px]" />
+                        Invalid file
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
             </div>
-          </div>
+          )}
           {isProcessingJob ? (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/30">
               <AppIcon name="spinner" spin className="text-[16px] text-slate-100" />
@@ -1477,41 +1498,41 @@ export const UploadTab = memo(forwardRef(function UploadTab(
             {filteredMediaItems.length} Job{filteredMediaItems.length === 1 ? "" : "s"}
           </span>
           <div className="flex items-center gap-2">
-            <div className="relative" ref={sortMenuRef}>
+            <div className="relative" ref={viewMenuRef}>
               <button
                 className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[#1b1b22] text-[10px] text-slate-200 transition hover:bg-[#26262f]"
                 onClick={(e) => {
                   e.stopPropagation();
                   setFilterMenuOpen(false);
-                  setSortMenuOpen((prev) => !prev);
+                  setViewMenuOpen((prev) => !prev);
                 }}
                 type="button"
-                aria-label="Sort media"
-                title="Sort"
+                aria-label="View"
+                title="View"
               >
                 <AppIcon name="sort" />
               </button>
-              {sortMenuOpen ? (
+              {viewMenuOpen ? (
                 <div className="absolute right-0 z-50 mt-2 w-32 overflow-hidden rounded-lg border border-slate-800/70 bg-[#151515] text-[11px] text-slate-200 shadow-lg" data-media-menu>
                   {[
-                    { id: "recent", label: "Recent" },
-                    { id: "name", label: "Name" }
+                    { id: "list-view", label: "List View" },
+                    { id: "list", label: "List" }
                   ].map((option) => (
                     <button
                       key={option.id}
                       className={cn(
                         "flex w-full items-center justify-between px-3 py-2 text-left hover:bg-[#1b1b22]",
-                        sortMode === option.id && "bg-[#1b1b22] text-white"
+                        viewMode === option.id && "bg-[#1b1b22] text-white"
                       )}
                       onClick={(e) => {
                         e.stopPropagation();
-                        setSortMode(option.id as "recent" | "name");
-                        setSortMenuOpen(false);
+                        setViewMode(option.id as "list-view" | "list");
+                        setViewMenuOpen(false);
                       }}
                       type="button"
                     >
                       {option.label}
-                      {sortMode === option.id ? <AppIcon name="check" className="text-[10px]" /> : null}
+                      {viewMode === option.id ? <AppIcon name="check" className="text-[10px]" /> : null}
                     </button>
                   ))}
                 </div>
@@ -1522,7 +1543,7 @@ export const UploadTab = memo(forwardRef(function UploadTab(
                 className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[#1b1b22] text-[10px] text-slate-200 transition hover:bg-[#26262f]"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setSortMenuOpen(false);
+                  setViewMenuOpen(false);
                   setFilterMenuOpen((prev) => !prev);
                 }}
                 type="button"
@@ -1583,7 +1604,7 @@ export const UploadTab = memo(forwardRef(function UploadTab(
         >
           <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
             <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-              <div className="space-y-2">
+              <div className={cn(viewMode === "list" ? "space-y-1" : "space-y-2")}>
                 {filteredMediaItems.map((item) => {
                   const job = item.source === "job" && item.jobId ? jobsById[item.jobId] : null;
                   const updatedAt = job?.completedAt ?? job?.startTime ?? item.createdAt ?? null;

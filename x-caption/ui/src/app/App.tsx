@@ -2254,7 +2254,7 @@ export function App() {
       try {
         const bodyText = iframe.contentDocument?.body?.innerText?.trim() ?? "";
         if (
-          bodyText.includes("Unable to load webview content.") ||
+          bodyText.includes("Unable to load the premium content.") ||
           bodyText.includes("Missing url") ||
           bodyText.includes("Invalid url") ||
           bodyText.includes("public base URL")
@@ -4971,7 +4971,7 @@ export function App() {
             {isHeaderCompact ? (
               <button
                 ref={headerMenuButtonRef}
-                className="pywebview-no-drag inline-flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-[#151515] text-[10px] text-slate-200 transition hover:border-slate-500"
+                className="pywebview-no-drag inline-flex h-6 w-6 items-center justify-center rounded-md bg-[#1b1b22] text-[10px] text-slate-200 transition hover:bg-[#26262f]"
                 onClick={(event) => {
                   event.stopPropagation();
                   setIsHeaderMenuOpen((prev) => !prev);
@@ -5159,7 +5159,7 @@ export function App() {
               <div className="flex items-center gap-2">
                 {isCompact ? (
                   <button
-                    className="pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-800/20 bg-[#151515] text-[10px] text-slate-300 hover:border-slate-600"
+                    className="pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md bg-[#1b1b22] text-[10px] text-slate-200 transition hover:bg-[#26262f]"
                     onClick={() => setIsLeftDrawerOpen(true)}
                     type="button"
                     aria-label="Menu"
@@ -5174,8 +5174,10 @@ export function App() {
                   <div className="flex items-center gap-1">
                     <button
                       className={cn(
-                        "pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-800/20 text-[10px]",
-                        compactTab === "player" ? "bg-primary text-white" : "bg-[#151515] text-slate-300 hover:border-slate-600"
+                        "pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md text-[10px] transition",
+                        compactTab === "player"
+                          ? "bg-primary text-white"
+                          : "bg-[#1b1b22] text-slate-300 hover:bg-[#26262f]"
                       )}
                       onClick={() => setCompactTab("player")}
                       type="button"
@@ -5186,8 +5188,10 @@ export function App() {
                     </button>
                     <button
                       className={cn(
-                        "pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-800/20 text-[10px]",
-                        compactTab === "captions" ? "bg-primary text-white" : "bg-[#151515] text-slate-300 hover:border-slate-600"
+                        "pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md text-[10px] transition",
+                        compactTab === "captions"
+                          ? "bg-primary text-white"
+                          : "bg-[#1b1b22] text-slate-300 hover:bg-[#26262f]"
                       )}
                       onClick={() => setCompactTab("captions")}
                       type="button"
@@ -5292,7 +5296,7 @@ export function App() {
                   <button
                     className={cn(
                       isCompact
-                        ? "inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-200 transition hover:bg-white/10"
+                        ? "inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-200 transition hover:bg-white/10"
                         : "inline-flex h-7 items-center gap-1.5 rounded-md bg-[#1b1b22] px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-[#26262f]"
                     )}
                     onClick={handleClearCaptions}
@@ -5300,14 +5304,14 @@ export function App() {
                     aria-label="Clear captions"
                     title="Clear captions"
                   >
-                    <AppIcon name="trashAlt" className={cn("text-[10px]", isCompact && "text-[14px]")} />
+                    <AppIcon name="trashAlt" className={cn("text-[10px]", isCompact && "text-[12px]")} />
                     {isCompact ? null : "Clear captions"}
                   </button>
                 ) : (
                   <button
                     className={cn(
                       isCompact
-                        ? "inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-200 transition hover:bg-white/10"
+                        ? "inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-200 transition hover:bg-white/10"
                         : "inline-flex h-7 items-center gap-1.5 rounded-md bg-[#1b1b22] px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-[#26262f]"
                     )}
                     onClick={handleLoadSrt}
@@ -5315,7 +5319,7 @@ export function App() {
                     aria-label="Load Caption File"
                     title="Load Caption File"
                   >
-                    <AppIcon name="fileImport" className={cn("text-[10px]", isCompact && "text-[14px]")} />
+                    <AppIcon name="fileImport" className={cn("text-[10px]", isCompact && "text-[12px]")} />
                     {isCompact ? null : "Load Caption File"}
                   </button>
                 )}
@@ -5363,7 +5367,9 @@ export function App() {
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Zoom</span>
+                {!isCompact ? (
+                  <span className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Zoom</span>
+                ) : null}
                 <input
                   type="range"
                   min={0.5}
@@ -6070,7 +6076,7 @@ export function App() {
                   />
                 ) : null}
                 {premiumWebviewStatus === "loading" ? (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60 text-slate-200">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#0f0f10] text-slate-200">
                     <AppIcon name="spinner" className="text-[18px] text-white/80" spin />
                     <div className="text-[12px] font-semibold">Loading content…</div>
                     <div className="text-[10px] text-slate-400">Fetching the latest Premium page</div>
@@ -6094,7 +6100,7 @@ export function App() {
                         <path d="M74 90l8 8" />
                       </svg>
                     </div>
-                    <div className="text-[15px] font-semibold text-slate-100">Unable to load content</div>
+                    <div className="text-[15px] font-semibold text-slate-100">Unable to load</div>
                     <div className="max-w-[360px] text-[12px] text-slate-400">
                       {premiumWebviewError ?? "Please check your connection and try again."}
                     </div>
