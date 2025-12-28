@@ -52,8 +52,8 @@ _PREFIX_SILENCE_SECONDS = 5.0
 _DEFAULT_PREFIX_SECONDS = 15.0
 _PREFIX_TRIM_MIN_DURATION = 0.2
 _PREFIX_TRIM_BOUNDARY_TOLERANCE = 0.25
-_PREFIX_RECOVERY_MAX_OVERLAP = 2.0
-_PREFIX_RECOVERY_MAX_DURATION = 8.0
+_PREFIX_RECOVERY_MAX_OVERLAP = 999.0
+_PREFIX_RECOVERY_MAX_DURATION = 12.0
 
 
 def _postprocess_caption_segments(segments: Iterable[Dict[str, Any]]) -> list[Dict[str, Any]]:
@@ -319,8 +319,6 @@ def _recover_first_segment_after_prefix(
         if start >= prefix_seconds:
             continue
         overlap = max(0.0, prefix_seconds - start)
-        if overlap > _PREFIX_RECOVERY_MAX_OVERLAP:
-            continue
 
         words = seg.get("words")
         updated = dict(seg)
@@ -346,7 +344,7 @@ def _recover_first_segment_after_prefix(
             new_end = max(0.0, end - prefix_seconds)
             if new_end - new_start < _PREFIX_TRIM_MIN_DURATION:
                 continue
-        if new_end > _PREFIX_RECOVERY_MAX_DURATION:
+        if new_end > _PREFIX_RECOVERY_MAX_DURATION and next_start is None:
             continue
         if next_start is not None and new_end > next_start:
             new_end = max(new_start, next_start)
