@@ -474,6 +474,11 @@ export function App() {
   const [machineIdLoading, setMachineIdLoading] = useState(false);
   const [machineIdCopied, setMachineIdCopied] = useState(false);
   const [premiumKey, setPremiumKey] = useState("");
+  const [premiumIframeKey, setPremiumIframeKey] = useState(0);
+  const [isOnline, setIsOnline] = useState(() => {
+    if (typeof navigator === "undefined") return true;
+    return navigator.onLine;
+  });
   const [updateModal, setUpdateModal] = useState<{ version: string; url: string } | null>(null);
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [youtubeImporting, setYoutubeImporting] = useState(false);
@@ -495,6 +500,18 @@ export function App() {
   const headerMenuRef = useRef<HTMLDivElement | null>(null);
   const headerMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const premiumWebviewRef = useRef<HTMLIFrameElement | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
 
   const [playback, setPlayback] = useState({
     currentTime: 0,
@@ -678,6 +695,7 @@ export function App() {
   >([]);
   const [activeMedia, setActiveMedia] = useState<MediaItem | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [isDisplayNameEditing, setIsDisplayNameEditing] = useState(false);
   const [displayNameDraft, setDisplayNameDraft] = useState("");
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
@@ -701,10 +719,16 @@ export function App() {
   const timelineScrollIdleRef = useRef<number | null>(null);
   const timelineUserScrollingRef = useRef(false);
   const dragRegionClass = useCustomDrag ? "stt-drag-region" : "pywebview-drag-region";
-  const getPreviewKind = useCallback((media?: MediaItem | null) => {
-    if (!media) return null;
-    return media.streamUrl ? "video" : media.kind;
-  }, []);
+  const getPreviewKind = useCallback(
+    (media?: MediaItem | null) => {
+      if (!media) return null;
+      if (media.externalSource?.type === "youtube" && (media.streamError || !isOnline)) {
+        return media.kind;
+      }
+      return media.streamUrl ? "video" : media.kind;
+    },
+    [isOnline]
+  );
   const captionDragRef = useRef<{
     pointerId: number;
     jobId: string;
@@ -2216,6 +2240,14 @@ export function App() {
     setPremiumWebviewError(null);
   }, [showPremiumModal]);
 
+  useEffect(() => {
+    if (!showPremiumModal) return;
+    if (!isOnline) {
+      setPremiumWebviewStatus("error");
+      setPremiumWebviewError("You're offline. Connect to the internet to load Premium.");
+    }
+  }, [isOnline, showPremiumModal]);
+
   const handlePremiumWebviewLoad = useCallback(() => {
     const iframe = premiumWebviewRef.current;
     if (iframe) {
@@ -2244,6 +2276,13 @@ export function App() {
     setPremiumWebviewStatus("error");
     setPremiumWebviewError("Failed to load webview content.");
   }, []);
+
+  const handlePremiumRetry = useCallback(() => {
+    if (!showPremiumModal) return;
+    setPremiumWebviewStatus("loading");
+    setPremiumWebviewError(null);
+    setPremiumIframeKey((prev) => prev + 1);
+  }, [showPremiumModal]);
 
   const handleCopyMachineId = useCallback(async () => {
     if (!machineId || machineIdLoading) return;
@@ -2734,16 +2773,29 @@ export function App() {
       setActivePreviewUrl(null);
       return;
     }
-    if (activeMedia.previewUrl) {
+    const toFileUrl = (path: string) => `/media?path=${encodeURIComponent(path)}`;
+    const preferLocalYoutube =
+      activeMedia.externalSource?.type === "youtube" && (activeMedia.streamError || !isOnline);
+    if (activeMedia.previewUrl && !preferLocalYoutube) {
       setActivePreviewUrl(null);
       return;
     }
     if (activeMedia.externalSource?.type === "youtube") {
-      setActivePreviewUrl(null);
-      return;
+      if (activeMedia.localPath) {
+        setActivePreviewUrl(toFileUrl(activeMedia.localPath));
+        return;
+      }
+      if (activeMedia.source === "job" && activeMedia.jobId) {
+        setActivePreviewUrl(`/audio/${activeMedia.jobId}?v=${Date.now()}`);
+        return;
+      }
     }
     if (activeMedia.source === "job" && activeMedia.jobId) {
       setActivePreviewUrl(`/audio/${activeMedia.jobId}?v=${Date.now()}`);
+      return;
+    }
+    if (activeMedia.localPath) {
+      setActivePreviewUrl(toFileUrl(activeMedia.localPath));
       return;
     }
     if (activeMedia.file) {
@@ -2755,9 +2807,15 @@ export function App() {
       return;
     }
     setActivePreviewUrl(null);
-  }, [activeMedia]);
+  }, [activeMedia, isOnline]);
 
-  const resolvedPreviewUrl = activeMedia?.previewUrl ?? activePreviewUrl;
+  const localPreviewUrl = activeMedia?.localPath
+    ? `/media?path=${encodeURIComponent(activeMedia.localPath)}`
+    : null;
+  const resolvedPreviewUrl =
+    activeMedia?.externalSource?.type === "youtube" && (activeMedia.streamError || !isOnline)
+      ? localPreviewUrl ?? activePreviewUrl ?? activeMedia?.previewUrl ?? null
+      : activeMedia?.previewUrl ?? activePreviewUrl;
   useEffect(() => {
     if (!pendingPlayRef.current) return;
     const mediaEl = getActiveMediaEl();
@@ -2767,6 +2825,7 @@ export function App() {
   useEffect(() => {
     if (!activeMedia) {
       setPreviewLoading(false);
+      setPreviewError(null);
       return;
     }
     if (activeMedia.isResolvingStream) {
@@ -2777,28 +2836,43 @@ export function App() {
   useEffect(() => {
     const mediaEl = getActiveMediaEl();
     if (!mediaEl) return;
-    const handleStart = () => setPreviewLoading(true);
+    const handleStart = () => {
+      setPreviewLoading(true);
+      setPreviewError(null);
+    };
     const handleReady = () => {
       setPreviewLoading(false);
+      setPreviewError(null);
       if (pendingPlayRef.current) {
         schedulePendingPlay(mediaEl);
       }
     };
+    const handleError = () => {
+      setPreviewLoading(false);
+      setPreviewError("Preview failed to load.");
+    };
     mediaEl.addEventListener("loadstart", handleStart);
     mediaEl.addEventListener("loadeddata", handleReady);
     mediaEl.addEventListener("canplay", handleReady);
-    mediaEl.addEventListener("error", handleReady);
+    mediaEl.addEventListener("error", handleError);
     return () => {
       mediaEl.removeEventListener("loadstart", handleStart);
       mediaEl.removeEventListener("loadeddata", handleReady);
       mediaEl.removeEventListener("canplay", handleReady);
-      mediaEl.removeEventListener("error", handleReady);
+      mediaEl.removeEventListener("error", handleError);
     };
   }, [getActiveMediaEl, activeMedia?.id, activePreviewKind, resolvedPreviewUrl, schedulePendingPlay]);
 
   const activeVideoSrc = resolvedPreviewUrl && activePreviewKind === "video" ? resolvedPreviewUrl : null;
   const audioPreviewSrc = activePreviewKind === "audio" ? resolvedPreviewUrl : null;
   const showPreviewSpinner = previewLoading || Boolean(activeMedia?.isResolvingStream);
+  const youtubeUnavailableReason =
+    activeMedia?.externalSource?.type === "youtube" && !activeMedia?.isResolvingStream
+      ? !isOnline
+        ? "You're offline. Connect to the internet to load the YouTube preview."
+        : activeMedia.streamError || null
+      : null;
+  const showYoutubeUnavailable = Boolean(youtubeUnavailableReason);
   useEffect(() => {
     const audioEl = audioRef.current;
     if (!audioEl) return;
@@ -4339,7 +4413,7 @@ export function App() {
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label className="text-[11px] font-semibold text-slate-400" htmlFor="secondCaptionLanguageSelect">
-            Subtitles Translation
+            Subtitles Translation (Beta)
           </label>
           <button
             className={cn(
@@ -4485,7 +4559,30 @@ export function App() {
                     )}
                   </div>
                 ) : null}
-                {activeVideoSrc ? (
+                {showYoutubeUnavailable ? (
+                  <div className="flex h-full w-full flex-col items-center justify-center gap-4 px-6 text-center text-slate-300">
+                    <div className="flex h-20 w-20 items-center justify-center">
+                      <svg
+                        viewBox="0 0 120 120"
+                        className="h-14 w-14 text-slate-200/80"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <rect x="18" y="26" width="84" height="52" rx="12" />
+                        <path d="M50 44l22 12-22 12z" fill="currentColor" opacity="0.15" />
+                        <path d="M32 94h56" />
+                        <path d="M30 34l60 52" />
+                      </svg>
+                    </div>
+                    <div className="text-[15px] font-semibold text-slate-100">YouTube preview unavailable</div>
+                    <div className="max-w-[360px] text-[12px] text-slate-400">
+                      {youtubeUnavailableReason}
+                    </div>
+                  </div>
+                ) : activeVideoSrc ? (
                   <>
                     <video
                       src={activeVideoSlot === 0 ? activeVideoSrc : nextVideoTarget?.url ?? undefined}
@@ -5961,31 +6058,57 @@ export function App() {
           >
             <div className="flex h-[70vh] w-full flex-col">
               <div className="relative flex-1">
-                <iframe
-                  ref={premiumWebviewRef}
-                  title="Premium Webview"
-                  src={`/premium/webview?url=${encodeURIComponent("https://www.google.com")}`}
-                  className="h-full w-full border-0 bg-black"
-                  onLoad={handlePremiumWebviewLoad}
-                  onError={handlePremiumWebviewError}
-                />
+                {premiumWebviewStatus !== "error" ? (
+                  <iframe
+                    key={premiumIframeKey}
+                    ref={premiumWebviewRef}
+                    title="Premium Webview"
+                    src={`/premium/webview?url=${encodeURIComponent("https://www.google.com")}`}
+                    className="h-full w-full border-0 bg-black"
+                    onLoad={handlePremiumWebviewLoad}
+                    onError={handlePremiumWebviewError}
+                  />
+                ) : null}
                 {premiumWebviewStatus === "loading" ? (
                   <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60 text-slate-200">
                     <AppIcon name="spinner" className="text-[18px] text-white/80" spin />
-                    <div className="text-[11px] font-semibold">Loading webview…</div>
+                    <div className="text-[12px] font-semibold">Loading content…</div>
+                    <div className="text-[10px] text-slate-400">Fetching the latest Premium page</div>
                   </div>
                 ) : null}
                 {premiumWebviewStatus === "error" ? (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/70 px-6 text-center text-slate-200">
-                    <AppIcon name="exclamationTriangle" className="text-[18px] text-amber-300" />
-                    <div className="text-[12px] font-semibold">Webview failed to load</div>
-                    <div className="text-[11px] text-slate-400">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-[#0f0f10] px-8 text-center text-slate-200">
+                    <div className="flex h-20 w-20 items-center justify-center">
+                      <svg
+                        viewBox="0 0 120 120"
+                        className="h-14 w-14 text-slate-200/80"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M20 62c0-18 16-32 35-32 9 0 18 4 24 10 3-1 6-2 9-2 11 0 20 9 20 20 0 12-9 22-21 22H42c-12 0-22-10-22-22z" />
+                        <path d="M38 82l44-36" />
+                        <path d="M46 90l-8 8" />
+                        <path d="M74 90l8 8" />
+                      </svg>
+                    </div>
+                    <div className="text-[15px] font-semibold text-slate-100">Unable to load content</div>
+                    <div className="max-w-[360px] text-[12px] text-slate-400">
                       {premiumWebviewError ?? "Please check your connection and try again."}
                     </div>
+                    <button
+                      type="button"
+                      onClick={handlePremiumRetry}
+                      className="inline-flex h-8 items-center justify-center rounded-full px-3 text-[11px] font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+                    >
+                      Try again
+                    </button>
                   </div>
                 ) : null}
               </div>
-              <div className="border-t border-slate-800/60 px-4 py-4">
+              <div className="px-4 py-4">
                 <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-slate-200">
                   <span className="text-slate-400">Your machine code</span>
                   <span className="break-all font-mono">

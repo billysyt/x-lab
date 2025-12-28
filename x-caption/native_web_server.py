@@ -15,8 +15,9 @@ import shutil
 import mimetypes
 import contextlib
 import re
+import subprocess
 import ssl
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -64,7 +65,7 @@ from whisper_cpp_runtime import resolve_whisper_model
 
 # Import model warmup event for readiness check
 from native_config import MODEL_WARMUP_EVENT
-from native_ffmpeg import setup_ffmpeg_environment, test_ffmpeg
+from native_ffmpeg import setup_ffmpeg_environment, test_ffmpeg, get_ffmpeg_path
 
 # Configure logging
 logging.basicConfig(
@@ -87,8 +88,14 @@ ALLOWED_EXTENSIONS = {
     'mpeg',
     'flac',
     'm4a',
-    'ogg'
+    'ogg',
+    'jpg',
+    'jpeg'
 }
+
+_THUMBNAIL_MAX_BYTES = 50 * 1024
+_THUMBNAIL_SCALES = [480, 360, 320, 240, 200, 160, 120, 96]
+_THUMBNAIL_QUALITIES = [6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30]
 
 # WebSocket emulation - store pending updates for each job
 job_update_queues = defaultdict(list)
@@ -149,6 +156,95 @@ def _resolve_youtube_download(downloads_dir: Path, download_id: str) -> Path:
     return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
+def _local_media_url(path: Path) -> str:
+    return f"/media?path={quote(str(path))}"
+
+
+def _guess_thumbnail_extension(url: str, content_type: Optional[str]) -> str:
+    content_type = (content_type or "").lower()
+    if "jpeg" in content_type or "jpg" in content_type:
+        return ".jpg"
+    if "png" in content_type:
+        return ".png"
+    if "webp" in content_type:
+        return ".webp"
+    parsed = urlparse(url)
+    suffix = Path(parsed.path).suffix.lower()
+    if suffix in {".jpg", ".jpeg", ".png", ".webp"}:
+        return suffix
+    return ".jpg"
+
+
+def _download_youtube_thumbnail(
+    thumbnail_url: Optional[str],
+    *,
+    downloads_dir: Path,
+    base_name: str,
+) -> Optional[Path]:
+    if not thumbnail_url:
+        return None
+    downloads_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = downloads_dir / f"{base_name}_thumb.jpg"
+    if dest_path.exists():
+        return dest_path
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="xsub_thumb_"))
+    best_path = None
+    best_size = None
+    try:
+        req = urllib.request.Request(
+            thumbnail_url,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        context = ssl.create_default_context(cafile=certifi.where()) if certifi else None
+        with urllib.request.urlopen(req, timeout=10, context=context) as response:
+            content_type = response.headers.get("Content-Type")
+            data = response.read()
+
+        ext = _guess_thumbnail_extension(thumbnail_url, content_type)
+        raw_path = temp_dir / f"thumbnail{ext}"
+        raw_path.write_bytes(data)
+
+        ffmpeg_path = get_ffmpeg_path()
+        attempt_path = temp_dir / "thumb_out.jpg"
+        best_path = temp_dir / "thumb_best.jpg"
+
+        for size in _THUMBNAIL_SCALES:
+            for quality in _THUMBNAIL_QUALITIES:
+                cmd = [
+                    ffmpeg_path,
+                    "-y",
+                    "-i",
+                    str(raw_path),
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    f"scale='min({size},iw)':-2",
+                    "-q:v",
+                    str(quality),
+                    str(attempt_path),
+                ]
+                process = subprocess.run(cmd, capture_output=True, text=True)
+                if process.returncode != 0 or not attempt_path.exists():
+                    continue
+                size_bytes = attempt_path.stat().st_size
+                if best_size is None or size_bytes < best_size:
+                    best_size = size_bytes
+                    shutil.copy2(attempt_path, best_path)
+                if size_bytes <= _THUMBNAIL_MAX_BYTES:
+                    shutil.copy2(attempt_path, dest_path)
+                    return dest_path
+
+        if best_path.exists():
+            shutil.copy2(best_path, dest_path)
+            return dest_path
+    except Exception as exc:
+        logger.warning("Failed to download YouTube thumbnail: %s", exc)
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+    return None
+
+
 def _download_youtube_audio(
     url: str,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
@@ -199,6 +295,9 @@ def _download_youtube_audio(
     video_id = info.get("id")
     duration = info.get("duration")
     thumbnail_url = _pick_youtube_thumbnail(info)
+    safe_title = secure_filename(title) or "youtube_audio"
+    safe_title = safe_title[:80].strip("-_") or "youtube_audio"
+    base_name = f"{safe_title}-{download_id[:8]}"
     downloaded_path = _resolve_youtube_download(downloads_dir, download_id)
 
     stream_url = None
@@ -220,9 +319,7 @@ def _download_youtube_audio(
     except Exception as exc:
         logger.warning("Failed to resolve YouTube stream URL: %s", exc)
 
-    safe_title = secure_filename(title) or "youtube_audio"
-    safe_title = safe_title[:80].strip("-_") or "youtube_audio"
-    final_name = f"{safe_title}-{download_id[:8]}{downloaded_path.suffix}"
+    final_name = f"{base_name}{downloaded_path.suffix}"
     final_path = downloads_dir / final_name
     try:
         if downloaded_path.resolve() != final_path.resolve():
@@ -235,6 +332,13 @@ def _download_youtube_audio(
     with contextlib.suppress(OSError):
         size = final_path.stat().st_size
 
+    thumbnail_path = _download_youtube_thumbnail(
+        thumbnail_url,
+        downloads_dir=downloads_dir,
+        base_name=base_name,
+    )
+    local_thumbnail_url = _local_media_url(thumbnail_path) if thumbnail_path else None
+
     return {
         "file": {
             "path": str(final_path),
@@ -242,7 +346,7 @@ def _download_youtube_audio(
             "size": size,
             "mime": mime_type or "application/octet-stream",
         },
-        "thumbnail_url": thumbnail_url,
+        "thumbnail_url": local_thumbnail_url,
         "source": {
             "url": url,
             "title": title,
@@ -309,9 +413,23 @@ def _resolve_youtube_stream(url: str) -> Dict[str, Any]:
     if not stream_url:
         raise RuntimeError("Failed to resolve YouTube stream URL.")
 
+    title = (stream_info.get("title") or "youtube_stream").strip()
+    safe_title = secure_filename(title) or "youtube_stream"
+    safe_title = safe_title[:80].strip("-_") or "youtube_stream"
+    video_id = stream_info.get("id") or uuid.uuid4().hex[:8]
+    base_name = f"{safe_title}-{video_id}"
+    downloads_dir = get_uploads_dir() / "youtube"
+    thumbnail_url = _pick_youtube_thumbnail(stream_info)
+    thumbnail_path = _download_youtube_thumbnail(
+        thumbnail_url,
+        downloads_dir=downloads_dir,
+        base_name=base_name,
+    )
+    local_thumbnail_url = _local_media_url(thumbnail_path) if thumbnail_path else None
+
     return {
         "stream_url": stream_url,
-        "thumbnail_url": _pick_youtube_thumbnail(stream_info),
+        "thumbnail_url": local_thumbnail_url,
         "source": {
             "url": url,
             "title": stream_info.get("title"),
@@ -371,10 +489,6 @@ def _start_youtube_download(url: str) -> Dict[str, Any]:
                 source = state.get("source") or {}
                 source["title"] = title
                 state["source"] = source
-            if isinstance(info, dict):
-                thumb = _pick_youtube_thumbnail(info)
-                if thumb and not state.get("thumbnail_url"):
-                    state["thumbnail_url"] = thumb
             if status == "downloading":
                 total = update.get("total_bytes")
                 if not total:
@@ -788,7 +902,7 @@ def create_app():
                 payload = response.read()
         except Exception as exc:
             logger.warning("Premium webview fetch failed: %s", exc)
-            return "Unable to load webview content.", 502
+            return "Unable to load the premium content.", 502
 
         if "text/html" in content_type.lower():
             charset = "utf-8"

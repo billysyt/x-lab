@@ -74,6 +74,7 @@ export type MediaItem = {
   createdAt?: number;
   durationSec?: number | null;
   invalid?: boolean;
+  streamError?: string | null;
 };
 
 type UploadTabProps = {
@@ -186,10 +187,6 @@ export const UploadTab = memo(forwardRef(function UploadTab(
   const resolveYoutubeThumbnailUrl = useCallback((item: MediaItem) => {
     const explicit = item.externalSource?.thumbnailUrl ?? null;
     if (explicit) return explicit;
-    const id = item.externalSource?.id ?? null;
-    if (id) {
-      return `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
-    }
     return null;
   }, []);
 
@@ -277,6 +274,45 @@ export const UploadTab = memo(forwardRef(function UploadTab(
         props.notify("Missing YouTube URL for this item.", "error");
         return null;
       }
+      const markStreamError = (message: string) => {
+        const nextSource: MediaSourceInfo = {
+          type: "youtube",
+          url,
+          streamUrl: null,
+          title: item.externalSource?.title ?? null,
+          id: item.externalSource?.id ?? null,
+          thumbnailUrl: item.externalSource?.thumbnailUrl ?? null
+        };
+        const failedItem: MediaItem = {
+          ...item,
+          previewUrl: item.previewUrl ?? null,
+          streamUrl: null,
+          externalSource: nextSource,
+          isResolvingStream: false,
+          streamError: message
+        };
+        if (item.source === "local") {
+          setLocalMedia((prev) => prev.map((entry) => (entry.id === item.id ? failedItem : entry)));
+        }
+        if (item.jobId) {
+          const job = jobsById[item.jobId];
+          const existingUiState =
+            job?.uiState && typeof job.uiState === "object" ? (job.uiState as Record<string, any>) : {};
+          const nextUiState = {
+            ...existingUiState,
+            mediaSource: nextSource,
+            mediaSourceError: message
+          };
+          if (job) {
+            dispatch(updateJobUiState({ jobId: item.jobId, uiState: nextUiState }));
+          }
+          void apiUpsertJobRecord({ job_id: item.jobId, ui_state: nextUiState }).catch(() => undefined);
+        }
+        return failedItem;
+      };
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        return markStreamError("You're offline. Connect to the internet to load the YouTube preview.");
+      }
       try {
         const payload = await apiResolveYoutubeStream(url);
         const streamUrl = typeof payload.stream_url === "string" ? payload.stream_url : null;
@@ -297,7 +333,8 @@ export const UploadTab = memo(forwardRef(function UploadTab(
           previewUrl: streamUrl,
           streamUrl,
           externalSource: nextSource,
-          isResolvingStream: false
+          isResolvingStream: false,
+          streamError: null
         };
         if (item.source === "local") {
           setLocalMedia((prev) => prev.map((entry) => (entry.id === item.id ? updatedItem : entry)));
@@ -308,7 +345,8 @@ export const UploadTab = memo(forwardRef(function UploadTab(
             job?.uiState && typeof job.uiState === "object" ? (job.uiState as Record<string, any>) : {};
           const nextUiState = {
             ...existingUiState,
-            mediaSource: nextSource
+            mediaSource: nextSource,
+            mediaSourceError: null
           };
           if (job) {
             dispatch(updateJobUiState({ jobId: item.jobId, uiState: nextUiState }));
@@ -319,7 +357,7 @@ export const UploadTab = memo(forwardRef(function UploadTab(
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         props.notify(message || "Failed to resolve YouTube stream.", "error");
-        return null;
+        return markStreamError("Unable to reach YouTube right now. Please try again later.");
       }
     },
     [dispatch, jobsById, props.notify, setLocalMedia]
@@ -1272,6 +1310,8 @@ export const UploadTab = memo(forwardRef(function UploadTab(
     const mediaPath = job.audioFile?.path || job.result?.file_path || null;
     const rawSource =
       job.uiState && typeof job.uiState === "object" ? (job.uiState as Record<string, any>).mediaSource : null;
+    const sourceError =
+      job.uiState && typeof job.uiState === "object" ? (job.uiState as Record<string, any>).mediaSourceError : null;
     const externalSource =
       rawSource && typeof rawSource === "object" && rawSource.type === "youtube"
         ? {
@@ -1317,7 +1357,8 @@ export const UploadTab = memo(forwardRef(function UploadTab(
         externalSource?.thumbnailUrl ??
         null,
       thumbnailSource,
-      invalid: Boolean(job.mediaInvalid)
+      invalid: Boolean(job.mediaInvalid),
+      streamError: typeof sourceError === "string" ? sourceError : null
     };
   }
 
