@@ -45,6 +45,7 @@ from native_config import (
     get_static_dir,
     get_transcriptions_dir,
     get_uploads_dir,
+    get_data_dir,
     get_config,
     get_models_dir,
     VERSION
@@ -115,6 +116,36 @@ youtube_downloads: Dict[str, Dict[str, Any]] = {}
 youtube_download_lock = threading.Lock()
 
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+update_cache_lock = threading.Lock()
+UPDATE_CACHE_FILENAME = "update_cache.json"
+
+
+def _get_update_cache_path() -> Path:
+    return get_data_dir() / UPDATE_CACHE_FILENAME
+
+
+def _read_update_cache() -> Dict[str, Any]:
+    path = _get_update_cache_path()
+    if not path.exists():
+        return {"projects": {}}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            if "projects" not in data or not isinstance(data.get("projects"), dict):
+                data["projects"] = {}
+            return data
+    except Exception as exc:
+        logger.warning("Failed to read update cache: %s", exc)
+    return {"projects": {}}
+
+
+def _write_update_cache(data: Dict[str, Any]) -> None:
+    path = _get_update_cache_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps(data, ensure_ascii=True, indent=2), encoding="utf-8")
+    tmp_path.replace(path)
 
 
 def is_youtube_url(raw_url: str) -> bool:
@@ -838,6 +869,50 @@ def create_app():
         except Exception as exc:
             logger.error("Failed to load job history: %s", exc)
             return jsonify({"error": "Failed to load history"}), 500
+
+    @app.route('/api/update/cache', methods=['GET'])
+    def get_update_cache():
+        project = (request.args.get("project") or "").strip()
+        with update_cache_lock:
+            data = _read_update_cache()
+        if project:
+            entry = data.get("projects", {}).get(project)
+            if not entry:
+                return jsonify({"project": project, "cached": False, "payload": None}), 200
+            return jsonify({
+                "project": project,
+                "cached": True,
+                "payload": entry.get("payload"),
+                "fetched_at": entry.get("fetched_at")
+            }), 200
+        return jsonify(data), 200
+
+    @app.route('/api/update/cache', methods=['POST'])
+    def set_update_cache():
+        payload = request.get_json(force=True, silent=True) or {}
+        payload_data = payload.get("payload") if isinstance(payload, dict) else None
+        project = payload.get("project") if isinstance(payload, dict) else None
+        if not project and isinstance(payload_data, dict):
+            project = payload_data.get("project")
+        if not project or not isinstance(project, str):
+            return jsonify({"error": "Missing project"}), 400
+        if payload_data is None:
+            return jsonify({"error": "Missing payload"}), 400
+
+        fetched_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with update_cache_lock:
+            data = _read_update_cache()
+            projects = data.get("projects")
+            if not isinstance(projects, dict):
+                projects = {}
+                data["projects"] = projects
+            projects[project] = {
+                "payload": payload_data,
+                "fetched_at": fetched_at
+            }
+            data["updated_at"] = fetched_at
+            _write_update_cache(data)
+        return jsonify({"success": True, "project": project, "fetched_at": fetched_at}), 200
 
     @app.route('/convert_chinese', methods=['POST'])
     def convert_chinese():

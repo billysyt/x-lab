@@ -40,6 +40,18 @@ import {
 } from "../shared/api/sttApi";
 import type { ExportLanguage, Job, TranscriptSegment, WhisperModelDownload, WhisperModelStatus } from "../shared/types";
 
+type UpdateModalInfo = {
+  project: string;
+  currentVersion: string | null;
+  latestVersion: string | null;
+  updateAvailable: boolean | null;
+  forceUpdate: boolean;
+  minSupportedVersion: string | null;
+  downloadUrl: string | null;
+  releaseNotes: string | null;
+  publishedAt: string | null;
+};
+
 function formatTime(seconds: number) {
   const total = Math.max(0, Math.floor(seconds));
   const mins = Math.floor(total / 60);
@@ -293,6 +305,62 @@ function compareVersions(a: string, b: string) {
   return 0;
 }
 
+function buildUpdateModalInfo(
+  payload: any,
+  fallbackVersion: string | null,
+  defaultProject: string
+): UpdateModalInfo | null {
+  if (!payload || typeof payload !== "object") return null;
+  const latestVersion =
+    payload.latestVersion ??
+    payload.latest_version ??
+    payload.latest ??
+    payload.version ??
+    null;
+  if (typeof latestVersion !== "string" || !latestVersion.trim()) return null;
+  const currentVersion = fallbackVersion ?? payload.currentVersion ?? payload.current_version ?? null;
+  const minSupportedVersion =
+    payload.minSupportedVersion ?? payload.min_supported ?? payload.minimum_supported ?? null;
+  const updateAvailable =
+    typeof currentVersion === "string" && typeof latestVersion === "string"
+      ? compareVersions(latestVersion, currentVersion) > 0
+      : typeof payload.updateAvailable === "boolean"
+        ? payload.updateAvailable
+        : null;
+  let forceUpdate = Boolean(payload.forceUpdate ?? payload.force_update);
+  if (typeof currentVersion === "string" && typeof minSupportedVersion === "string") {
+    forceUpdate = forceUpdate || compareVersions(currentVersion, minSupportedVersion) < 0;
+  }
+  if (!forceUpdate && updateAvailable !== true) {
+    return null;
+  }
+  const downloadUrl = payload.downloadUrl ?? payload.url ?? payload.link ?? payload.download_url ?? null;
+  const releaseNotes =
+    typeof payload.releaseNotes === "string"
+      ? payload.releaseNotes
+      : typeof payload.notes === "string"
+        ? payload.notes
+        : null;
+  const publishedAt =
+    typeof payload.publishedAt === "string"
+      ? payload.publishedAt
+      : typeof payload.released_at === "string"
+        ? payload.released_at
+        : null;
+
+  return {
+    project: String(payload.project ?? defaultProject ?? "x-caption"),
+    currentVersion: typeof currentVersion === "string" ? currentVersion : null,
+    latestVersion,
+    updateAvailable,
+    forceUpdate,
+    minSupportedVersion: typeof minSupportedVersion === "string" ? minSupportedVersion : null,
+    downloadUrl: typeof downloadUrl === "string" ? downloadUrl : null,
+    releaseNotes,
+    publishedAt
+  };
+}
+
 function findSegmentAtTime<T extends { start: number; end: number }>(segments: T[], time: number): T | null {
   if (!segments.length || !Number.isFinite(time)) return null;
   let lo = 0;
@@ -479,7 +547,7 @@ export function App() {
     if (typeof navigator === "undefined") return true;
     return navigator.onLine;
   });
-  const [updateModal, setUpdateModal] = useState<{ version: string; url: string } | null>(null);
+  const [updateModal, setUpdateModal] = useState<UpdateModalInfo | null>(null);
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [youtubeImporting, setYoutubeImporting] = useState(false);
   const [youtubeError, setYoutubeError] = useState<string | null>(null);
@@ -1005,35 +1073,80 @@ export function App() {
   useEffect(() => {
     const win = typeof window !== "undefined" ? (window as any) : null;
     const version = typeof win?.__APP_VERSION__ === "string" ? win.__APP_VERSION__ : null;
-    if (version) {
-      dispatch(setVersion(version));
+    const envVersion =
+      typeof (import.meta as any)?.env?.VITE_APP_VERSION === "string"
+        ? (import.meta as any).env.VITE_APP_VERSION
+        : null;
+    const resolvedVersion = version || (envVersion ? String(envVersion).trim() : null);
+    if (resolvedVersion) {
+      dispatch(setVersion(resolvedVersion));
     }
     dispatch(bootstrapJobs()).catch(() => undefined);
   }, [dispatch]);
 
   useEffect(() => {
-    if (!appVersion) return;
     const updateUrl = (import.meta as any)?.env?.VITE_UPDATE_CHECK_URL;
     if (!updateUrl || typeof updateUrl !== "string") return;
+    const envVersion =
+      typeof (import.meta as any)?.env?.VITE_APP_VERSION === "string"
+        ? (import.meta as any).env.VITE_APP_VERSION
+        : null;
+    const fallbackVersion = appVersion || (envVersion ? String(envVersion).trim() : null);
+    const updateProject =
+      (import.meta as any)?.env?.VITE_UPDATE_PROJECT ??
+      (import.meta as any)?.env?.VITE_UPDATE_PROJECT_NAME ??
+      "x-caption";
     let cancelled = false;
-    const checkUpdate = async () => {
+    const loadCachedUpdate = async () => {
       try {
-        const response = await fetch(updateUrl, { cache: "no-store" });
+        const response = await fetch(`/api/update/cache?project=${encodeURIComponent(updateProject)}`, {
+          cache: "no-store"
+        });
+        if (!response.ok) return;
+        const cached = await response.json();
+        if (cancelled || !cached) return;
+        const cachedPayload = cached?.payload ?? null;
+        const info = buildUpdateModalInfo(cachedPayload, fallbackVersion, updateProject);
+        if (info) {
+          setUpdateModal(info);
+        }
+      } catch {
+        // Ignore cache errors.
+      }
+    };
+    const storeCachedUpdate = async (payload: any) => {
+      try {
+        await fetch("/api/update/cache", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ project: updateProject, payload })
+        });
+      } catch {
+        // Ignore cache write errors.
+      }
+    };
+    const fetchLatestUpdate = async () => {
+      try {
+        const url = new URL(updateUrl, window.location.origin);
+        if (updateProject) {
+          url.searchParams.set("project", updateProject);
+        }
+        if (fallbackVersion) {
+          url.searchParams.set("current", fallbackVersion);
+        }
+        const response = await fetch(url.toString(), { cache: "no-store" });
         if (!response.ok) return;
         const payload = await response.json();
         if (cancelled || !payload) return;
-        const latestVersion =
-          payload.version ?? payload.latest ?? payload.latestVersion ?? payload.latest_version;
-        const downloadUrl = payload.url ?? payload.link ?? payload.download_url;
-        if (typeof latestVersion !== "string" || typeof downloadUrl !== "string") return;
-        if (compareVersions(latestVersion, appVersion) > 0) {
-          setUpdateModal({ version: latestVersion, url: downloadUrl });
-        }
+        await storeCachedUpdate(payload);
+        if (cancelled) return;
+        await loadCachedUpdate();
       } catch {
         // Offline or blocked: skip update check silently.
       }
     };
-    void checkUpdate();
+    void loadCachedUpdate();
+    void fetchLatestUpdate();
     return () => {
       cancelled = true;
     };
@@ -4921,6 +5034,15 @@ export function App() {
           Math.min(youtubeImportStatus && youtubeImportStatus !== "completed" ? 99 : 100, youtubeProgress)
         )
       : 0;
+  const updateLatestVersion = updateModal?.latestVersion ?? null;
+  const updateCurrentVersion = updateModal?.currentVersion ?? appVersion ?? null;
+  const updateAvailable = updateModal
+    ? updateModal.updateAvailable ??
+        (updateLatestVersion && updateCurrentVersion
+          ? compareVersions(updateLatestVersion, updateCurrentVersion) > 0
+          : false)
+    : false;
+  const updateForceRequired = updateModal ? Boolean(updateModal.forceUpdate) : false;
 
   return (
     <>
@@ -6145,7 +6267,9 @@ export function App() {
                     key={premiumIframeKey}
                     ref={premiumWebviewRef}
                     title="Premium Webview"
-                    src={`/premium/webview?url=${encodeURIComponent("https://www.google.com")}`}
+                    src={`/premium/webview?url=${encodeURIComponent(
+                      (import.meta as any)?.env?.VITE_PREMIUM_PAGE_URL || "https://www.google.com"
+                    )}`}
                     className="h-full w-full border-0 bg-black"
                     onLoad={handlePremiumWebviewLoad}
                     onError={handlePremiumWebviewError}
@@ -6233,10 +6357,7 @@ export function App() {
       ) : null}
 
       {updateModal ? (
-        <div
-          className="fixed inset-0 z-[140] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-          onClick={() => setUpdateModal(null)}
-        >
+        <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div
             className="w-full max-w-[420px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
             role="dialog"
@@ -6245,34 +6366,79 @@ export function App() {
           >
             <div className="p-5">
               <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#111827] text-[#60a5fa]">
-                  <AppIcon name="download" className="text-[16px]" />
+                <div className="flex h-10 w-10 items-center justify-center text-white">
+                  <svg
+                    viewBox="0 0 24 24"
+                    className="h-5 w-5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M20 16.5a4.5 4.5 0 0 0-2-8.5h-0.6A7 7 0 1 0 5 16.2" />
+                    <path d="M12 12v7" />
+                    <path d="m8.5 15.5 3.5 3.5 3.5-3.5" />
+                  </svg>
                 </div>
                 <div>
-                  <div className="text-sm font-semibold text-slate-100">New version available</div>
+                  <div className="text-sm font-semibold text-slate-100">
+                    {updateForceRequired ? "Update required" : "Update available"}
+                  </div>
                   <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-                    Version {updateModal.version} is ready. You're on {appVersion ?? "current"}.
+                    Latest version is available.
                   </p>
                 </div>
+              </div>
+              <div className="mt-4 grid gap-2 text-[11px] text-slate-300">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Current version</span>
+                  <span>{updateCurrentVersion ?? "Unknown"}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Latest version</span>
+                  <span>{updateLatestVersion ?? "Unknown"}</span>
+                </div>
+                {updateModal.publishedAt ? (
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Published</span>
+                    <span>{updateModal.publishedAt}</span>
+                  </div>
+                ) : null}
               </div>
               <div className="mt-5 flex items-center justify-end gap-2">
                 <button
                   className="rounded-md bg-transparent px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
-                  onClick={() => setUpdateModal(null)}
-                  type="button"
-                >
-                  Later
-                </button>
-                <button
-                  className="rounded-md bg-white px-3 py-1.5 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95"
                   onClick={() => {
-                    openExternalUrl(updateModal.url);
+                    if (updateForceRequired) {
+                      handleWindowAction("close");
+                      return;
+                    }
                     setUpdateModal(null);
                   }}
                   type="button"
                 >
-                  Update
+                  {updateForceRequired ? "Exit" : "Later"}
                 </button>
+                {updateAvailable ? (
+                  <button
+                    className={cn(
+                      "rounded-md bg-white px-3 py-1.5 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95",
+                      !updateModal.downloadUrl && "cursor-not-allowed opacity-60"
+                    )}
+                    onClick={() => {
+                      if (updateModal.downloadUrl) {
+                        openExternalUrl(updateModal.downloadUrl);
+                        handleWindowAction("close");
+                      }
+                    }}
+                    type="button"
+                    disabled={!updateModal.downloadUrl}
+                  >
+                    {updateForceRequired ? "Update now" : "Update"}
+                  </button>
+                ) : null}
               </div>
             </div>
           </div>
