@@ -137,6 +137,86 @@ const premiumHtml = `<!doctype html>
         font-size: 12px;
         letter-spacing: 0.08em;
       }
+      .countdown-row {
+        margin-top: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .countdown-top {
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 6px;
+      }
+      .countdown-slot {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 0;
+        color: var(--accent-2);
+        font-size: 12px;
+        letter-spacing: 0.16em;
+      }
+      .countdown-label {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.28em;
+        color: var(--accent-2);
+      }
+      .slot-group {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .slot-digit {
+        width: 26px;
+        height: 30px;
+        border-radius: 6px;
+        background: rgba(0,0,0,0.45);
+        color: var(--text);
+        display: grid;
+        place-items: center;
+        font-size: 18px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        text-shadow: 0 0 12px rgba(122, 168, 255, 0.28);
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 6px 14px rgba(0,0,0,0.35);
+      }
+      .slot-label {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.28em;
+        color: var(--accent-2);
+      }
+      .promo-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        color: #0b0d10;
+        background: linear-gradient(135deg, #74f0da, #7aa8ff);
+        text-transform: uppercase;
+        animation: pulse 1.6s ease-in-out infinite;
+        transform-origin: center;
+        box-shadow: 0 10px 24px rgba(116, 240, 218, 0.25);
+      }
+      @keyframes pulse {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.08); }
+        100% { transform: scale(1); }
+      }
+      @media (max-width: 640px) {
+        .slot-digit {
+          width: 24px;
+          height: 28px;
+          font-size: 16px;
+        }
+      }
       .section {
         margin-top: 22px;
       }
@@ -173,24 +253,50 @@ const premiumHtml = `<!doctype html>
       }
       .pay-row {
         margin-top: 12px;
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 10px;
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
       }
       .pay-chip {
         display: flex;
         align-items: center;
         gap: 10px;
-        padding: 10px 12px;
+        padding: 10px 18px;
         border-radius: 12px;
-        background: rgba(0,0,0,0.35);
-        color: var(--muted);
-        font-size: 13px;
+        background: linear-gradient(135deg, rgba(116, 240, 218, 0.9), rgba(122, 168, 255, 0.95));
+        color: #0b0d10;
+        font-size: 14px;
+        font-weight: 700;
+        white-space: nowrap;
+        border: none;
+        cursor: pointer;
+        box-shadow: 0 12px 26px rgba(116, 240, 218, 0.22);
+        transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+        animation: ctaPulse 2.2s ease-in-out infinite;
       }
-      .pay-chip svg {
-        width: 18px;
-        height: 18px;
-        color: var(--text);
+      .pay-chip:hover {
+        transform: translateY(-1px) scale(1.02);
+        box-shadow: 0 16px 34px rgba(116, 240, 218, 0.3);
+        filter: brightness(1.02);
+      }
+      @keyframes ctaPulse {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.04); }
+        100% { transform: scale(1); }
+      }
+      @media (max-width: 640px) {
+        .pay-row {
+          gap: 8px;
+        }
+        .pay-chip {
+          gap: 8px;
+          padding: 8px 14px;
+          font-size: 12px;
+        }
+        .pay-chip svg {
+          width: 16px;
+          height: 16px;
+        }
       }
       .pay-icons {
         display: flex;
@@ -260,92 +366,143 @@ const premiumHtml = `<!doctype html>
         <div class="badge">Premium Access</div>
         <h1>X-Caption Premium</h1>
         <p class="lead">
-          Unlock the full studio: priority transcription, premium export controls, and early
-          access to new captioning models.
+          Unlock all premium features, including other products, unlimited usage, lifetime support,
+          and early access to new releases.
         </p>
 
         <div class="split">
           <div>
-            <div class="price-title">All-in-one exclusive discount</div>
+            <div class="price-title">Lifetime Subscription</div>
             <div class="price-line">
-              <div class="price-old">$1199</div>
-              <div class="price-new">$99HKD</div>
-              <div class="price-unit">/ term</div>
+              <div class="price-old">$199</div>
+              <div class="price-new">$19.9</div>
+              <div class="price-unit">USD / device</div>
             </div>
-            <div class="countdown">7-Day Countdown</div>
-
-            <div class="section">
-              <div class="section-title">Auto Issue</div>
-              <div class="row">
-                <div class="cta">
-                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                    <path d="M4 7.5a2.5 2.5 0 0 1 2.5-2.5h11A2.5 2.5 0 0 1 20 7.5v9A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Zm4.5 2a1 1 0 0 0 0 2h7a1 1 0 1 0 0-2h-7Zm0 4a1 1 0 0 0 0 2h4.5a1 1 0 1 0 0-2H8.5Z" />
-                  </svg>
-                  Taobao self-service
-                </div>
-
-                <div class="cta">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 3v12" />
-                    <path d="m8.5 11.5 3.5 3.5 3.5-3.5" />
-                    <path d="M4 19h16" />
-                  </svg>
-                  Manual payment
-                </div>
-              </div>
+            <div class="countdown-row" aria-live="polite">
+              <span class="countdown-top">
+                <span class="countdown-label">Time left</span>
+                <span class="promo-badge">90% OFF</span>
+              </span>
+              <span class="countdown-slot">
+                <span class="slot-group" aria-label="Days left">
+                  <span class="slot-digit" data-slot="d1">0</span>
+                  <span class="slot-digit" data-slot="d2">0</span>
+                  <span class="slot-label">D</span>
+                </span>
+                <span class="slot-group" aria-label="Hours left">
+                  <span class="slot-digit" data-slot="h1">0</span>
+                  <span class="slot-digit" data-slot="h2">0</span>
+                  <span class="slot-label">H</span>
+                </span>
+                <span class="slot-group" aria-label="Minutes left">
+                  <span class="slot-digit" data-slot="m1">0</span>
+                  <span class="slot-digit" data-slot="m2">0</span>
+                  <span class="slot-label">M</span>
+                </span>
+              </span>
             </div>
-
             <div class="section">
-              <div class="section-title">Payment methods</div>
+              <div class="section-title">Payment</div>
               <div class="pay-row">
-                <div class="pay-chip">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M6.5 12.5c-2.2 0-4-1.6-4-3.6C2.5 6.7 4 5 6.1 5c1.3 0 2.5.6 3.2 1.5" />
-                    <path d="M11.5 16.8c-2.9 0-5.2-2-5.2-4.5" />
-                    <path d="M14.7 8.2c.7-.7 1.6-1.2 2.7-1.2 2.1 0 3.8 1.7 3.8 3.8 0 2.1-1.7 3.8-3.8 3.8" />
-                    <path d="M9.5 10.5c.9-1.4 2.6-2.4 4.6-2.4 2.9 0 5.2 2 5.2 4.5 0 2.5-2.3 4.5-5.2 4.5" />
-                  </svg>
-                  WeChat Pay
-                </div>
-                <div class="pay-chip">
-                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                    <path d="M12 4c4.4 0 8 3.6 8 8 0 3.5-2.3 6.5-5.5 7.6l-1.3-2.4c2.1-.8 3.6-2.8 3.6-5.2 0-3.1-2.5-5.6-5.6-5.6S6.4 9.9 6.4 13c0 1.9.9 3.6 2.4 4.6l-1.2 2.3C4.3 18.4 2 15.3 2 12c0-4.4 3.6-8 8-8Z" />
-                  </svg>
-                  Alipay
-                </div>
-                <div class="pay-chip">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" />
-                  </svg>
-                  FPS
-                </div>
-                <div class="pay-chip">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M8 4h6a4 4 0 0 1 0 8H8V4Z" />
-                    <path d="M8 12v8" />
-                  </svg>
-                  PayMe
-                </div>
+                <button class="pay-chip" type="button">Pay Now</button>
               </div>
             </div>
 
-            <div class="contact">Contact us if you need help.</div>
           </div>
 
           <div>
             <div class="qr-wrap">
               <div class="qr">
-                <img src="/wechat-group-qr.svg" alt="WeChat QR code" />
+                <img src="/wechat-qrcode.png" alt="WeChat QR code" />
               </div>
               <div class="qr-title">Scan &amp; Join the group</div>
-              <div class="qr-text">Share your machine code to activate premium access.</div>
-              <div class="qr-text">24/7 Support</div>
+              <div class="qr-text">Contact us in WeChat</div>
             </div>
           </div>
         </div>
       </div>
     </div>
   </body>
+  <script>
+    (function () {
+      const target = new Date("2026-01-15T00:00:00");
+
+      const getDigits = (value) => {
+        const text = String(value).padStart(2, "0");
+        const slice = text.slice(-2);
+        return [slice[0], slice[1]];
+      };
+      const slots = {
+        d1: document.querySelector('[data-slot="d1"]'),
+        d2: document.querySelector('[data-slot="d2"]'),
+        h1: document.querySelector('[data-slot="h1"]'),
+        h2: document.querySelector('[data-slot="h2"]'),
+        m1: document.querySelector('[data-slot="m1"]'),
+        m2: document.querySelector('[data-slot="m2"]')
+      };
+      const slotEls = Object.values(slots).filter(Boolean);
+      if (!slotEls.length) return;
+
+      const setDigits = (digits) => {
+        if (slots.d1) slots.d1.textContent = digits.d1;
+        if (slots.d2) slots.d2.textContent = digits.d2;
+        if (slots.h1) slots.h1.textContent = digits.h1;
+        if (slots.h2) slots.h2.textContent = digits.h2;
+        if (slots.m1) slots.m1.textContent = digits.m1;
+        if (slots.m2) slots.m2.textContent = digits.m2;
+      };
+
+      const spinToDigits = (digits, duration) => {
+        const start = Date.now();
+        const timer = setInterval(() => {
+          const elapsed = Date.now() - start;
+          if (elapsed >= duration) {
+            clearInterval(timer);
+            setDigits(digits);
+            return;
+          }
+          slotEls.forEach((el) => {
+            el.textContent = String(Math.floor(Math.random() * 10));
+          });
+        }, 60);
+      };
+      const tick = () => {
+        const now = new Date();
+        let diff = Math.floor((target.getTime() - now.getTime()) / 1000);
+        if (diff <= 0) {
+          setDigits({ d1: "0", d2: "0", h1: "0", h2: "0", m1: "0", m2: "0" });
+          return;
+        }
+        const days = Math.floor(diff / 86400);
+        diff %= 86400;
+        const hours = Math.floor(diff / 3600);
+        diff %= 3600;
+        const mins = Math.floor(diff / 60);
+        const dayDigits = getDigits(days);
+        const hourDigits = getDigits(hours);
+        const minDigits = getDigits(mins);
+        setDigits({
+          d1: dayDigits[0],
+          d2: dayDigits[1],
+          h1: hourDigits[0],
+          h2: hourDigits[1],
+          m1: minDigits[0],
+          m2: minDigits[1]
+        });
+      };
+
+      tick();
+      spinToDigits({
+        d1: slots.d1 ? slots.d1.textContent || "0" : "0",
+        d2: slots.d2 ? slots.d2.textContent || "0" : "0",
+        h1: slots.h1 ? slots.h1.textContent || "0" : "0",
+        h2: slots.h2 ? slots.h2.textContent || "0" : "0",
+        m1: slots.m1 ? slots.m1.textContent || "0" : "0",
+        m2: slots.m2 ? slots.m2.textContent || "0" : "0"
+      }, 900);
+      setInterval(tick, 1000);
+    })();
+  </script>
 </html>`;
 
 export async function GET() {

@@ -31,6 +31,7 @@ import {
   apiGetYoutubeImport,
   apiGetWhisperModelDownload,
   apiGetWhisperModelStatus,
+  apiResolveYoutubeStream,
   apiStartWhisperModelDownload,
   apiStartYoutubeImport,
   apiUpsertJobRecord,
@@ -789,6 +790,7 @@ export function App() {
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);
   const timelineTrackRef = useRef<HTMLDivElement | null>(null);
   const isGapPlaybackRef = useRef(false);
+  const youtubeResolveAttemptRef = useRef<Record<string, number>>({});
   const [timelineScrollLeft, setTimelineScrollLeft] = useState(0);
   const [timelineViewportWidth, setTimelineViewportWidth] = useState(0);
   const timelineScrollIdleRef = useRef<number | null>(null);
@@ -803,6 +805,123 @@ export function App() {
       return media.streamUrl ? "video" : media.kind;
     },
     [isOnline]
+  );
+  const applyMediaUpdate = useCallback(
+    (next: MediaItem) => {
+      setActiveMedia(next);
+      setTimelineClips((prev) =>
+        prev.map((clip) => (clip.media.id === next.id ? { ...clip, media: next } : clip))
+      );
+      if (next.source === "local") {
+        setLocalMedia((prev) => prev.map((item) => (item.id === next.id ? next : item)));
+      }
+    },
+    [setLocalMedia, setTimelineClips]
+  );
+  const resolveYoutubeStreamForMedia = useCallback(
+    async (media: MediaItem) => {
+      if (!media || media.externalSource?.type !== "youtube") return;
+      const url = media.externalSource.url ?? null;
+      if (!url) {
+        const failed: MediaItem = {
+          ...media,
+          streamUrl: null,
+          isResolvingStream: false,
+          streamError: "Missing YouTube URL for this item."
+        };
+        applyMediaUpdate(failed);
+        return;
+      }
+      const now = Date.now();
+      const lastAttempt = youtubeResolveAttemptRef.current[media.id] ?? 0;
+      if (now - lastAttempt < 4000) return;
+      youtubeResolveAttemptRef.current[media.id] = now;
+
+      const fallbackPreviewUrl = media.localPath
+        ? `/media?path=${encodeURIComponent(media.localPath)}`
+        : media.previewUrl ?? null;
+
+      const pending: MediaItem = {
+        ...media,
+        previewUrl: fallbackPreviewUrl,
+        streamUrl: null,
+        isResolvingStream: true,
+        streamError: null
+      };
+      applyMediaUpdate(pending);
+
+      try {
+        const payload = await apiResolveYoutubeStream(url);
+        const streamUrl = typeof payload.stream_url === "string" ? payload.stream_url : null;
+        if (!streamUrl) {
+          throw new Error("Failed to resolve YouTube stream.");
+        }
+        const nextSource = {
+          type: "youtube" as const,
+          url,
+          streamUrl,
+          title: payload.source?.title ?? media.externalSource?.title ?? null,
+          id: payload.source?.id ?? media.externalSource?.id ?? null,
+          thumbnailUrl:
+            typeof payload.thumbnail_url === "string"
+              ? payload.thumbnail_url
+              : media.externalSource?.thumbnailUrl ?? null
+        };
+        const resolved: MediaItem = {
+          ...media,
+          previewUrl: streamUrl,
+          streamUrl,
+          externalSource: nextSource,
+          isResolvingStream: false,
+          streamError: null
+        };
+        applyMediaUpdate(resolved);
+        if (resolved.source === "job" && resolved.jobId) {
+          const job = jobsById[resolved.jobId];
+          const existingUiState =
+            job?.uiState && typeof job.uiState === "object" ? (job.uiState as Record<string, any>) : {};
+          const nextUiState = {
+            ...existingUiState,
+            mediaSource: nextSource,
+            mediaSourceError: null
+          };
+          dispatch(updateJobUiState({ jobId: resolved.jobId, uiState: nextUiState }));
+          void apiUpsertJobRecord({ job_id: resolved.jobId, ui_state: nextUiState }).catch(() => undefined);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const nextSource = {
+          type: "youtube" as const,
+          url,
+          streamUrl: null,
+          title: media.externalSource?.title ?? null,
+          id: media.externalSource?.id ?? null,
+          thumbnailUrl: media.externalSource?.thumbnailUrl ?? null
+        };
+        const failed: MediaItem = {
+          ...media,
+          previewUrl: fallbackPreviewUrl,
+          streamUrl: null,
+          externalSource: nextSource,
+          isResolvingStream: false,
+          streamError: message || "Unable to reach YouTube right now. Please try again later."
+        };
+        applyMediaUpdate(failed);
+        if (failed.source === "job" && failed.jobId) {
+          const job = jobsById[failed.jobId];
+          const existingUiState =
+            job?.uiState && typeof job.uiState === "object" ? (job.uiState as Record<string, any>) : {};
+          const nextUiState = {
+            ...existingUiState,
+            mediaSource: nextSource,
+            mediaSourceError: failed.streamError
+          };
+          dispatch(updateJobUiState({ jobId: failed.jobId, uiState: nextUiState }));
+          void apiUpsertJobRecord({ job_id: failed.jobId, ui_state: nextUiState }).catch(() => undefined);
+        }
+      }
+    },
+    [applyMediaUpdate, dispatch, jobsById]
   );
   const captionDragRef = useRef<{
     pointerId: number;
@@ -2942,6 +3061,26 @@ export function App() {
     if (!mediaEl) return;
     schedulePendingPlay(mediaEl);
   }, [getActiveMediaEl, activeMedia?.id, activePreviewKind, resolvedPreviewUrl, schedulePendingPlay]);
+
+  useEffect(() => {
+    if (!activeMedia) return;
+    if (activeMedia.externalSource?.type !== "youtube") return;
+    if (!isOnline) return;
+    if (activeMedia.isResolvingStream) return;
+    const existingStream = activeMedia.streamUrl ?? activeMedia.externalSource?.streamUrl ?? null;
+    if (existingStream && !activeMedia.streamError) return;
+    void resolveYoutubeStreamForMedia(activeMedia);
+  }, [
+    activeMedia,
+    activeMedia?.externalSource?.streamUrl,
+    activeMedia?.externalSource?.type,
+    activeMedia?.id,
+    activeMedia?.isResolvingStream,
+    activeMedia?.streamError,
+    activeMedia?.streamUrl,
+    isOnline,
+    resolveYoutubeStreamForMedia
+  ]);
   useEffect(() => {
     if (!activeMedia) {
       setPreviewLoading(false);
@@ -2970,6 +3109,16 @@ export function App() {
     const handleError = () => {
       setPreviewLoading(false);
       setPreviewError("Preview failed to load.");
+      if (activeMedia?.externalSource?.type === "youtube" && !activeMedia.streamError) {
+        const nextMedia = { ...activeMedia, streamError: "YouTube preview failed to load." };
+        setActiveMedia(nextMedia);
+        setTimelineClips((prev) =>
+          prev.map((clip) => (clip.media.id === nextMedia.id ? { ...clip, media: nextMedia } : clip))
+        );
+        if (nextMedia.source === "local") {
+          setLocalMedia((prev) => prev.map((item) => (item.id === nextMedia.id ? nextMedia : item)));
+        }
+      }
     };
     mediaEl.addEventListener("loadstart", handleStart);
     mediaEl.addEventListener("loadeddata", handleReady);
@@ -2981,7 +3130,15 @@ export function App() {
       mediaEl.removeEventListener("canplay", handleReady);
       mediaEl.removeEventListener("error", handleError);
     };
-  }, [getActiveMediaEl, activeMedia?.id, activePreviewKind, resolvedPreviewUrl, schedulePendingPlay]);
+  }, [
+    activeMedia,
+    activePreviewKind,
+    getActiveMediaEl,
+    resolvedPreviewUrl,
+    schedulePendingPlay,
+    setLocalMedia,
+    setTimelineClips
+  ]);
 
   const activeVideoSrc = resolvedPreviewUrl && activePreviewKind === "video" ? resolvedPreviewUrl : null;
   const audioPreviewSrc = activePreviewKind === "audio" ? resolvedPreviewUrl : null;
@@ -3500,10 +3657,11 @@ export function App() {
     if (!clipTimeline.length && !activeMedia) {
       return;
     }
-    if (!resolvedPreviewUrl && activeMedia?.externalSource?.type === "youtube") {
+    if (activeMedia?.externalSource?.type === "youtube" && (activeMedia.streamError || !resolvedPreviewUrl)) {
       pendingPlayRef.current = true;
       pendingPlayTargetRef.current = activeMedia?.id ?? null;
       setPlayback((prev) => ({ ...prev, isPlaying: true }));
+      void resolveYoutubeStreamForMedia(activeMedia);
       return;
     }
     if (clipTimeline.length) {

@@ -116,6 +116,21 @@ function buildImportedJobId(path: string, size?: number | null) {
   return `media-${hashStableId(`${path}::${size ?? ""}`)}`;
 }
 
+function isYoutubeStreamExpired(streamUrl?: string | null) {
+  if (!streamUrl) return false;
+  try {
+    const url = new URL(streamUrl);
+    const expireParam = url.searchParams.get("expire");
+    if (!expireParam) return false;
+    const expireSec = Number(expireParam);
+    if (!Number.isFinite(expireSec)) return false;
+    const nowSec = Math.floor(Date.now() / 1000);
+    return expireSec <= nowSec + 30;
+  } catch {
+    return false;
+  }
+}
+
 export const UploadTab = memo(forwardRef(function UploadTab(
   props: UploadTabProps,
   ref: ForwardedRef<UploadTabHandle>
@@ -1082,7 +1097,9 @@ export const UploadTab = memo(forwardRef(function UploadTab(
             const isYoutube = item.externalSource?.type === "youtube";
             if (isYoutube) {
               const existingStreamUrl = item.streamUrl ?? item.externalSource?.streamUrl ?? null;
-              if (existingStreamUrl) {
+              const streamExpired = existingStreamUrl ? isYoutubeStreamExpired(existingStreamUrl) : false;
+              const shouldUseExistingStream = Boolean(existingStreamUrl) && !streamExpired && !item.streamError;
+              if (shouldUseExistingStream) {
                 const stableSource = item.externalSource
                   ? { ...item.externalSource, streamUrl: existingStreamUrl }
                   : item.externalSource;
@@ -1098,15 +1115,17 @@ export const UploadTab = memo(forwardRef(function UploadTab(
                 props.onAddToTimeline?.([stableItem]);
                 return;
               }
+              const fallbackPreviewUrl = item.localPath ? toFileUrl(item.localPath) : item.previewUrl ?? null;
               const pendingSource = item.externalSource
                 ? { ...item.externalSource, streamUrl: null }
                 : item.externalSource;
               const pendingItem: MediaItem = {
                 ...item,
-                previewUrl: null,
+                previewUrl: fallbackPreviewUrl,
                 streamUrl: null,
                 externalSource: pendingSource,
-                isResolvingStream: true
+                isResolvingStream: true,
+                streamError: null
               };
               setSelectedId(pendingItem.id);
               selectedIdRef.current = pendingItem.id;
@@ -1114,7 +1133,11 @@ export const UploadTab = memo(forwardRef(function UploadTab(
               const resolveToken = ++resolveTokenRef.current;
               const requestedId = pendingItem.id;
               const requestedJobId = item.source === "job" ? item.jobId ?? null : null;
-              void resolveYoutubeStream(item).then((refreshed) => {
+              const resolveTarget: MediaItem = {
+                ...item,
+                previewUrl: fallbackPreviewUrl ?? null
+              };
+              void resolveYoutubeStream(resolveTarget).then((refreshed) => {
                 if (!refreshed) return;
                 if (resolveTokenRef.current !== resolveToken) return;
                 if (selectedIdRef.current !== requestedId) return;
