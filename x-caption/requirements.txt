@@ -11,3 +11,5 @@ certifi>=2024.2.2
 yt-dlp>=2024.3.10
 # Native desktop shell
 pywebview>=4.4.2
+# Premium license verification
+cryptography>=41.0.0

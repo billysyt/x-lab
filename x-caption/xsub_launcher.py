@@ -26,6 +26,8 @@ import subprocess
 import uuid
 from pathlib import Path
 
+from native_premium import activate_premium_key, check_premium_status
+
 IS_WINDOWS = sys.platform == "win32"
 
 
@@ -507,6 +509,27 @@ def open_browser(port: int = 11220, width: int = 1480, height: int = 900) -> str
             def getMachineId(self):
                 """Alias for camelCase access from JavaScript."""
                 return self.get_machine_id()
+
+            def get_premium_status(self):
+                machine_id = self.get_machine_id().get("id")
+                if not machine_id:
+                    return {"success": False, "premium": False, "error": "machine_id_missing"}
+                premium, reason = check_premium_status(machine_id)
+                return {"success": True, "premium": premium, "reason": reason}
+
+            def getPremiumStatus(self):
+                """Alias for camelCase access from JavaScript."""
+                return self.get_premium_status()
+
+            def set_premium_key(self, license_key: str):
+                machine_id = self.get_machine_id().get("id")
+                if not machine_id:
+                    return {"success": False, "error": "machine_id_missing"}
+                return activate_premium_key(machine_id, license_key)
+
+            def setPremiumKey(self, license_key: str):
+                """Alias for camelCase access from JavaScript."""
+                return self.set_premium_key(license_key)
 
             def save_transcript(self, filename: str, content: str):
                 """

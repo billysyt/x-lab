@@ -537,6 +537,9 @@ export function App() {
   const [showExportModal, setShowExportModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const [isPremium, setIsPremium] = useState(false);
+  const [premiumStatusLoading, setPremiumStatusLoading] = useState(true);
+  const [premiumKeySubmitting, setPremiumKeySubmitting] = useState(false);
   const [premiumWebviewStatus, setPremiumWebviewStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [premiumWebviewError, setPremiumWebviewError] = useState<string | null>(null);
   const [machineId, setMachineId] = useState<string | null>(null);
@@ -1783,8 +1786,9 @@ export function App() {
   }, [exportSegments, notify, openCcConverter, saveTextFile, selectedJob?.filename]);
 
   const handleOpenPremiumModal = useCallback(() => {
+    if (isPremium) return;
     setShowPremiumModal(true);
-  }, []);
+  }, [isPremium]);
 
   const handleOpenFiles = useCallback(() => {
     if (isCompact) {
@@ -2446,6 +2450,43 @@ export function App() {
     return getLocalMachineId();
   }, [callApiMethod]);
 
+  const refreshPremiumStatus = useCallback(async () => {
+    const win = typeof window !== "undefined" ? (window as any) : null;
+    const api = win?.pywebview?.api;
+    if (!api) {
+      setIsPremium(false);
+      setPremiumStatusLoading(false);
+      return;
+    }
+    setPremiumStatusLoading(true);
+    try {
+      const result = await Promise.resolve(callApiMethod(api, ["get_premium_status", "getPremiumStatus"]));
+      if (result && result.success !== false && typeof result.premium === "boolean") {
+        setIsPremium(result.premium);
+      } else {
+        setIsPremium(false);
+      }
+    } catch {
+      setIsPremium(false);
+    } finally {
+      setPremiumStatusLoading(false);
+    }
+  }, [callApiMethod]);
+
+  useEffect(() => {
+    let active = true;
+    const run = () => {
+      if (!active) return;
+      void refreshPremiumStatus();
+    };
+    run();
+    window.addEventListener("pywebviewready", run as EventListener);
+    return () => {
+      active = false;
+      window.removeEventListener("pywebviewready", run as EventListener);
+    };
+  }, [refreshPremiumStatus]);
+
   useEffect(() => {
     if (!showPremiumModal) return;
     let active = true;
@@ -2560,6 +2601,44 @@ export function App() {
       }, 1600);
     }
   }, [machineId, machineIdLoading]);
+
+  const handleConfirmPremiumKey = useCallback(async () => {
+    if (premiumKeySubmitting || isPremium) return;
+    const key = premiumKey.trim();
+    if (!key) return;
+    const win = typeof window !== "undefined" ? (window as any) : null;
+    const api = win?.pywebview?.api;
+    if (!api) {
+      notify("Premium activation is only available in the desktop app.", "error");
+      return;
+    }
+    setPremiumKeySubmitting(true);
+    try {
+      const result = await Promise.resolve(callApiMethod(api, ["set_premium_key", "setPremiumKey"], key));
+      if (result && result.success !== false && result.premium === true) {
+        setIsPremium(true);
+        setPremiumKey("");
+        setShowPremiumModal(false);
+        notify("Premium activated for this machine.", "success");
+        void refreshPremiumStatus();
+        return;
+      }
+      const errorMap: Record<string, string> = {
+        crypto_unavailable: "Premium verification is unavailable on this build.",
+        public_key_missing: "Premium verification is not configured for this app build.",
+        machine_id_missing: "Unable to read machine code.",
+        invalid_signature: "Invalid premium key.",
+        invalid_key_format: "Invalid premium key."
+      };
+      const rawError = typeof result?.error === "string" ? result.error.trim() : "";
+      const message = rawError ? errorMap[rawError] ?? rawError : "Invalid premium key.";
+      notify(message, "error");
+    } catch {
+      notify("Failed to verify premium key.", "error");
+    } finally {
+      setPremiumKeySubmitting(false);
+    }
+  }, [premiumKeySubmitting, isPremium, premiumKey, callApiMethod, notify, refreshPremiumStatus]);
 
   useEffect(() => {
     return () => {
@@ -5353,12 +5432,19 @@ export function App() {
                   Export
                 </button>
                 <button
-                  className="pywebview-no-drag inline-flex h-7 items-center justify-center gap-1.5 rounded-md bg-gradient-to-r from-[#2563eb] via-[#4338ca] to-[#6d28d9] px-2 text-[11px] font-semibold text-white shadow-[0_10px_24px_rgba(76,29,149,0.35)] transition hover:brightness-110"
+                  className={cn(
+                    "pywebview-no-drag inline-flex h-7 items-center justify-center gap-1.5 rounded-md px-2 text-[11px] font-semibold transition",
+                    isPremium
+                      ? "cursor-default bg-emerald-500/20 text-emerald-200"
+                      : "bg-gradient-to-r from-[#2563eb] via-[#4338ca] to-[#6d28d9] text-white shadow-[0_10px_24px_rgba(76,29,149,0.35)] hover:brightness-110",
+                    premiumStatusLoading && "opacity-60"
+                  )}
                   onClick={handleOpenPremiumModal}
                   type="button"
+                  disabled={isPremium || premiumStatusLoading}
                 >
-                  <AppIcon name="aiStar" className="text-[11px]" />
-                  Get Premium
+                  <AppIcon name={isPremium ? "user" : "aiStar"} className="text-[11px]" />
+                  {isPremium ? "Premium Member" : "Get Premium"}
                 </button>
                 {showCustomWindowControls && !isMac ? (
                   <div className="ml-2 flex items-center gap-1 pl-2">
@@ -5427,15 +5513,20 @@ export function App() {
                 Export
               </button>
               <button
-                className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#1b1b22]"
+                className={cn(
+                  "flex w-full items-center gap-2 px-3 py-2 text-left",
+                  isPremium || premiumStatusLoading ? "cursor-not-allowed opacity-60" : "hover:bg-[#1b1b22]"
+                )}
                 onClick={() => {
+                  if (isPremium || premiumStatusLoading) return;
                   setIsHeaderMenuOpen(false);
                   handleOpenPremiumModal();
                 }}
                 type="button"
+                disabled={isPremium || premiumStatusLoading}
               >
-                <AppIcon name="aiStar" />
-                Get Premium
+                <AppIcon name={isPremium ? "user" : "aiStar"} />
+                {isPremium ? "Premium Member" : "Get Premium"}
               </button>
               <button
                 className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#1b1b22]"
@@ -6497,17 +6588,30 @@ export function App() {
                     type="text"
                     value={premiumKey}
                     onChange={(event) => setPremiumKey(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void handleConfirmPremiumKey();
+                      }
+                    }}
                     placeholder="Enter your key"
                     className="w-full flex-1 rounded-full border-0 bg-[#151515] px-4 py-2 text-[11px] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-[#3b82f6]/60"
+                    disabled={isPremium || premiumKeySubmitting}
                   />
                   <button
                     className="rounded-full bg-white px-4 py-2 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95 disabled:opacity-60"
                     type="button"
-                    disabled={!premiumKey.trim()}
+                    onClick={() => void handleConfirmPremiumKey()}
+                    disabled={!premiumKey.trim() || isPremium || premiumKeySubmitting}
                   >
-                    Confirm
+                    {premiumKeySubmitting ? "Verifying..." : isPremium ? "Activated" : "Confirm"}
                   </button>
                 </div>
+                {isPremium ? (
+                  <p className="mt-2 text-[11px] font-semibold text-emerald-300">
+                    Premium is active on this machine.
+                  </p>
+                ) : null}
               </div>
             </div>
           </div>
