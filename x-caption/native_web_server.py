@@ -8,6 +8,8 @@ import os
 import sys
 import logging
 import json
+import zlib
+import hashlib
 import uuid
 import tempfile
 import time
@@ -118,19 +120,46 @@ youtube_download_lock = threading.Lock()
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 update_cache_lock = threading.Lock()
-UPDATE_CACHE_FILENAME = "update_cache.json"
+_UPDATE_CACHE_TOKEN = hashlib.sha256(b"x-caption-update-cache").hexdigest()[:16]
+UPDATE_CACHE_FILENAME = f".{_UPDATE_CACHE_TOKEN}.dll"
+LEGACY_UPDATE_CACHE_FILENAME = "update_cache.json"
 
 
 def _get_update_cache_path() -> Path:
     return get_data_dir() / UPDATE_CACHE_FILENAME
 
 
+def _get_legacy_update_cache_path() -> Path:
+    return get_data_dir() / LEGACY_UPDATE_CACHE_FILENAME
+
+
 def _read_update_cache() -> Dict[str, Any]:
     path = _get_update_cache_path()
     if not path.exists():
+        legacy_path = _get_legacy_update_cache_path()
+        if not legacy_path.exists():
+            return {"projects": {}}
+        try:
+            legacy_data = json.loads(legacy_path.read_text(encoding="utf-8"))
+            if isinstance(legacy_data, dict):
+                if "projects" not in legacy_data or not isinstance(legacy_data.get("projects"), dict):
+                    legacy_data["projects"] = {}
+                _write_update_cache(legacy_data)
+                try:
+                    legacy_path.unlink()
+                except Exception:
+                    pass
+                return legacy_data
+        except Exception as exc:
+            logger.warning("Failed to read legacy update cache: %s", exc)
         return {"projects": {}}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        raw = path.read_bytes()
+        try:
+            decoded = zlib.decompress(raw).decode("utf-8")
+        except Exception:
+            decoded = raw.decode("utf-8")
+        data = json.loads(decoded)
         if isinstance(data, dict):
             if "projects" not in data or not isinstance(data.get("projects"), dict):
                 data["projects"] = {}
@@ -144,7 +173,8 @@ def _write_update_cache(data: Dict[str, Any]) -> None:
     path = _get_update_cache_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(".tmp")
-    tmp_path.write_text(json.dumps(data, ensure_ascii=True, indent=2), encoding="utf-8")
+    payload = json.dumps(data, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+    tmp_path.write_bytes(zlib.compress(payload))
     tmp_path.replace(path)
 
 
