@@ -289,6 +289,23 @@ function getLocalMachineId(): string | null {
   return null;
 }
 
+function formatTimestamp(value: string | null | undefined): string {
+  if (!value) return "Unknown";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Unknown";
+  try {
+    return parsed.toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  } catch {
+    return parsed.toISOString();
+  }
+}
+
 function normalizeVersion(value: string) {
   return value.trim().replace(/^v/i, "");
 }
@@ -537,9 +554,14 @@ export function App() {
   const [showExportModal, setShowExportModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const [showPremiumStatusModal, setShowPremiumStatusModal] = useState(false);
   const [isPremium, setIsPremium] = useState(false);
   const [premiumStatusLoading, setPremiumStatusLoading] = useState(true);
   const [premiumKeySubmitting, setPremiumKeySubmitting] = useState(false);
+  const [premiumDetails, setPremiumDetails] = useState<{
+    machineId: string | null;
+    activatedAt: string | null;
+  } | null>(null);
   const [premiumWebviewStatus, setPremiumWebviewStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [premiumWebviewError, setPremiumWebviewError] = useState<string | null>(null);
   const [machineId, setMachineId] = useState<string | null>(null);
@@ -1785,11 +1807,6 @@ export function App() {
     }
   }, [exportSegments, notify, openCcConverter, saveTextFile, selectedJob?.filename]);
 
-  const handleOpenPremiumModal = useCallback(() => {
-    if (isPremium) return;
-    setShowPremiumModal(true);
-  }, [isPremium]);
-
   const handleOpenFiles = useCallback(() => {
     if (isCompact) {
       setIsLeftDrawerOpen(true);
@@ -2455,6 +2472,7 @@ export function App() {
     const api = win?.pywebview?.api;
     if (!api) {
       setIsPremium(false);
+      setPremiumDetails(null);
       setPremiumStatusLoading(false);
       return;
     }
@@ -2463,11 +2481,26 @@ export function App() {
       const result = await Promise.resolve(callApiMethod(api, ["get_premium_status", "getPremiumStatus"]));
       if (result && result.success !== false && typeof result.premium === "boolean") {
         setIsPremium(result.premium);
+        const license = result.license;
+        const machineFromResult =
+          typeof result.machine_id === "string" && result.machine_id.trim() ? result.machine_id : null;
+        if (machineFromResult) {
+          setMachineId(machineFromResult);
+        }
+        setPremiumDetails({
+          machineId:
+            (typeof license?.machine_id === "string" && license.machine_id.trim()
+              ? license.machine_id
+              : machineFromResult) ?? null,
+          activatedAt: typeof license?.activated_at === "string" ? license.activated_at : null
+        });
       } else {
         setIsPremium(false);
+        setPremiumDetails(null);
       }
     } catch {
       setIsPremium(false);
+      setPremiumDetails(null);
     } finally {
       setPremiumStatusLoading(false);
     }
@@ -2486,6 +2519,17 @@ export function App() {
       window.removeEventListener("pywebviewready", run as EventListener);
     };
   }, [refreshPremiumStatus]);
+
+  const handleOpenPremiumModal = useCallback(() => {
+    if (isPremium) {
+      if (!premiumDetails) {
+        void refreshPremiumStatus();
+      }
+      setShowPremiumStatusModal(true);
+      return;
+    }
+    setShowPremiumModal(true);
+  }, [isPremium, premiumDetails, refreshPremiumStatus]);
 
   useEffect(() => {
     if (!showPremiumModal) return;
@@ -2509,6 +2553,35 @@ export function App() {
       active = false;
     };
   }, [fetchMachineId, showPremiumModal]);
+
+  useEffect(() => {
+    if (!showPremiumStatusModal) return;
+    if (!machineId && premiumDetails?.machineId) {
+      setMachineId(premiumDetails.machineId);
+      setMachineIdLoading(false);
+      return;
+    }
+    if (machineId) return;
+    let active = true;
+    setMachineIdLoading(true);
+    setMachineIdCopied(false);
+    fetchMachineId()
+      .then((id) => {
+        if (!active) return;
+        setMachineId(id);
+      })
+      .catch(() => {
+        if (!active) return;
+        setMachineId(getLocalMachineId());
+      })
+      .finally(() => {
+        if (!active) return;
+        setMachineIdLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [fetchMachineId, machineId, premiumDetails, showPremiumStatusModal]);
 
   useEffect(() => {
     if (!showPremiumModal) {
@@ -2617,8 +2690,17 @@ export function App() {
       const result = await Promise.resolve(callApiMethod(api, ["set_premium_key", "setPremiumKey"], key));
       if (result && result.success !== false && result.premium === true) {
         setIsPremium(true);
+        const license = result.license;
+        setPremiumDetails({
+          machineId:
+            (typeof license?.machine_id === "string" && license.machine_id.trim()
+              ? license.machine_id
+              : machineId) ?? null,
+          activatedAt: typeof license?.activated_at === "string" ? license.activated_at : null
+        });
         setPremiumKey("");
         setShowPremiumModal(false);
+        setShowPremiumStatusModal(true);
         notify("Premium activated for this machine.", "success");
         void refreshPremiumStatus();
         return;
@@ -2638,7 +2720,7 @@ export function App() {
     } finally {
       setPremiumKeySubmitting(false);
     }
-  }, [premiumKeySubmitting, isPremium, premiumKey, callApiMethod, notify, refreshPremiumStatus]);
+  }, [premiumKeySubmitting, isPremium, premiumKey, callApiMethod, notify, refreshPremiumStatus, machineId]);
 
   useEffect(() => {
     return () => {
@@ -5435,13 +5517,13 @@ export function App() {
                   className={cn(
                     "pywebview-no-drag inline-flex h-7 items-center justify-center gap-1.5 rounded-md px-2 text-[11px] font-semibold transition",
                     isPremium
-                      ? "cursor-default bg-emerald-500/20 text-emerald-200"
+                      ? "bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/25"
                       : "bg-gradient-to-r from-[#2563eb] via-[#4338ca] to-[#6d28d9] text-white shadow-[0_10px_24px_rgba(76,29,149,0.35)] hover:brightness-110",
                     premiumStatusLoading && "opacity-60"
                   )}
                   onClick={handleOpenPremiumModal}
                   type="button"
-                  disabled={isPremium || premiumStatusLoading}
+                  disabled={premiumStatusLoading}
                 >
                   <AppIcon name={isPremium ? "user" : "aiStar"} className="text-[11px]" />
                   {isPremium ? "Premium Member" : "Get Premium"}
@@ -5515,15 +5597,15 @@ export function App() {
               <button
                 className={cn(
                   "flex w-full items-center gap-2 px-3 py-2 text-left",
-                  isPremium || premiumStatusLoading ? "cursor-not-allowed opacity-60" : "hover:bg-[#1b1b22]"
+                  premiumStatusLoading ? "cursor-not-allowed opacity-60" : "hover:bg-[#1b1b22]"
                 )}
                 onClick={() => {
-                  if (isPremium || premiumStatusLoading) return;
+                  if (premiumStatusLoading) return;
                   setIsHeaderMenuOpen(false);
                   handleOpenPremiumModal();
                 }}
                 type="button"
-                disabled={isPremium || premiumStatusLoading}
+                disabled={premiumStatusLoading}
               >
                 <AppIcon name={isPremium ? "user" : "aiStar"} />
                 {isPremium ? "Premium Member" : "Get Premium"}
@@ -6612,6 +6694,71 @@ export function App() {
                     Premium is active on this machine.
                   </p>
                 ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showPremiumStatusModal ? (
+        <div
+          className="fixed inset-0 z-[131] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          onClick={() => setShowPremiumStatusModal(false)}
+        >
+          <div
+            className="w-full max-w-[420px] overflow-hidden rounded-2xl border border-emerald-500/20 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
+            role="dialog"
+            aria-modal="true"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="p-5">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-200">
+                  <AppIcon name="user" className="text-[14px]" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold text-slate-100">Premium Member</div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                    This machine is activated for Premium.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-2 text-[11px] text-slate-300">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-slate-500">Machine code</span>
+                  <span className="max-w-[230px] break-all text-right font-mono text-slate-200">
+                    {premiumDetails?.machineId ?? machineId ?? "Unknown"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-slate-500">Activated</span>
+                  <span className="text-slate-200">
+                    {formatTimestamp(premiumDetails?.activatedAt)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-slate-500">Expires</span>
+                  <span className="text-emerald-300">Lifetime</span>
+                </div>
+              </div>
+
+              <div className="mt-4 flex items-center justify-between">
+                <button
+                  className="inline-flex h-8 items-center justify-center rounded-full border border-emerald-500/30 px-3 text-[11px] font-semibold text-emerald-200 transition hover:bg-emerald-500/10 disabled:opacity-60"
+                  onClick={handleCopyMachineId}
+                  type="button"
+                  disabled={!machineId || machineIdLoading}
+                >
+                  Copy machine code
+                </button>
+                <button
+                  className="inline-flex h-8 items-center justify-center rounded-full bg-white px-4 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95"
+                  onClick={() => setShowPremiumStatusModal(false)}
+                  type="button"
+                >
+                  Close
+                </button>
               </div>
             </div>
           </div>

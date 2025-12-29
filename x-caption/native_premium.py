@@ -78,7 +78,7 @@ def load_license() -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
-def save_license(license_key: str, machine_id: str) -> Path:
+def save_license(license_key: str, machine_id: str) -> dict:
     payload = {
         "version": 1,
         "machine_id": machine_id,
@@ -87,7 +87,7 @@ def save_license(license_key: str, machine_id: str) -> Path:
     }
     path = _license_path()
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    return path
+    return payload
 
 
 def verify_license_key(machine_id: str, license_key: str) -> tuple[bool, str | None]:
@@ -127,5 +127,30 @@ def activate_premium_key(machine_id: str, license_key: str) -> dict:
     ok, reason = verify_license_key(machine_id, license_key)
     if not ok:
         return {"success": False, "error": reason}
-    save_license(license_key, machine_id)
-    return {"success": True, "premium": True}
+    payload = save_license(license_key, machine_id)
+    return {
+        "success": True,
+        "premium": True,
+        "license": {
+            "machine_id": payload.get("machine_id"),
+            "activated_at": payload.get("saved_at"),
+            "version": payload.get("version"),
+        },
+    }
+
+
+def get_premium_details(machine_id: str) -> dict:
+    payload = load_license()
+    license_info = None
+    if isinstance(payload, dict):
+        license_info = {
+            "machine_id": payload.get("machine_id"),
+            "activated_at": payload.get("saved_at"),
+            "version": payload.get("version"),
+        }
+    premium, reason = check_premium_status(machine_id)
+    return {
+        "premium": premium,
+        "reason": reason,
+        "license": license_info,
+    }
