@@ -1,10 +1,10 @@
-import { useOverlayState } from "../../shell/hooks/useOverlayState";
-import { useTranscriptActions } from "../../transcript/hooks/useTranscriptActions";
+import { useOverlayState } from "../../components/shell/hooks/useOverlayState";
+import { useTranscriptActions } from "../../components/transcript/hooks/useTranscriptActions";
 import type { RefObject } from "react";
-import type { UploadTabHandle } from "../../upload/components/UploadTab";
-import type { AppDispatch } from "../../../store";
-import type { Job } from "../../../types";
-import type { MediaItem } from "../../upload/components/UploadTab";
+import type { UploadTabHandle } from "../../components/upload/components/UploadTab";
+import type { AppDispatch } from "../../store";
+import type { Job } from "../../types";
+import type { MediaItem } from "../../components/upload/components/UploadTab";
 
 export function useEditorImportState(params: {
   dispatch: AppDispatch;

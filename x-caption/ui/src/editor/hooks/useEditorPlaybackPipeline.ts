@@ -1,11 +1,11 @@
-import { useTimelineDerivedState } from "../../timeline/hooks/useTimelineDerivedState";
-import { usePlaybackState } from "../../player/hooks/usePlaybackState";
-import { useTimelineViewState } from "../../timeline/hooks/useTimelineViewState";
-import { selectJob } from "../../jobs/jobsSlice";
-import type { AppDispatch } from "../../../store";
-import type { Job } from "../../../types";
-import type { useMediaState } from "../../upload/hooks/useMediaState";
-import type { useSegmentsState } from "../../transcript/hooks/useSegmentsState";
+import { useTimelineDerivedState } from "../../components/timeline/hooks/useTimelineDerivedState";
+import { usePlaybackState } from "../../components/player/hooks/usePlaybackState";
+import { useTimelineViewState } from "../../components/timeline/hooks/useTimelineViewState";
+import { selectJob } from "../../components/jobs/jobsSlice";
+import type { AppDispatch } from "../../store";
+import type { Job } from "../../types";
+import type { useMediaState } from "../../components/upload/hooks/useMediaState";
+import type { useSegmentsState } from "../../components/transcript/hooks/useSegmentsState";
 
 export function useEditorPlaybackPipeline(params: {
   dispatch: AppDispatch;

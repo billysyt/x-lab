@@ -1,7 +1,7 @@
 import { useCallback } from "react";
-import { setChineseStyle, setLanguage, type SettingsState } from "../../settings/settingsSlice";
-import { setExportLanguage } from "../../transcript/transcriptSlice";
-import type { AppDispatch } from "../../../store";
+import { setChineseStyle, setLanguage, type SettingsState } from "../../components/settings/settingsSlice";
+import { setExportLanguage } from "../../components/transcript/transcriptSlice";
+import type { AppDispatch } from "../../store";
 
 type EditorSettingsActionsParams = {
   dispatch: AppDispatch;

@@ -1,21 +1,21 @@
 import type { RefObject } from "react";
-import type { UploadTabHandle } from "../../upload/components/UploadTab";
-import type { ToastType } from "../../../components/common/ToastHost";
-import type { SettingsState } from "../../settings/settingsSlice";
-import { MediaSidebar } from "../../upload/components/MediaSidebar";
-import { useCaptionState } from "../../transcript/hooks/useCaptionState";
-import { usePlayerState } from "../../player/hooks/usePlayerState";
-import { useTimelineState } from "../../timeline/hooks/useTimelineState";
-import { useActiveJobState } from "../../jobs/hooks/useActiveJobState";
-import { useExportHandlers } from "../../export/hooks/useExportHandlers";
-import { useMediaState } from "../../upload/hooks/useMediaState";
-import { useOverlayState } from "../../shell/hooks/useOverlayState";
-import { usePlaybackState } from "../../player/hooks/usePlaybackState";
-import { useSegmentsState } from "../../transcript/hooks/useSegmentsState";
-import { useSubtitleState } from "../../player/hooks/useSubtitleState";
-import { useTimelineViewState } from "../../timeline/hooks/useTimelineViewState";
-import { useTranscriptActions } from "../../transcript/hooks/useTranscriptActions";
-import { useWindowState } from "../../shell/hooks/useWindowState";
+import type { UploadTabHandle } from "../../components/upload/components/UploadTab";
+import type { ToastType } from "../../components/common/ToastHost";
+import type { SettingsState } from "../../components/settings/settingsSlice";
+import { MediaSidebar } from "../../components/upload/components/MediaSidebar";
+import { useCaptionState } from "../../components/transcript/hooks/useCaptionState";
+import { usePlayerState } from "../../components/player/hooks/usePlayerState";
+import { useTimelineState } from "../../components/timeline/hooks/useTimelineState";
+import { useActiveJobState } from "../../components/jobs/hooks/useActiveJobState";
+import { useExportHandlers } from "../../components/export/hooks/useExportHandlers";
+import { useMediaState } from "../../components/upload/hooks/useMediaState";
+import { useOverlayState } from "../../components/shell/hooks/useOverlayState";
+import { usePlaybackState } from "../../components/player/hooks/usePlaybackState";
+import { useSegmentsState } from "../../components/transcript/hooks/useSegmentsState";
+import { useSubtitleState } from "../../components/player/hooks/useSubtitleState";
+import { useTimelineViewState } from "../../components/timeline/hooks/useTimelineViewState";
+import { useTranscriptActions } from "../../components/transcript/hooks/useTranscriptActions";
+import { useWindowState } from "../../components/shell/hooks/useWindowState";
 
 type EditorPanelsLayout = {
   isCompact: boolean;

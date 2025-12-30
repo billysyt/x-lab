@@ -6,9 +6,9 @@ import {
   setIsPlayerModalVisible as setIsPlayerModalVisibleAction,
   setIsTranscriptEdit as setIsTranscriptEditAction,
   setShowExportModal as setShowExportModalAction
-} from "../../ui/uiSlice";
-import type { ToastType } from "../../../components/common/ToastHost";
-import type { AppDispatch } from "../../../store";
+} from "../../components/ui/uiSlice";
+import type { ToastType } from "../../components/common/ToastHost";
+import type { AppDispatch } from "../../store";
 
 type EditorUiActionsParams = {
   dispatch: AppDispatch;

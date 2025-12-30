@@ -1,8 +1,8 @@
 import { useCallback, useState, type RefObject } from "react";
-import type { SettingsState } from "../../settings/settingsSlice";
-import { formatBytes } from "../../../lib/format";
-import { callApiMethod } from "../../../lib/pywebview";
-import type { UploadTabHandle } from "../../upload/components/UploadTab";
+import type { SettingsState } from "../../components/settings/settingsSlice";
+import { formatBytes } from "../../lib/format";
+import { callApiMethod } from "../../lib/pywebview";
+import type { UploadTabHandle } from "../../components/upload/components/UploadTab";
 
 type EditorUiParams = {
   isCompact: boolean;

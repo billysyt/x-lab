@@ -1,4 +1,4 @@
-import { useEditorState } from "../components/editor/hooks/useEditorState";
+import { useEditorState } from "../editor/hooks/useEditorState";
 
 export function useAppState() {
   return useEditorState();

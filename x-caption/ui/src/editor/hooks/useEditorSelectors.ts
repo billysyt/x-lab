@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useAppSelector } from "../../../hooks";
+import { useAppSelector } from "../../hooks";
 
 export function useEditorSelectors() {
   const settings = useAppSelector((s) => s.settings);
