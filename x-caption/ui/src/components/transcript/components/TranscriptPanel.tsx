@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { apiConvertChinese, apiEditSegment } from "../../../api/sttApi";
+import { apiConvertChinese } from "../../../api/exportApi";
+import { apiEditSegment } from "../../../api/segmentsApi";
 import { fetchJobDetails, selectJobById, updateSegmentText } from "../../jobs/jobsSlice";
 import { useAppDispatch, useAppSelector } from "../../../hooks";
 import type { ExportLanguage, Job, TranscriptSegment } from "../../../types";

@@ -4,7 +4,7 @@ import { useAppDispatch, useAppSelector } from "../../../hooks";
 import {
   setShowPremiumModal as setShowPremiumModalAction,
   setShowPremiumStatusModal as setShowPremiumStatusModalAction
-} from "../../ui/uiSlice";
+} from "../../layout/uiSlice";
 
 function getLocalMachineId(): string | null {
   return null;

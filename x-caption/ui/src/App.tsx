@@ -1,4 +1,4 @@
-import { AppShell } from "./components/shell/layout/AppShell";
+import { AppShell } from "./components/layout";
 import { useAppState } from "./hooks/useAppState";
 
 export function App() {

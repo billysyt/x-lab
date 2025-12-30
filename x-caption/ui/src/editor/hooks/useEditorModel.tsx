@@ -4,8 +4,8 @@ import type { UploadTabHandle } from "../../components/upload/components/UploadT
 import { useAppBootstrap } from "../../hooks/useAppBootstrap";
 import { useJobPolling } from "../../components/jobs/hooks/useJobPolling";
 import { useOnlineStatus } from "../../hooks/useOnlineStatus";
-import { useWindowState } from "../../components/shell/hooks/useWindowState";
-import { useLayoutState } from "../../components/shell/hooks/useLayoutState";
+import { useWindowState } from "../../components/layout/hooks/useWindowState";
+import { useLayoutState } from "../../components/layout/hooks/useLayoutState";
 import { useModelDownload } from "../../components/model/hooks/useModelDownload";
 import { useExportHandlers } from "../../components/export/hooks/useExportHandlers";
 import { useSegmentsState } from "../../components/transcript/hooks/useSegmentsState";

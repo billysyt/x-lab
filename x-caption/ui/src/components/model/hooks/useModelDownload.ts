@@ -4,7 +4,7 @@ import {
   apiGetWhisperModelDownload,
   apiGetWhisperModelStatus,
   apiStartWhisperModelDownload
-} from "../../../api/sttApi";
+} from "../../../api/modelApi";
 
 export type ModelDownloadState = {
   status: "idle" | "checking" | "downloading" | "error";

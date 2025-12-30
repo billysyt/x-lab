@@ -1,11 +1,6 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit";
-import {
-  apiGetHistory,
-  apiGetJob,
-  apiPollJob,
-  apiRemoveJob,
-  apiTranscribeAudio
-} from "../../api/sttApi";
+import { apiGetHistory, apiGetJob, apiPollJob, apiRemoveJob } from "../../api/jobsApi";
+import { apiTranscribeAudio } from "../../api/mediaApi";
 import type { Job, PollUpdate, TranscriptResult, TranscriptSegment } from "../../types";
 import {
   convertHistoryEntry,

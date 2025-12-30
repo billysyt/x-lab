@@ -1,5 +1,5 @@
 import { AppIcon } from "./AppIcon";
-import type { AlertOverlayProps } from "../shell/components/AppOverlays.types";
+import type { AlertOverlayProps } from "../layout/AppOverlays.types";
 
 type AlertModalOverlayProps = Pick<AlertOverlayProps, "alertModal" | "setAlertModal">;
 

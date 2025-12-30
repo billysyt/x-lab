@@ -14,12 +14,8 @@ import type { AppDispatch } from "../../../store";
 import type { MediaItem } from "../../upload/components/UploadTab";
 import type { TranscriptSegment, Job } from "../../../types";
 import { addJob, addSegment, removeSegment, selectJob, setJobSegments, updateSegmentTiming } from "../../jobs/jobsSlice";
-import {
-  apiAddSegment,
-  apiDeleteSegment,
-  apiUpdateSegmentTiming,
-  apiUpsertJobRecord
-} from "../../../api/sttApi";
+import { apiAddSegment, apiDeleteSegment, apiUpdateSegmentTiming } from "../../../api/segmentsApi";
+import { apiUpsertJobRecord } from "../../../api/jobsApi";
 import { clamp } from "../../../lib/timeline";
 import { isBlankAudioText } from "../../../lib/transcript";
 import { stripFileExtension } from "../../../lib/utils";

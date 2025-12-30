@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { setVersion } from "../components/ui/uiSlice";
+import { setVersion } from "../components/layout/uiSlice";
 import { bootstrapJobs } from "../components/jobs/jobsSlice";
 import type { AppDispatch } from "../store";
 

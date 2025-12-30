@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import type { ExportLanguage, TranscriptSegment } from "../../../types";
-import { apiConvertChinese } from "../../../api/sttApi";
+import { apiConvertChinese } from "../../../api/exportApi";
 import { baseFilename } from "../../../lib/format";
 import { formatSrtTimestamp } from "../../../lib/srt";
 

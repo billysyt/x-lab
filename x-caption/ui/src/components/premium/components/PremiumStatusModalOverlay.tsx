@@ -1,6 +1,6 @@
 import { AppIcon } from "../../common/AppIcon";
 import { formatTimestamp } from "../../../lib/format";
-import type { PremiumOverlayProps } from "../../shell/components/AppOverlays.types";
+import type { PremiumOverlayProps } from "../../layout/AppOverlays.types";
 
 type PremiumStatusModalOverlayProps = Pick<
   PremiumOverlayProps,

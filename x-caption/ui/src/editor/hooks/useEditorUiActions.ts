@@ -6,7 +6,7 @@ import {
   setIsPlayerModalVisible as setIsPlayerModalVisibleAction,
   setIsTranscriptEdit as setIsTranscriptEditAction,
   setShowExportModal as setShowExportModalAction
-} from "../../components/ui/uiSlice";
+} from "../../components/layout/uiSlice";
 import type { ToastType } from "../../components/common/ToastHost";
 import type { AppDispatch } from "../../store";
 

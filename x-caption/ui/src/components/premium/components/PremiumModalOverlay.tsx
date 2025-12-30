@@ -1,6 +1,6 @@
 import { AppIcon } from "../../common/AppIcon";
 import { cn } from "../../../lib/cn";
-import type { PremiumOverlayProps } from "../../shell/components/AppOverlays.types";
+import type { PremiumOverlayProps } from "../../layout/AppOverlays.types";
 
 type PremiumModalOverlayProps = Pick<
   PremiumOverlayProps,

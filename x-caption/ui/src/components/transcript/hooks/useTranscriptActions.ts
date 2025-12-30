@@ -7,7 +7,7 @@ import type { MediaItem, UploadTabHandle } from "../../upload/components/UploadT
 import { fileFromBase64 } from "../../../lib/file";
 import { parseSrt } from "../../../lib/srt";
 import { stripFileExtension } from "../../../lib/utils";
-import { apiUpsertJobRecord } from "../../../api/sttApi";
+import { apiUpsertJobRecord } from "../../../api/jobsApi";
 
 type TranscriptActionsParams = {
   dispatch: AppDispatch;

@@ -11,7 +11,8 @@ import type { AppDispatch } from "../../../store";
 import type { MediaItem } from "../../upload/components/UploadTab";
 import type { ToastType } from "../../common/ToastHost";
 import type { TranscriptSegment } from "../../../types";
-import { apiEditSegment, apiGetJobRecord, apiUpsertJobRecord } from "../../../api/sttApi";
+import { apiEditSegment } from "../../../api/segmentsApi";
+import { apiGetJobRecord, apiUpsertJobRecord } from "../../../api/jobsApi";
 import { clamp } from "../../../lib/timeline";
 import { updateJobDisplayName, updateJobUiState, updateSegmentText } from "../../jobs/jobsSlice";
 

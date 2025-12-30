@@ -1,6 +1,6 @@
 import { AppIcon } from "../../common/AppIcon";
 import { cn } from "../../../lib/cn";
-import type { ExportOverlayProps } from "../../shell/components/AppOverlays.types";
+import type { ExportOverlayProps } from "../../layout/AppOverlays.types";
 
 type ExportModalOverlayProps = ExportOverlayProps;
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 import type { UploadTabHandle } from "../../upload/components/UploadTab";
-import { apiGetYoutubeImport, apiStartYoutubeImport } from "../../../api/sttApi";
+import { apiGetYoutubeImport, apiStartYoutubeImport } from "../../../api/youtubeApi";
 import { useAppDispatch, useAppSelector } from "../../../hooks";
 import { patchMediaImport } from "../mediaImportSlice";
 

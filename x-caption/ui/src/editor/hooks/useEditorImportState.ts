@@ -1,4 +1,4 @@
-import { useOverlayState } from "../../components/shell/hooks/useOverlayState";
+import { useOverlayState } from "../../components/layout/hooks/useOverlayState";
 import { useTranscriptActions } from "../../components/transcript/hooks/useTranscriptActions";
 import type { RefObject } from "react";
 import type { UploadTabHandle } from "../../components/upload/components/UploadTab";

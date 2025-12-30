@@ -9,13 +9,13 @@ import { useTimelineState } from "../../components/timeline/hooks/useTimelineSta
 import { useActiveJobState } from "../../components/jobs/hooks/useActiveJobState";
 import { useExportHandlers } from "../../components/export/hooks/useExportHandlers";
 import { useMediaState } from "../../components/upload/hooks/useMediaState";
-import { useOverlayState } from "../../components/shell/hooks/useOverlayState";
+import { useOverlayState } from "../../components/layout/hooks/useOverlayState";
 import { usePlaybackState } from "../../components/player/hooks/usePlaybackState";
 import { useSegmentsState } from "../../components/transcript/hooks/useSegmentsState";
 import { useSubtitleState } from "../../components/player/hooks/useSubtitleState";
 import { useTimelineViewState } from "../../components/timeline/hooks/useTimelineViewState";
 import { useTranscriptActions } from "../../components/transcript/hooks/useTranscriptActions";
-import { useWindowState } from "../../components/shell/hooks/useWindowState";
+import { useWindowState } from "../../components/layout/hooks/useWindowState";
 
 type EditorPanelsLayout = {
   isCompact: boolean;

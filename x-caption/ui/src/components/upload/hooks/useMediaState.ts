@@ -3,7 +3,8 @@ import type { AppDispatch } from "../../../store";
 import type { Job } from "../../../types";
 import type { MediaItem } from "../components/UploadTab";
 import type { TimelineClip } from "../../timeline/hooks/useTimelineDerivedState";
-import { apiResolveYoutubeStream, apiUpsertJobRecord } from "../../../api/sttApi";
+import { apiResolveYoutubeStream } from "../../../api/youtubeApi";
+import { apiUpsertJobRecord } from "../../../api/jobsApi";
 import { updateJobDisplayName, updateJobUiState } from "../../jobs/jobsSlice";
 import { stripFileExtension } from "../../../lib/utils";
 

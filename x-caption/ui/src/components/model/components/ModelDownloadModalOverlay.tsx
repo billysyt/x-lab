@@ -1,5 +1,5 @@
 import { AppIcon } from "../../common/AppIcon";
-import type { ModelDownloadOverlayProps } from "../../shell/components/AppOverlays.types";
+import type { ModelDownloadOverlayProps } from "../../layout/AppOverlays.types";
 
 type ModelDownloadModalOverlayProps = ModelDownloadOverlayProps;
 
