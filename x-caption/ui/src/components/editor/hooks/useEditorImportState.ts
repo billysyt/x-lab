@@ -1,0 +1,69 @@
+import { useOverlayState } from "../../shell/hooks/useOverlayState";
+import { useTranscriptActions } from "../../transcript/hooks/useTranscriptActions";
+import type { RefObject } from "react";
+import type { UploadTabHandle } from "../../upload/components/UploadTab";
+import type { AppDispatch } from "../../../store";
+import type { Job } from "../../../types";
+import type { MediaItem } from "../../upload/components/UploadTab";
+
+export function useEditorImportState(params: {
+  dispatch: AppDispatch;
+  appVersion: string | null;
+  isOnline: boolean;
+  isCompact: boolean;
+  notify: (message: string, type?: "info" | "success" | "error") => void;
+  uploadRef: RefObject<UploadTabHandle>;
+  onOpenLocalPicker: () => void;
+  onOpenLeftDrawer: () => void;
+  activeJob: Job | null;
+  activeMedia: MediaItem | null;
+  selectedJob: Job | null;
+  srtInputRef: RefObject<HTMLInputElement | null>;
+  handleRequestFilePicker: (open: () => void) => void;
+  ensureWhisperModelReady: () => Promise<boolean>;
+  timelineClipCount: number;
+}) {
+  const {
+    dispatch,
+    appVersion,
+    isOnline,
+    isCompact,
+    notify,
+    uploadRef,
+    onOpenLocalPicker,
+    onOpenLeftDrawer,
+    activeJob,
+    activeMedia,
+    selectedJob,
+    srtInputRef,
+    handleRequestFilePicker,
+    ensureWhisperModelReady,
+    timelineClipCount
+  } = params;
+
+  const overlayState = useOverlayState({
+    appVersion,
+    isOnline,
+    notify,
+    isCompact,
+    uploadRef,
+    onOpenLocalPicker,
+    onOpenLeftDrawer
+  });
+
+  const transcriptActions = useTranscriptActions({
+    dispatch,
+    notify,
+    activeJob,
+    activeMedia,
+    selectedJob,
+    srtInputRef,
+    uploadRef,
+    handleRequestFilePicker,
+    ensureWhisperModelReady,
+    setShowImportModal: overlayState.mediaImport.modals.setShowImportModal,
+    timelineClipCount
+  });
+
+  return { overlayState, transcriptActions };
+}
