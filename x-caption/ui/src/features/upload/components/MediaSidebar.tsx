@@ -1,8 +1,8 @@
 import type { RefObject } from "react";
-import { UploadTab, type UploadTabHandle, type MediaItem } from "../../features/upload/components/UploadTab";
-import type { ToastType } from "../../shared/components/ToastHost";
-import { AppIcon } from "../../shared/components/AppIcon";
-import { cn } from "../../shared/lib/cn";
+import { UploadTab, type UploadTabHandle, type MediaItem } from "./UploadTab";
+import type { ToastType } from "../../../shared/components/ToastHost";
+import { AppIcon } from "../../../shared/components/AppIcon";
+import { cn } from "../../../shared/lib/cn";
 
 export type MediaSidebarProps = {
   isCompact: boolean;

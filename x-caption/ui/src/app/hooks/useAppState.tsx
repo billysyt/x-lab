@@ -39,7 +39,7 @@ import {
   clamp,
   normalizeClips
 } from "../lib/timeline";
-import { MediaSidebar } from "../components/MediaSidebar";
+import { MediaSidebar } from "../../features/upload/components/MediaSidebar";
 import {
   apiEditSegment,
   apiGetJobRecord,
@@ -59,6 +59,7 @@ import { useOverlayState } from "./useOverlayState";
 import { useCaptionState } from "./useCaptionState";
 import { usePlayerState } from "./usePlayerState";
 import { useTimelineState } from "./useTimelineState";
+import { useLayoutState } from "./useLayoutState";
 import { useModelDownload } from "./useModelDownload";
 import { useExportHandlers } from "./useExportHandlers";
 
@@ -257,15 +258,16 @@ export function useAppState() {
   const [secondCaptionLanguage, setSecondCaptionLanguage] = useState<"yue" | "zh" | "en">("yue");
   const [localMedia, setLocalMedia] = useState<MediaItem[]>([]);
   const [timelineZoom, setTimelineZoom] = useState(DEFAULT_TIMELINE_ZOOM);
-  const [isCompact, setIsCompact] = useState(false);
-  const [isHeaderCompact, setIsHeaderCompact] = useState(false);
   const setIsLeftDrawerOpen = useCallback(
     (value: boolean) => {
       dispatch(setIsLeftDrawerOpenAction(value));
     },
     [dispatch]
   );
-  const [compactTab, setCompactTab] = useState<"player" | "captions">("player");
+  const { isCompact, isHeaderCompact, compactTab, setCompactTab } = useLayoutState({
+    setIsLeftDrawerOpen,
+    setIsHeaderMenuOpen
+  });
   const handleOpenFiles = useCallback(() => {
     if (isCompact) {
       setIsLeftDrawerOpen(true);
@@ -613,12 +615,6 @@ export function useAppState() {
   }, [captionMenu]);
 
   useEffect(() => {
-    if (!isHeaderCompact) {
-      setIsHeaderMenuOpen(false);
-    }
-  }, [isHeaderCompact]);
-
-  useEffect(() => {
     if (selectedJob?.uiState && typeof selectedJob.uiState === "object") {
       selectedJobUiStateRef.current = selectedJob.uiState as Record<string, any>;
       return;
@@ -660,21 +656,7 @@ export function useAppState() {
     return () => observer.disconnect();
   }, []);
 
-  useEffect(() => {
-    const update = () => {
-      const compact = window.innerWidth < 1100;
-      const headerCompact = window.innerWidth < 500;
-      setIsCompact(compact);
-      setIsHeaderCompact(headerCompact);
-      if (!compact) {
-        setIsLeftDrawerOpen(false);
-        setCompactTab("player");
-      }
-    };
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, []);
+  // layout state handled by hook.
 
   // app bootstrap, update checks, and job polling are handled by hooks.
 
@@ -3881,9 +3863,7 @@ export function useAppState() {
     timelineZoom,
     setTimelineZoom,
     isCompact,
-    setIsCompact,
     isHeaderCompact,
-    setIsHeaderCompact,
     isLeftDrawerOpen,
     setIsLeftDrawerOpen,
     compactTab,

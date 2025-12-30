@@ -1,5 +1,5 @@
-import { TranscriptPanel } from "../../features/transcript/components/TranscriptPanel";
-import type { ToastType } from "../../shared/components/ToastHost";
+import { TranscriptPanel } from "./TranscriptPanel";
+import type { ToastType } from "../../../shared/components/ToastHost";
 import type { ReactNode, RefObject } from "react";
 
 export type CaptionPanelBodyProps = {

@@ -1,7 +1,7 @@
-import { Select } from "../../shared/components/Select";
-import { cn } from "../../shared/lib/cn";
-import { LANGUAGE_OPTIONS } from "../lib/languageOptions";
-import type { SettingsState } from "../../features/settings/settingsSlice";
+import { Select } from "../../../shared/components/Select";
+import { cn } from "../../../shared/lib/cn";
+import { LANGUAGE_OPTIONS } from "../../../app/lib/languageOptions";
+import type { SettingsState } from "../../settings/settingsSlice";
 
 export type CaptionSetupPanelProps = {
   settings: SettingsState;

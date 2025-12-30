@@ -1,9 +1,9 @@
 import type { MouseEvent, MutableRefObject, PointerEvent, ReactNode, RefObject, UIEvent, WheelEvent } from "react";
-import { AppIcon } from "../../shared/components/AppIcon";
-import { cn } from "../../shared/lib/cn";
-import { formatTime } from "../lib/format";
-import { TIMELINE_RIGHT_PADDING_PX } from "../lib/timeline";
-import type { TranscriptSegment } from "../../shared/types";
+import { AppIcon } from "../../../shared/components/AppIcon";
+import { cn } from "../../../shared/lib/cn";
+import { formatTime } from "../../../app/lib/format";
+import { TIMELINE_RIGHT_PADDING_PX } from "../../../app/lib/timeline";
+import type { TranscriptSegment } from "../../../shared/types";
 
 export type TimelinePanelProps = {
   isCompact: boolean;

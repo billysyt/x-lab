@@ -1,8 +1,8 @@
 import { useMemo, type CSSProperties, type PointerEvent, type ReactNode, type RefObject } from "react";
-import { AppIcon } from "../../shared/components/AppIcon";
-import { cn } from "../../shared/lib/cn";
-import { formatTime } from "../lib/format";
-import type { MediaItem } from "../../features/upload/components/UploadTab";
+import { AppIcon } from "../../../shared/components/AppIcon";
+import { cn } from "../../../shared/lib/cn";
+import { formatTime } from "../../../app/lib/format";
+import type { MediaItem } from "../../upload/components/UploadTab";
 
 export type PlayerPanelProps = {
   isModal: boolean;

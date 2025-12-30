@@ -1,6 +1,6 @@
 import type { AppState } from "../hooks/useAppState";
 import { HeaderBar } from "../components/HeaderBar";
-import { TimelinePanel } from "../components/TimelinePanel";
+import { TimelinePanel } from "../../features/timeline/components/TimelinePanel";
 import { AppOverlays } from "../components/AppOverlays";
 import { AppIcon } from "../../shared/components/AppIcon";
 import { cn } from "../../shared/lib/cn";
