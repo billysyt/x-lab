@@ -16,14 +16,33 @@ import {
   updateSegmentText,
   updateSegmentTiming
 } from "../features/jobs/jobsSlice";
-import { UploadTab, type UploadTabHandle, type MediaItem } from "../features/upload/components/UploadTab";
-import { TranscriptPanel } from "../features/transcript/components/TranscriptPanel";
+import type { UploadTabHandle, MediaItem } from "../features/upload/components/UploadTab";
 import type { ToastType } from "../shared/components/ToastHost";
 import { AppIcon } from "../shared/components/AppIcon";
-import { Select } from "../shared/components/Select";
 import { cn } from "../shared/lib/cn";
 import { sanitizeProgressValue, stripFileExtension } from "../shared/lib/utils";
 import { fileFromBase64 } from "../shared/lib/file";
+import { formatBytes, baseFilename, compareVersions } from "./lib/format";
+import { parseSrt, formatSrtTimestamp } from "./lib/srt";
+import { safeOpenCcConverter } from "./lib/opencc";
+import { deriveJobSegments, findSegmentAtTime, isBlankAudioText } from "./lib/transcript";
+import {
+  BASE_PX_PER_SEC,
+  DEFAULT_TIMELINE_ZOOM,
+  MIN_CLIP_DURATION_SEC,
+  TIMELINE_LEFT_PADDING_PX,
+  TIMELINE_RIGHT_PADDING_PX,
+  clamp,
+  normalizeClips
+} from "./lib/timeline";
+import { buildUpdateModalInfo, type UpdateModalInfo } from "./lib/update";
+import { CaptionSetupPanel } from "./components/CaptionSetupPanel";
+import { CaptionPanelBody } from "./components/CaptionPanelBody";
+import { PlayerPanel } from "./components/PlayerPanel";
+import { MediaSidebar } from "./components/MediaSidebar";
+import { HeaderBar } from "./components/HeaderBar";
+import { TimelinePanel } from "./components/TimelinePanel";
+import { AppOverlays } from "./components/AppOverlays";
 import {
   apiConvertChinese,
   apiEditSegment,
@@ -41,223 +60,6 @@ import {
 } from "../shared/api/sttApi";
 import type { ExportLanguage, Job, TranscriptSegment, WhisperModelDownload, WhisperModelStatus } from "../shared/types";
 
-type UpdateModalInfo = {
-  project: string;
-  currentVersion: string | null;
-  latestVersion: string | null;
-  updateAvailable: boolean | null;
-  forceUpdate: boolean;
-  minSupportedVersion: string | null;
-  downloadUrl: string | null;
-  releaseNotes: string | null;
-  publishedAt: string | null;
-};
-
-function formatTime(seconds: number) {
-  const total = Math.max(0, Math.floor(seconds));
-  const mins = Math.floor(total / 60);
-  const secs = total % 60;
-  return `${mins}:${secs.toString().padStart(2, "0")}`;
-}
-
-function isBlankAudioText(value: string) {
-  const cleaned = value.trim().toUpperCase();
-  return !cleaned || cleaned === "[BLANK_AUDIO]";
-}
-
-function formatBytes(value?: number | null) {
-  if (!value || value <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  let idx = 0;
-  let size = value;
-  while (size >= 1024 && idx < units.length - 1) {
-    size /= 1024;
-    idx += 1;
-  }
-  return `${size.toFixed(size >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
-}
-
-const PRIMARY_LANGUAGE_OPTIONS = [
-  { value: "auto", label: "Cantonese" },
-  { value: "zh", label: "Mandarin" },
-  { value: "en", label: "English" }
-];
-
-const OTHER_LANGUAGE_OPTIONS = [
-  { value: "af", label: "Afrikaans" },
-  { value: "am", label: "Amharic" },
-  { value: "ar", label: "Arabic" },
-  { value: "as", label: "Assamese" },
-  { value: "az", label: "Azerbaijani" },
-  { value: "ba", label: "Bashkir" },
-  { value: "be", label: "Belarusian" },
-  { value: "bg", label: "Bulgarian" },
-  { value: "bn", label: "Bengali" },
-  { value: "bo", label: "Tibetan" },
-  { value: "br", label: "Breton" },
-  { value: "bs", label: "Bosnian" },
-  { value: "ca", label: "Catalan" },
-  { value: "cs", label: "Czech" },
-  { value: "cy", label: "Welsh" },
-  { value: "da", label: "Danish" },
-  { value: "de", label: "German" },
-  { value: "el", label: "Greek" },
-  { value: "es", label: "Spanish" },
-  { value: "et", label: "Estonian" },
-  { value: "eu", label: "Basque" },
-  { value: "fa", label: "Persian" },
-  { value: "fi", label: "Finnish" },
-  { value: "fo", label: "Faroese" },
-  { value: "fr", label: "French" },
-  { value: "gl", label: "Galician" },
-  { value: "gu", label: "Gujarati" },
-  { value: "ha", label: "Hausa" },
-  { value: "haw", label: "Hawaiian" },
-  { value: "he", label: "Hebrew" },
-  { value: "hi", label: "Hindi" },
-  { value: "hr", label: "Croatian" },
-  { value: "ht", label: "Haitian Creole" },
-  { value: "hu", label: "Hungarian" },
-  { value: "hy", label: "Armenian" },
-  { value: "id", label: "Indonesian" },
-  { value: "is", label: "Icelandic" },
-  { value: "it", label: "Italian" },
-  { value: "ja", label: "Japanese" },
-  { value: "jw", label: "Javanese" },
-  { value: "ka", label: "Georgian" },
-  { value: "kk", label: "Kazakh" },
-  { value: "km", label: "Khmer" },
-  { value: "kn", label: "Kannada" },
-  { value: "ko", label: "Korean" },
-  { value: "la", label: "Latin" },
-  { value: "lb", label: "Luxembourgish" },
-  { value: "ln", label: "Lingala" },
-  { value: "lo", label: "Lao" },
-  { value: "lt", label: "Lithuanian" },
-  { value: "lv", label: "Latvian" },
-  { value: "mg", label: "Malagasy" },
-  { value: "mi", label: "Maori" },
-  { value: "mk", label: "Macedonian" },
-  { value: "ml", label: "Malayalam" },
-  { value: "mn", label: "Mongolian" },
-  { value: "mr", label: "Marathi" },
-  { value: "ms", label: "Malay" },
-  { value: "mt", label: "Maltese" },
-  { value: "my", label: "Myanmar" },
-  { value: "ne", label: "Nepali" },
-  { value: "nl", label: "Dutch" },
-  { value: "nn", label: "Norwegian Nynorsk" },
-  { value: "no", label: "Norwegian" },
-  { value: "oc", label: "Occitan" },
-  { value: "pa", label: "Punjabi" },
-  { value: "pl", label: "Polish" },
-  { value: "ps", label: "Pashto" },
-  { value: "pt", label: "Portuguese" },
-  { value: "ro", label: "Romanian" },
-  { value: "ru", label: "Russian" },
-  { value: "sa", label: "Sanskrit" },
-  { value: "sd", label: "Sindhi" },
-  { value: "si", label: "Sinhala" },
-  { value: "sk", label: "Slovak" },
-  { value: "sl", label: "Slovenian" },
-  { value: "sn", label: "Shona" },
-  { value: "so", label: "Somali" },
-  { value: "sq", label: "Albanian" },
-  { value: "sr", label: "Serbian" },
-  { value: "su", label: "Sundanese" },
-  { value: "sv", label: "Swedish" },
-  { value: "sw", label: "Swahili" },
-  { value: "ta", label: "Tamil" },
-  { value: "te", label: "Telugu" },
-  { value: "tg", label: "Tajik" },
-  { value: "th", label: "Thai" },
-  { value: "tk", label: "Turkmen" },
-  { value: "tl", label: "Tagalog" },
-  { value: "tr", label: "Turkish" },
-  { value: "tt", label: "Tatar" },
-  { value: "uk", label: "Ukrainian" },
-  { value: "ur", label: "Urdu" },
-  { value: "uz", label: "Uzbek" },
-  { value: "vi", label: "Vietnamese" },
-  { value: "yi", label: "Yiddish" },
-  { value: "yo", label: "Yoruba" }
-];
-
-const LANGUAGE_OPTIONS = [
-  ...PRIMARY_LANGUAGE_OPTIONS,
-  { value: "divider", label: "--------", disabled: true },
-  ...OTHER_LANGUAGE_OPTIONS
-];
-
-function parseSrtTimestamp(raw: string) {
-  const match = raw.trim().match(/(\d{2}):(\d{2}):(\d{2})[,.](\d{1,3})/);
-  if (!match) return 0;
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  const seconds = Number(match[3]);
-  const millis = Number(match[4].padEnd(3, "0"));
-  return hours * 3600 + minutes * 60 + seconds + millis / 1000;
-}
-
-function formatSrtTimestamp(seconds: number) {
-  const totalMs = Math.max(0, Math.round(seconds * 1000));
-  const hours = Math.floor(totalMs / 3600000);
-  const minutes = Math.floor((totalMs % 3600000) / 60000);
-  const secs = Math.floor((totalMs % 60000) / 1000);
-  const ms = totalMs % 1000;
-  return `${hours.toString().padStart(2, "0")}:${minutes
-    .toString()
-    .padStart(2, "0")}:${secs.toString().padStart(2, "0")},${ms
-    .toString()
-    .padStart(3, "0")}`;
-}
-
-function parseSrt(text: string): TranscriptSegment[] {
-  const blocks = text.replace(/\r\n/g, "\n").split(/\n{2,}/);
-  const segments: TranscriptSegment[] = [];
-  let id = 1;
-  for (const block of blocks) {
-    const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
-    if (!lines.length) continue;
-    let timeLineIndex = lines.findIndex((line) => line.includes("-->"));
-    if (timeLineIndex < 0) continue;
-    if (timeLineIndex === 0 && /^\d+$/.test(lines[0])) {
-      timeLineIndex = 1;
-    }
-    const timeLine = lines[timeLineIndex] ?? "";
-    const [startRaw, endRaw] = timeLine.split("-->").map((part) => part.trim());
-    if (!startRaw || !endRaw) continue;
-    const start = parseSrtTimestamp(startRaw);
-    const end = parseSrtTimestamp(endRaw);
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
-    const textLines = lines.slice(timeLineIndex + 1);
-    const captionText = textLines.join("\n").trim();
-    segments.push({
-      id,
-      start,
-      end,
-      text: captionText,
-      originalText: captionText
-    });
-    id += 1;
-  }
-  return segments;
-}
-
-function safeOpenCcConverter(target: ExportLanguage): ((input: string) => string) | null {
-  const win = typeof window !== "undefined" ? (window as any) : null;
-  const OpenCC = win?.OpenCC;
-  if (!OpenCC || typeof OpenCC.Converter !== "function") return null;
-  try {
-    if (target === "traditional") {
-      return OpenCC.Converter({ from: "cn", to: "tw" });
-    }
-    return OpenCC.Converter({ from: "tw", to: "cn" });
-  } catch {
-    return null;
-  }
-}
-
 type ModelDownloadState = {
   status: "idle" | "checking" | "downloading" | "error";
   progress: number | null;
@@ -270,149 +72,9 @@ type ModelDownloadState = {
   totalBytes?: number | null;
 };
 
-function deriveJobSegments(job: Job | null): TranscriptSegment[] {
-  if (!job) return [];
-  if (job.streamingSegments && job.streamingSegments.length > 0) return job.streamingSegments;
-  if (job.result && job.result.segments) return job.result.segments;
-  if (job.partialResult && job.partialResult.segments) return job.partialResult.segments;
-  return [];
-}
-
-function baseFilename(value: string | null | undefined) {
-  const raw = (value ?? "").trim();
-  const stripped = raw ? raw.replace(/\.[^/.]+$/, "") : "transcript";
-  const safe = stripped.replace(/[\\/:*?"<>|]+/g, "_").trim();
-  return safe || "transcript";
-}
-
 function getLocalMachineId(): string | null {
   return null;
 }
-
-function formatTimestamp(value: string | null | undefined): string {
-  if (!value) return "Unknown";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "Unknown";
-  try {
-    return parsed.toLocaleString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit"
-    });
-  } catch {
-    return parsed.toISOString();
-  }
-}
-
-function normalizeVersion(value: string) {
-  return value.trim().replace(/^v/i, "");
-}
-
-function compareVersions(a: string, b: string) {
-  const left = normalizeVersion(a).split(/[^0-9]+/).filter(Boolean).map(Number);
-  const right = normalizeVersion(b).split(/[^0-9]+/).filter(Boolean).map(Number);
-  const maxLen = Math.max(left.length, right.length);
-  for (let i = 0; i < maxLen; i += 1) {
-    const la = left[i] ?? 0;
-    const lb = right[i] ?? 0;
-    if (la > lb) return 1;
-    if (la < lb) return -1;
-  }
-  return 0;
-}
-
-function buildUpdateModalInfo(
-  payload: any,
-  fallbackVersion: string | null,
-  defaultProject: string
-): UpdateModalInfo | null {
-  if (!payload || typeof payload !== "object") return null;
-  const latestVersion =
-    payload.latestVersion ??
-    payload.latest_version ??
-    payload.latest ??
-    payload.version ??
-    null;
-  if (typeof latestVersion !== "string" || !latestVersion.trim()) return null;
-  const currentVersion = fallbackVersion ?? payload.currentVersion ?? payload.current_version ?? null;
-  const minSupportedVersion =
-    payload.minSupportedVersion ?? payload.min_supported ?? payload.minimum_supported ?? null;
-  const updateAvailable =
-    typeof currentVersion === "string" && typeof latestVersion === "string"
-      ? compareVersions(latestVersion, currentVersion) > 0
-      : typeof payload.updateAvailable === "boolean"
-        ? payload.updateAvailable
-        : null;
-  let forceUpdate = Boolean(payload.forceUpdate ?? payload.force_update);
-  if (typeof currentVersion === "string" && typeof minSupportedVersion === "string") {
-    forceUpdate = forceUpdate || compareVersions(currentVersion, minSupportedVersion) < 0;
-  }
-  if (!forceUpdate && updateAvailable !== true) {
-    return null;
-  }
-  const downloadUrl = payload.downloadUrl ?? payload.url ?? payload.link ?? payload.download_url ?? null;
-  const releaseNotes =
-    typeof payload.releaseNotes === "string"
-      ? payload.releaseNotes
-      : typeof payload.notes === "string"
-        ? payload.notes
-        : null;
-  const publishedAt =
-    typeof payload.publishedAt === "string"
-      ? payload.publishedAt
-      : typeof payload.released_at === "string"
-        ? payload.released_at
-        : null;
-
-  return {
-    project: String(payload.project ?? defaultProject ?? "x-caption"),
-    currentVersion: typeof currentVersion === "string" ? currentVersion : null,
-    latestVersion,
-    updateAvailable,
-    forceUpdate,
-    minSupportedVersion: typeof minSupportedVersion === "string" ? minSupportedVersion : null,
-    downloadUrl: typeof downloadUrl === "string" ? downloadUrl : null,
-    releaseNotes,
-    publishedAt
-  };
-}
-
-function findSegmentAtTime<T extends { start: number; end: number }>(segments: T[], time: number): T | null {
-  if (!segments.length || !Number.isFinite(time)) return null;
-  let lo = 0;
-  let hi = segments.length - 1;
-  let idx = -1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    if (segments[mid].start <= time) {
-      idx = mid;
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
-    }
-  }
-  if (idx < 0) return null;
-  const segment = segments[idx];
-  if (time >= segment.start && time < segment.end) return segment;
-  return null;
-}
-
-const BASE_PX_PER_SEC = 20;
-const MIN_CLIP_DURATION_SEC = 0.5;
-const DEFAULT_TIMELINE_ZOOM = 1.75;
-const TIMELINE_LEFT_PADDING_PX = 0;
-const TIMELINE_RIGHT_PADDING_PX = 8;
-const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-const normalizeClips = <T extends { startSec: number; durationSec: number }>(clips: T[]) => {
-  const withIndex = clips.map((clip, index) => ({ clip, index }));
-  withIndex.sort((a, b) => a.clip.startSec - b.clip.startSec || a.index - b.index);
-  return withIndex.map(({ clip }) => ({
-    ...clip,
-    durationSec: Math.max(MIN_CLIP_DURATION_SEC, clip.durationSec)
-  }));
-};
 
 export function App() {
   const settings = useAppSelector((s) => s.settings);
@@ -1049,6 +711,29 @@ export function App() {
     setGapMenu(null);
     setGapMenuHighlight(false);
   }, []);
+
+  const closeCaptionMenu = useCallback(() => {
+    setCaptionMenu(null);
+    setCaptionMenuGapHighlight(false);
+  }, []);
+
+  const handleOpenGapAdjust = useCallback(
+    (segment: TranscriptSegment, maxRemoveMs: number, hasGap: boolean) => {
+      setGapAdjustModal({
+        segment,
+        mode: "insert",
+        ms: "1000",
+        maxRemoveMs,
+        hasGap
+      });
+    },
+    []
+  );
+
+  const handleCloseGapMenu = useCallback(() => {
+    closeGapMenu();
+    setCaptionHover(null);
+  }, [closeGapMenu]);
 
   useEffect(() => {
     if (!captionMenu) {
@@ -2185,6 +1870,14 @@ export function App() {
   const handleToggleChineseVariant = useCallback(() => {
     dispatch(setExportLanguage(exportLanguage === "traditional" ? "simplified" : "traditional"));
   }, [dispatch, exportLanguage]);
+
+  const handleSubtitleScaleDecrease = useCallback(() => {
+    setSubtitleScale((value) => Math.max(0.8, Number((value - 0.15).toFixed(2))));
+  }, []);
+
+  const handleSubtitleScaleIncrease = useCallback(() => {
+    setSubtitleScale((value) => Math.min(2.4, Number((value + 0.15).toFixed(2))));
+  }, []);
 
   const handleSrtSelected = useCallback(
     async (file: File) => {
@@ -4869,479 +4562,150 @@ export function App() {
       : modelDownload.status === "downloading"
         ? "Downloading model..."
         : "AI Generate Caption";
-
+  const isGenerateDisabled =
+    modelDownload.status === "checking" || modelDownload.status === "downloading" || isTranscribing;
+  const handleToggleSecondCaption = useCallback(() => {
+    if (captionControlsDisabled) return;
+    setSecondCaptionEnabled((prev) => {
+      const next = !prev;
+      if (next) {
+        setSecondCaptionLanguage("yue");
+      }
+      return next;
+    });
+  }, [captionControlsDisabled]);
   const captionSetupPanel = (
-    <div className="space-y-4">
-      <div className="space-y-2">
-        <label className="text-[11px] font-semibold text-slate-400" htmlFor="languageSelect">
-          Language
-        </label>
-        <Select
-          className={cn("stt-select-dark", captionControlsDisabled && "opacity-60")}
-          id="language"
-          buttonId="languageSelect"
-          value={String(settings.language)}
-          options={LANGUAGE_OPTIONS}
-          onChange={(value) => dispatch(setLanguage(value as any))}
-          disabled={captionControlsDisabled}
-        />
-      </div>
-      <div className="space-y-2">
-        <label className="text-[11px] font-semibold text-slate-400" htmlFor="chineseStyleSelect">
-          Cantonese Output Style
-        </label>
-        <Select
-          className={cn(
-            "stt-select-dark",
-            (!isCantoneseLanguage || captionControlsDisabled || isSecondCaptionActive) && "opacity-60"
-          )}
-          id="chineseStyle"
-          buttonId="chineseStyleSelect"
-          value={String(settings.chineseStyle)}
-          options={[
-            { value: "written", label: "Written (書面語)" },
-            { value: "spoken", label: "Spoken (口語)" }
-          ]}
-          onChange={(value) => dispatch(setChineseStyle(value as any))}
-          disabled={!isCantoneseLanguage || captionControlsDisabled || isSecondCaptionActive}
-        />
-      </div>
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <label className="text-[11px] font-semibold text-slate-400" htmlFor="secondCaptionLanguageSelect">
-            Subtitles Translation (Beta)
-          </label>
-          <button
-            className={cn(
-              "inline-flex items-center gap-2 text-[10px] font-medium transition",
-              isSecondCaptionActive ? "text-slate-200" : "text-slate-500"
-            )}
-            onClick={() => {
-              if (captionControlsDisabled) return;
-              setSecondCaptionEnabled((prev) => {
-                const next = !prev;
-                if (next) {
-                  setSecondCaptionLanguage("yue");
-                }
-                return next;
-              });
-            }}
-            type="button"
-            disabled={captionControlsDisabled}
-          >
-            <span
-              className={cn(
-                "relative inline-flex h-4 w-7 items-center rounded-full border transition",
-                isSecondCaptionActive ? "border-slate-500 bg-[#1b1b22]" : "border-slate-700 bg-[#151515]"
-              )}
-            >
-              <span
-                className={cn(
-                  "absolute h-3 w-3 rounded-full bg-white transition",
-                  isSecondCaptionActive ? "translate-x-3" : "translate-x-1"
-                )}
-              />
-            </span>
-          </button>
-        </div>
-        <Select
-          className={cn("stt-select-dark", (!isSecondCaptionActive || captionControlsDisabled) && "opacity-60")}
-          id="secondCaptionLanguage"
-          buttonId="secondCaptionLanguageSelect"
-          value={secondCaptionLanguage}
-          options={[
-            { value: "yue", label: "English" }
-          ]}
-          onChange={(value) => setSecondCaptionLanguage(value as "yue" | "zh" | "en")}
-          disabled={!isSecondCaptionActive || captionControlsDisabled}
-        />
-      </div>
-      <div className="pt-2">
-        <button
-          className={cn(
-            "inline-flex w-full items-center justify-center rounded-md bg-[#1b1b22] px-3 py-2.5 text-[11.5px] font-semibold text-slate-200 transition hover:bg-[#26262f]",
-            modelDownload.status === "checking" ||
-              modelDownload.status === "downloading" ||
-              isTranscribing
-              ? "cursor-not-allowed opacity-60 hover:bg-[#1b1b22]"
-              : ""
-          )}
-          onClick={handleGenerateCaptions}
-          disabled={
-            modelDownload.status === "checking" ||
-            modelDownload.status === "downloading" ||
-            isTranscribing
-          }
-          type="button"
-        >
-          {generateCaptionLabel}
-        </button>
-      </div>
-    </div>
+    <CaptionSetupPanel
+      settings={settings}
+      captionControlsDisabled={captionControlsDisabled}
+      isCantoneseLanguage={isCantoneseLanguage}
+      isSecondCaptionActive={isSecondCaptionActive}
+      secondCaptionLanguage={secondCaptionLanguage}
+      onLanguageChange={(value) => dispatch(setLanguage(value))}
+      onChineseStyleChange={(value) => dispatch(setChineseStyle(value))}
+      onToggleSecondCaption={handleToggleSecondCaption}
+      onSecondCaptionLanguageChange={setSecondCaptionLanguage}
+      generateCaptionLabel={generateCaptionLabel}
+      onGenerateCaptions={handleGenerateCaptions}
+      isGenerateDisabled={isGenerateDisabled}
+    />
   );
 
-  const renderPlayerPanel = (isModal: boolean) => {
-    const showCompactCaptions = !isModal && isCompact && compactTab === "captions";
-    return (
-      <div
-        className={cn(
-          "flex min-h-0 flex-1 flex-col items-center justify-center gap-2",
-          isModal ? "p-4" : "p-2"
-        )}
-      >
-        {showCompactCaptions ? (
-          <div className="flex min-h-0 w-full flex-1">
-            <div className="min-h-0 h-[calc(100vh-320px)] max-h-[calc(100vh-320px)] w-full overflow-hidden">
-              <div className="flex h-full min-h-0 flex-col gap-3">
-                {showCaptionSetup ? captionSetupPanel : null}
-                <div className="min-h-0 flex-1">
-                  <TranscriptPanel
-                    mediaRef={transcriptMediaRef}
-                    notify={notify}
-                    editEnabled={isTranscriptEdit}
-                    suppressEmptyState={showCaptionSetup}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <>
-            <div
-              className="relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden"
-              ref={previewContainerRef}
-            >
-              <div
-                className="relative h-full w-full overflow-hidden rounded-xl bg-black"
-                onClick={handlePreviewClick}
-              >
-                {activeMedia ? (
-                  <div
-                    className="pointer-events-auto absolute left-1/2 top-3 z-20 -translate-x-1/2"
-                    data-no-toggle
-                  >
-                    {isDisplayNameEditing ? (
-                      <input
-                        className="w-[min(70vw,420px)] rounded-md border border-white/15 bg-black/70 px-3 py-1 text-center text-[12px] font-medium text-white outline-none focus:border-primary/70"
-                        value={displayNameDraft}
-                        placeholder={activeMediaDisplayName || activeMedia.displayName || activeMedia.name || "Display name"}
-                        onChange={(e) => setDisplayNameDraft(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            void commitDisplayName();
-                          } else if (e.key === "Escape") {
-                            e.preventDefault();
-                            cancelDisplayNameEdit();
-                          }
-                        }}
-                        onBlur={() => void commitDisplayName()}
-                        autoFocus
-                        aria-label="Edit display name"
-                      />
-                    ) : (
-                      <button
-                        type="button"
-                        className="inline-flex max-w-[min(70vw,420px)] items-center rounded-md border border-white/10 bg-black/60 px-3 py-1 text-[12px] font-medium text-white/90 shadow hover:border-white/25"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setIsDisplayNameEditing(true);
-                        }}
-                        title="Click to rename"
-                      >
-                        <span className="truncate">{activeMediaDisplayName}</span>
-                      </button>
-                    )}
-                  </div>
-                ) : null}
-                {showYoutubeUnavailable ? (
-                  <div className="flex h-full w-full flex-col items-center justify-center gap-4 px-6 text-center text-slate-300">
-                    <div className="flex h-20 w-20 items-center justify-center">
-                      <svg
-                        viewBox="0 0 120 120"
-                        className="h-14 w-14 text-slate-200/80"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="3"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <rect x="18" y="26" width="84" height="52" rx="12" />
-                        <path d="M50 44l22 12-22 12z" fill="currentColor" opacity="0.15" />
-                        <path d="M32 94h56" />
-                        <path d="M30 34l60 52" />
-                      </svg>
-                    </div>
-                    <div className="text-[15px] font-semibold text-slate-100">YouTube preview unavailable</div>
-                    <div className="max-w-[360px] text-[12px] text-slate-400">
-                      {youtubeUnavailableReason}
-                    </div>
-                  </div>
-                ) : activeVideoSrc ? (
-                  <>
-                    <video
-                      src={activeVideoSlot === 0 ? activeVideoSrc : nextVideoTarget?.url ?? undefined}
-                      ref={videoRefA}
-                      playsInline
-                      preload="auto"
-                      muted={activeVideoSlot !== 0}
-                      poster={activeVideoSlot === 0 ? previewPoster ?? undefined : undefined}
-                      onLoadedData={() => {
-                        if (previewPosterModeRef.current !== "paused") {
-                          setPreviewPoster(null);
-                        }
-                      }}
-                      className={cn(
-                        "absolute inset-0 h-full w-full object-contain transition-opacity",
-                        activeVideoSlot === 0 ? "opacity-100" : "opacity-0"
-                      )}
-                    />
-                    <video
-                      src={activeVideoSlot === 1 ? activeVideoSrc : nextVideoTarget?.url ?? undefined}
-                      ref={videoRefB}
-                      playsInline
-                      preload="auto"
-                      muted={activeVideoSlot !== 1}
-                      poster={activeVideoSlot === 1 ? previewPoster ?? undefined : undefined}
-                      onLoadedData={() => {
-                        if (previewPosterModeRef.current !== "paused") {
-                          setPreviewPoster(null);
-                        }
-                      }}
-                      className={cn(
-                        "absolute inset-0 h-full w-full object-contain transition-opacity",
-                        activeVideoSlot === 1 ? "opacity-100" : "opacity-0"
-                      )}
-                    />
-                    {shouldShowPreviewPoster ? (
-                      <img
-                        src={previewPoster}
-                        alt=""
-                        className="pointer-events-none absolute inset-0 h-full w-full object-contain"
-                      />
-                    ) : null}
-                  </>
-                ) : activePreviewKind === "audio" && resolvedPreviewUrl ? (
-                  <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-6 text-xs text-slate-500">
-                    <AppIcon name="volume" className="text-2xl" />
-                    <span className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Audio Preview</span>
-                  </div>
-                ) : activeMedia ? (
-                  <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-xs text-slate-500">
-                    <AppIcon name={activePreviewKind === "audio" ? "volume" : "video"} className="text-2xl" />
-                    <span className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
-                      {activePreviewKind === "audio" ? "Audio Preview" : "Preview"}
-                    </span>
-                    {activeMedia.source === "job" && activeMedia.kind === "video" ? (
-                      <span className="text-[10px] text-slate-500">Video preview not available yet</span>
-                    ) : null}
-                  </div>
-                ) : (
-                  <div className="h-full w-full bg-black" />
-                )}
-                {showActiveJobOverlay ? (
-                  <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center p-4">
-                    <div className="w-full max-w-[360px] rounded-2xl border border-white/10 bg-black/65 p-6 text-center shadow-[0_24px_60px_rgba(0,0,0,0.55)] backdrop-blur-md">
-                      <div className="mx-auto flex items-center justify-center">
-                        <div className="processing-spinner" aria-hidden>
-                          <span className="processing-bar processing-bar-1" />
-                          <span className="processing-bar processing-bar-2" />
-                          <span className="processing-bar processing-bar-3" />
-                          <span className="processing-bar processing-bar-4" />
-                        </div>
-                      </div>
-                      <div className="mt-4 text-sm font-semibold text-slate-100">{activeJobLabel}</div>
-                      <div className="mt-4">
-                        <div className="h-2 w-full overflow-hidden rounded-full bg-white/15">
-                          <div
-                            className={cn(
-                              "h-full rounded-full bg-white transition-[width] duration-200",
-                              activeJobProgress === null && "animate-pulse"
-                            )}
-                            style={{
-                              width: `${Math.max(4, Math.min(100, activeJobProgress ?? 18))}%`
-                            }}
-                          />
-                        </div>
-                        <div className="mt-2 text-[11px] font-semibold text-white/90">
-                          {activeJobProgress !== null ? `${activeJobProgress}%` : "Preparing..."}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-                {showPreviewSpinner ? (
-                  <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/35 backdrop-blur-[1px]">
-                    <AppIcon name="spinner" spin className="text-[20px] text-white/80" />
-                  </div>
-                ) : null}
-                {subtitleEditor || currentSubtitle ? (
-                  <div
-                    ref={subtitleBoxRef}
-                    className={cn(
-                      "absolute z-10 rounded-md px-3 py-1",
-                      subtitleEditor
-                        ? "cursor-move border border-white/35 resize overflow-hidden"
-                        : "cursor-move"
-                    )}
-                    data-no-toggle
-                    style={{
-                      left: `${subtitlePosition.x * 100}%`,
-                      top: `${subtitlePosition.y * 100}%`,
-                      transform: "translate(-50%, -50%)",
-                      width: subtitleDisplaySize.width ? `${subtitleDisplaySize.width}px` : undefined,
-                      height: subtitleDisplaySize.height ? `${subtitleDisplaySize.height}px` : undefined,
-                      maxWidth: `${subtitleMaxWidth}px`,
-                      minWidth: "140px",
-                      minHeight: "36px"
-                    }}
-                    onPointerDown={handleSubtitlePointerDown}
-                    onPointerMove={handleSubtitlePointerMove}
-                    onPointerUp={handleSubtitlePointerUp}
-                    onPointerCancel={handleSubtitlePointerUp}
-                  >
-                    {subtitleEditor ? (
-                      <textarea
-                        className="h-full w-full resize-none bg-transparent text-center text-[13px] font-medium text-white outline-none cursor-text"
-                        style={subtitleTextStyle}
-                        value={subtitleDraft}
-                        onChange={(e) => setSubtitleDraft(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Escape") {
-                            e.preventDefault();
-                            setSubtitleEditor(null);
-                          } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                            e.preventDefault();
-                            void handleSaveSubtitleEdit();
-                          }
-                        }}
-                        onBlur={() => void handleSaveSubtitleEdit()}
-                        autoFocus
-                        aria-label="Edit subtitle"
-                      />
-                    ) : (
-                      <div
-                        className="whitespace-normal break-words text-[13px] font-medium text-white pointer-events-none text-center"
-                        style={subtitleTextStyle}
-                      >
-                        {currentSubtitle}
-                      </div>
-                    )}
-                  </div>
-                ) : null}
-                <span
-                  ref={subtitleMeasureRef}
-                  className="pointer-events-none absolute -z-10 opacity-0 whitespace-normal break-words"
-                  style={{
-                    fontSize: `${subtitleFontSize}px`,
-                    fontWeight: 500,
-                    lineHeight: "1.2",
-                    maxWidth: `${subtitleMaxWidth}px`
-                  }}
-                />
-              </div>
-            </div>
-            <div className="flex w-full shrink-0 items-center gap-3 px-2 py-1">
-              <button
-                className={cn(
-                  "flex h-8 w-8 items-center justify-center rounded-md text-slate-200 transition",
-                  previewDisabled ? "cursor-not-allowed opacity-50" : "hover:bg-white/10"
-                )}
-                onClick={togglePlayback}
-                disabled={previewDisabled}
-                type="button"
-              >
-                <AppIcon name={isMediaPlaying ? "pause" : "play"} className="text-[12px]" />
-              </button>
-              <button
-                className={cn(
-                  "flex h-8 w-12 items-center justify-center rounded-md px-2 text-[11px] font-semibold tabular-nums text-slate-200 transition",
-                  previewDisabled ? "cursor-not-allowed opacity-50" : "hover:bg-white/10"
-                )}
-                onClick={cyclePlaybackRate}
-                disabled={previewDisabled}
-                type="button"
-                aria-label="Playback speed"
-                title="Playback speed"
-              >
-                {`${playbackRate}X`}
-              </button>
-              <div className="flex min-w-0 flex-1 items-center gap-2">
-                <span className="text-[11px] text-slate-400 tabular-nums">{formatTime(playback.currentTime)}</span>
-                <div className="relative flex-1">
-                  <div className="h-1 rounded-full bg-[#2a2a30]">
-                    <div className="h-full rounded-full bg-primary" style={{ width: `${playheadPct}%` }} />
-                  </div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={Math.max(0, duration)}
-                    value={Math.min(playback.currentTime, duration || 0)}
-                    onChange={(event) => scheduleScrub(Number(event.target.value))}
-                    onPointerDown={startPlayerScrub}
-                    onPointerUp={endPlayerScrub}
-                    onPointerCancel={endPlayerScrub}
-                    onPointerLeave={endPlayerScrub}
-                    className="absolute inset-0 h-4 w-full cursor-pointer opacity-0"
-                    disabled={previewDisabled}
-                  />
-                </div>
-                <span className="text-[11px] text-slate-400 tabular-nums">{formatTime(duration)}</span>
-              </div>
-              <button
-                className="flex h-8 w-8 items-center justify-center rounded-md text-slate-200 transition hover:bg-white/10"
-                onClick={toggleFullscreen}
-                type="button"
-                aria-label={isModal ? "縮小" : "Zoom"}
-                title={isModal ? "縮小" : "Zoom"}
-              >
-                <AppIcon name={isModal ? "compress" : "expand"} className="text-[12px]" />
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    );
+  const compactCaptionsPanel = (
+    <CaptionPanelBody
+      captionSetupPanel={captionSetupPanel}
+      showCaptionSetup={showCaptionSetup}
+      transcriptMediaRef={transcriptMediaRef}
+      notify={notify}
+      editEnabled={isTranscriptEdit}
+      suppressEmptyState={showCaptionSetup}
+      containerClassName="min-h-0 h-[calc(100vh-320px)] max-h-[calc(100vh-320px)] w-full overflow-hidden"
+    />
+  );
+
+  const captionSidebarContent = (
+    <CaptionPanelBody
+      captionSetupPanel={captionSetupPanel}
+      showCaptionSetup={showCaptionSetup}
+      transcriptMediaRef={transcriptMediaRef}
+      notify={notify}
+      editEnabled={isTranscriptEdit}
+      suppressEmptyState={showCaptionSetup}
+      containerClassName="min-h-0 h-[calc(100vh-340px)] max-h-[calc(100vh-340px)] overflow-hidden"
+    />
+  );
+
+  const captionSidebarModalContent = (
+    <CaptionPanelBody
+      captionSetupPanel={captionSetupPanel}
+      showCaptionSetup={showCaptionSetup}
+      transcriptMediaRef={transcriptMediaRef}
+      notify={notify}
+      editEnabled={isTranscriptEdit}
+      suppressEmptyState={showCaptionSetup}
+      containerClassName="flex h-full min-h-0 flex-col"
+    />
+  );
+
+  const playerPanelProps = {
+    isCompact,
+    compactTab,
+    compactCaptionsPanel,
+    previewContainerRef,
+    handlePreviewClick,
+    activeMedia,
+    isDisplayNameEditing,
+    displayNameDraft,
+    setDisplayNameDraft,
+    setIsDisplayNameEditing,
+    activeMediaDisplayName,
+    commitDisplayName,
+    cancelDisplayNameEdit,
+    showYoutubeUnavailable,
+    youtubeUnavailableReason,
+    activeVideoSrc,
+    activeVideoSlot,
+    nextVideoTarget,
+    videoRefA,
+    videoRefB,
+    previewPoster,
+    previewPosterModeRef,
+    setPreviewPoster,
+    shouldShowPreviewPoster,
+    activePreviewKind,
+    resolvedPreviewUrl,
+    showActiveJobOverlay,
+    activeJobLabel,
+    activeJobProgress,
+    showPreviewSpinner,
+    subtitleEditor,
+    currentSubtitle,
+    subtitleBoxRef,
+    subtitlePosition,
+    subtitleDisplaySize,
+    subtitleMaxWidth,
+    handleSubtitlePointerDown,
+    handleSubtitlePointerMove,
+    handleSubtitlePointerUp,
+    subtitleTextStyle,
+    subtitleDraft,
+    setSubtitleDraft,
+    handleSaveSubtitleEdit,
+    setSubtitleEditor,
+    subtitleMeasureRef,
+    subtitleFontSize,
+    togglePlayback,
+    previewDisabled,
+    isMediaPlaying,
+    cyclePlaybackRate,
+    playbackRate,
+    playback,
+    playheadPct,
+    duration,
+    scheduleScrub,
+    startPlayerScrub,
+    endPlayerScrub,
+    toggleFullscreen
   };
 
+  const playerPanel = <PlayerPanel isModal={false} {...playerPanelProps} />;
+  const playerModalPanel = <PlayerPanel isModal {...playerPanelProps} />;
+
   const leftPanelContent = (
-    <>
-      <div className={cn(dragRegionClass, "flex items-center justify-between px-4 py-3 text-xs font-semibold text-slate-200")}>
-        <span>Media</span>
-        {isCompact ? (
-          <button
-            className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-800/20 bg-[#151515] text-[10px] text-slate-300 hover:border-slate-600"
-            onClick={() => setIsLeftDrawerOpen(false)}
-            type="button"
-            aria-label="Close"
-            title="Close"
-          >
-            <AppIcon name="chevronLeft" />
-          </button>
-        ) : null}
-      </div>
-      <div
-        className={cn(
-          "min-h-0 flex-1 overflow-y-auto px-4 py-3 stt-scrollbar",
-          !isCompact && "h-[calc(100vh-340px)] max-h-[calc(100vh-340px)]"
-        )}
-      >
-        <div className="h-full">
-          <UploadTab
-            ref={uploadRef}
-            notify={notify}
-            localMedia={localMedia}
-            onLocalMediaChange={setLocalMedia}
-            onAddToTimeline={handleAddToTimeline}
-            onClearSelection={handleClearSelection}
-            onRequestFilePicker={handleRequestFilePicker}
-            secondCaptionEnabled={secondCaptionEnabled}
-            secondCaptionLanguage={secondCaptionLanguage}
-          />
-        </div>
-      </div>
-    </>
+    <MediaSidebar
+      isCompact={isCompact}
+      dragRegionClass={dragRegionClass}
+      onClose={() => setIsLeftDrawerOpen(false)}
+      uploadRef={uploadRef}
+      notify={notify}
+      localMedia={localMedia}
+      onLocalMediaChange={setLocalMedia}
+      onAddToTimeline={handleAddToTimeline}
+      onClearSelection={handleClearSelection}
+      onRequestFilePicker={handleRequestFilePicker}
+      secondCaptionEnabled={secondCaptionEnabled}
+      secondCaptionLanguage={secondCaptionLanguage}
+    />
   );
 
   const isYoutubeIndeterminate =
@@ -5366,311 +4730,35 @@ export function App() {
   return (
     <>
       <div className="flex h-full w-full flex-col bg-[#0b0b0b] text-slate-100">
-        <div
-          {...getHeaderDragProps(
-            "relative grid h-10 select-none grid-cols-[1fr_auto_1fr] items-center bg-[#0b0b0b] px-3 text-xs text-slate-300"
-          )}
-        >
-          <div className="flex min-w-0 items-center gap-2">
-            {isMac ? (
-              <div className="group ml-1 mr-3 flex items-center gap-2">
-                <button
-                  className={cn(
-                    "pywebview-no-drag relative flex h-3 w-3 cursor-default items-center justify-center rounded-full shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)] transition",
-                    isWindowFocused ? "bg-[#ff5f57] group-hover:brightness-95" : "bg-[#525252]"
-                  )}
-                  onClick={() => handleWindowAction("close")}
-                  type="button"
-                  aria-label="Close"
-                >
-                  <svg
-                    viewBox="0 0 8 8"
-                    className={cn(
-                      "h-2 w-2 stroke-black/60 transition",
-                      isWindowFocused ? "opacity-0 group-hover:opacity-80" : "opacity-0"
-                    )}
-                    strokeWidth="1.2"
-                    strokeLinecap="round"
-                  >
-                    <line x1="1.5" y1="1.5" x2="6.5" y2="6.5" />
-                    <line x1="6.5" y1="1.5" x2="1.5" y2="6.5" />
-                  </svg>
-                </button>
-                <button
-                  className={cn(
-                    "pywebview-no-drag relative flex h-3 w-3 cursor-default items-center justify-center rounded-full shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)] transition",
-                    isWindowFocused ? "bg-[#febc2e] group-hover:brightness-95" : "bg-[#525252]"
-                  )}
-                  onClick={() => handleWindowAction("minimize")}
-                  type="button"
-                  aria-label="Minimize"
-                >
-                  <svg
-                    viewBox="0 0 8 8"
-                    className={cn(
-                      "h-2 w-2 stroke-black/60 transition",
-                      isWindowFocused ? "opacity-0 group-hover:opacity-80" : "opacity-0"
-                    )}
-                    strokeWidth="1.2"
-                    strokeLinecap="round"
-                  >
-                    <line x1="1.5" y1="4" x2="6.5" y2="4" />
-                  </svg>
-                </button>
-                <button
-                  className={cn(
-                    "pywebview-no-drag relative flex h-3 w-3 cursor-default items-center justify-center rounded-full shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)] transition",
-                    isWindowFocused ? "bg-[#28c840] group-hover:brightness-95" : "bg-[#525252]"
-                  )}
-                  onClick={() => handleWindowAction(isAltPressed ? "zoom" : "fullscreen")}
-                  type="button"
-                  aria-label="Zoom"
-                >
-                  {isAltPressed ? (
-                    <svg
-                      viewBox="0 0 8 8"
-                      className={cn(
-                        "h-2 w-2 stroke-black/70 transition",
-                        isWindowFocused ? "opacity-0 group-hover:opacity-90" : "opacity-0"
-                      )}
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                    >
-                      <line x1="1.5" y1="4" x2="6.5" y2="4" />
-                      <line x1="4" y1="1.5" x2="4" y2="6.5" />
-                    </svg>
-                  ) : (
-                    <svg
-                      viewBox="0 0 8 8"
-                      className={cn(
-                        "h-2 w-2 rotate-90 stroke-black/70 transition",
-                        isWindowFocused ? "opacity-0 group-hover:opacity-90" : "opacity-0"
-                      )}
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                    >
-                      <path d="M4.7 2.1 H6.3 V3.3" />
-                      <path d="M3.3 5.9 H1.7 V4.7" />
-                    </svg>
-                  )}
-                </button>
-              </div>
-            ) : null}
-            {!isHeaderCompact ? (
-              <button
-                className="pywebview-no-drag inline-flex h-7 items-center gap-1.5 rounded-md bg-[#1b1b22] px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-[#26262f]"
-                onClick={handleOpenModal}
-                type="button"
-                aria-label="Open"
-                title="Open"
-              >
-                <AppIcon name="folderOpen" className="text-[11px]" />
-                Open
-              </button>
-            ) : null}
-          </div>
-          <div className="flex items-center justify-center gap-2">
-            <span className="text-[11px] font-semibold text-slate-200">X-Caption</span>
-          </div>
-          <div className="flex items-center justify-end gap-2">
-            {isHeaderCompact ? (
-              <button
-                ref={headerMenuButtonRef}
-                className="pywebview-no-drag inline-flex h-6 w-6 items-center justify-center rounded-md bg-[#1b1b22] text-[10px] text-slate-200 transition hover:bg-[#26262f]"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setIsHeaderMenuOpen((prev) => !prev);
-                }}
-                type="button"
-                aria-label="Menu"
-                title="Menu"
-              >
-                <AppIcon name="bars" className="text-[11px]" />
-              </button>
-            ) : (
-              <>
-                <button
-                  className="pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md text-[11px] text-slate-200/80 transition hover:bg-white/5 hover:text-white"
-                  onClick={handleTogglePinned}
-                  type="button"
-                  aria-label={isPinned ? "Unpin window" : "Pin window"}
-                  title={isPinned ? "Unpin window" : "Pin window"}
-                >
-                  <AppIcon
-                    name={isPinned ? "pin" : "pinOff"}
-                    className={cn("text-[11px]", !isPinned && "rotate-45 opacity-70")}
-                  />
-                </button>
-                <button
-                  className={cn(
-                    "pywebview-no-drag inline-flex h-7 items-center justify-center gap-1.5 rounded-md bg-[#1b1b22] px-2 text-[11px] font-semibold text-slate-200 transition",
-                    isExporting ? "cursor-not-allowed opacity-50" : "hover:bg-[#26262f]"
-                  )}
-                  onClick={() => setShowExportModal(true)}
-                  disabled={isExporting}
-                  type="button"
-                >
-                  <AppIcon name="download" className="text-[10px]" />
-                  Export
-                </button>
-                <button
-                  className={cn(
-                    "pywebview-no-drag inline-flex h-7 items-center justify-center gap-1.5 rounded-md px-2 text-[11px] font-semibold transition",
-                    isPremium
-                      ? "bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/25"
-                      : "bg-gradient-to-r from-[#2563eb] via-[#4338ca] to-[#6d28d9] text-white shadow-[0_10px_24px_rgba(76,29,149,0.35)] hover:brightness-110",
-                    premiumStatusLoading && "opacity-60"
-                  )}
-                  onClick={handleOpenPremiumModal}
-                  type="button"
-                  disabled={premiumStatusLoading}
-                >
-                  <AppIcon name={isPremium ? "user" : "aiStar"} className="text-[11px]" />
-                  {isPremium ? "Premium Member" : "Get Premium"}
-                </button>
-                {showCustomWindowControls && !isMac ? (
-                  <div className="ml-2 flex items-center gap-1 pl-2">
-                    <button
-                      className="pywebview-no-drag inline-flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-[#151515] text-[10px] text-slate-200 hover:border-slate-500"
-                      onClick={() => handleWindowAction("minimize")}
-                      type="button"
-                      aria-label="Minimize"
-                      title="Minimize"
-                    >
-                      <AppIcon name="windowMinimize" className="text-[10px]" />
-                    </button>
-                    <button
-                      className="pywebview-no-drag inline-flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-[#151515] text-[10px] text-slate-200 hover:border-slate-500"
-                      onClick={() => handleWindowAction("zoom")}
-                      type="button"
-                      aria-label="Zoom"
-                      title="Zoom"
-                    >
-                      <AppIcon name="windowMaximize" className="text-[9px]" />
-                    </button>
-                    <button
-                      className="pywebview-no-drag inline-flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-[#151515] text-[10px] text-slate-200 hover:border-slate-500"
-                      onClick={() => handleWindowAction("close")}
-                      type="button"
-                      aria-label="Close"
-                      title="Close"
-                    >
-                      <AppIcon name="times" className="text-[10px]" />
-                    </button>
-                  </div>
-                ) : null}
-              </>
-            )}
-          </div>
-          {isHeaderCompact && isHeaderMenuOpen ? (
-            <div
-              ref={headerMenuRef}
-              className="pywebview-no-drag absolute right-3 top-10 z-[130] min-w-[190px] overflow-hidden rounded-lg border border-slate-800/40 bg-[#151515] text-[11px] text-slate-200 shadow-xl"
-            >
-              <button
-                className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#1b1b22]"
-                onClick={() => {
-                  setIsHeaderMenuOpen(false);
-                  handleOpenModal();
-                }}
-                type="button"
-              >
-                <AppIcon name="folderOpen" />
-                Open
-              </button>
-              <button
-                className={cn(
-                  "flex w-full items-center gap-2 px-3 py-2 text-left",
-                  isExporting ? "cursor-not-allowed opacity-50" : "hover:bg-[#1b1b22]"
-                )}
-                onClick={() => {
-                  if (isExporting) return;
-                  setIsHeaderMenuOpen(false);
-                  setShowExportModal(true);
-                }}
-                disabled={isExporting}
-                type="button"
-              >
-                <AppIcon name="download" />
-                Export
-              </button>
-              <button
-                className={cn(
-                  "flex w-full items-center gap-2 px-3 py-2 text-left",
-                  premiumStatusLoading ? "cursor-not-allowed opacity-60" : "hover:bg-[#1b1b22]"
-                )}
-                onClick={() => {
-                  if (premiumStatusLoading) return;
-                  setIsHeaderMenuOpen(false);
-                  handleOpenPremiumModal();
-                }}
-                type="button"
-                disabled={premiumStatusLoading}
-              >
-                <AppIcon name={isPremium ? "user" : "aiStar"} />
-                {isPremium ? "Premium Member" : "Get Premium"}
-              </button>
-              <button
-                className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#1b1b22]"
-                onClick={() => {
-                  setIsHeaderMenuOpen(false);
-                  handleTogglePinned();
-                }}
-                type="button"
-              >
-                <AppIcon name={isPinned ? "pin" : "pinOff"} className={cn(!isPinned && "rotate-45 opacity-70")} />
-                {isPinned ? "Unpin Window" : "Pin Window"}
-              </button>
-              {showCustomWindowControls && !isMac ? (
-                <>
-                  <div className="h-px bg-slate-800/60" />
-                  <button
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#1b1b22]"
-                    onClick={() => {
-                      setIsHeaderMenuOpen(false);
-                      handleWindowAction("minimize");
-                    }}
-                    type="button"
-                  >
-                    <AppIcon name="windowMinimize" />
-                    Minimize
-                  </button>
-                  <button
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#1b1b22]"
-                    onClick={() => {
-                      setIsHeaderMenuOpen(false);
-                      handleWindowAction("zoom");
-                    }}
-                    type="button"
-                  >
-                    <AppIcon name="windowMaximize" />
-                    Zoom
-                  </button>
-                  <button
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#1b1b22]"
-                    onClick={() => {
-                      setIsHeaderMenuOpen(false);
-                      handleWindowAction("close");
-                    }}
-                    type="button"
-                  >
-                    <AppIcon name="times" />
-                    Close
-                  </button>
-                </>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+        <HeaderBar
+          isMac={isMac}
+          isWindowFocused={isWindowFocused}
+          isAltPressed={isAltPressed}
+          isHeaderCompact={isHeaderCompact}
+          isHeaderMenuOpen={isHeaderMenuOpen}
+          showCustomWindowControls={showCustomWindowControls}
+          isPinned={isPinned}
+          isExporting={isExporting}
+          isPremium={isPremium}
+          premiumStatusLoading={premiumStatusLoading}
+          headerMenuRef={headerMenuRef}
+          headerMenuButtonRef={headerMenuButtonRef}
+          getHeaderDragProps={getHeaderDragProps}
+          onOpenModal={handleOpenModal}
+          onTogglePinned={handleTogglePinned}
+          onOpenExport={() => setShowExportModal(true)}
+          onOpenPremium={handleOpenPremiumModal}
+          onWindowAction={handleWindowAction}
+          onToggleHeaderMenu={() => setIsHeaderMenuOpen((prev) => !prev)}
+          onCloseHeaderMenu={() => setIsHeaderMenuOpen(false)}
+        />
         <div className={cn(layoutClass, "flex-1")}>
-          {/* Left */}
           {!isCompact ? (
             <aside className="row-start-1 row-end-2 flex min-h-0 flex-col bg-[#0b0b0b]">
               {leftPanelContent}
             </aside>
           ) : null}
 
-          {/* Middle */}
           <section className="row-start-1 row-end-2 flex min-h-0 flex-col bg-[#0b0b0b]">
             <div className={cn(dragRegionClass, "flex shrink-0 items-center justify-between px-4 py-2 text-xs text-slate-400")}>
               <div className="flex items-center gap-2">
@@ -5747,13 +4835,14 @@ export function App() {
                 </div>
               ) : null}
             </div>
-            {isPlayerModalVisible ? null : renderPlayerPanel(false)}
+            {isPlayerModalVisible ? null : playerPanel}
           </section>
 
-          {/* Right */}
           {!isCompact ? (
             <aside className="row-start-1 row-end-2 flex min-h-0 flex-col overflow-hidden bg-[#0b0b0b]">
-              <div className={cn(dragRegionClass, "flex items-center justify-between px-4 py-3 text-xs font-semibold text-slate-200")}>
+              <div
+                className={cn(dragRegionClass, "flex items-center justify-between px-4 py-3 text-xs font-semibold text-slate-200")}
+              >
                 <span>Caption Setting</span>
                 {segments.length > 0 ? (
                   <button
@@ -5782,1287 +4871,144 @@ export function App() {
                   </button>
                 ) : null}
               </div>
-              <div className="min-h-0 flex-1 px-3 py-3">
-                <div className="min-h-0 h-[calc(100vh-340px)] max-h-[calc(100vh-340px)] overflow-hidden">
-                  <div className="flex h-full min-h-0 flex-col gap-3">
-                    {showCaptionSetup ? captionSetupPanel : null}
-                    <div className="min-h-0 flex-1">
-                      <TranscriptPanel
-                        mediaRef={transcriptMediaRef}
-                        notify={notify}
-                        editEnabled={isTranscriptEdit}
-                        suppressEmptyState={showCaptionSetup}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <div className="min-h-0 flex-1 px-3 py-3">{captionSidebarContent}</div>
             </aside>
           ) : null}
 
-          {/* Bottom */}
-          <section
-            className={cn(
-              "col-span-1 row-start-2 row-end-3 flex flex-col bg-[#0b0b0b]",
-              isCompact ? "col-span-1" : "col-span-3"
-            )}
-          >
-            <div className="flex items-center justify-between px-4 py-2 text-xs text-slate-400">
-              <div className="flex items-center gap-2">
-                {segments.length > 0 ? (
-                  <button
-                    className={cn(
-                      isCompact
-                        ? "inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-200 transition hover:bg-white/10"
-                        : "inline-flex h-7 items-center gap-1.5 rounded-md bg-[#1b1b22] px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-[#26262f]"
-                    )}
-                    onClick={handleClearCaptions}
-                    type="button"
-                    aria-label="Clear captions"
-                    title="Clear captions"
-                  >
-                    <AppIcon name="trashAlt" className={cn("text-[10px]", isCompact && "text-[12px]")} />
-                    {isCompact ? null : "Clear captions"}
-                  </button>
-                ) : (
-                  <button
-                    className={cn(
-                      isCompact
-                        ? "inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-200 transition hover:bg-white/10"
-                        : "inline-flex h-7 items-center gap-1.5 rounded-md bg-[#1b1b22] px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-[#26262f]"
-                    )}
-                    onClick={handleLoadSrt}
-                    type="button"
-                    aria-label="Load Caption File"
-                    title="Load Caption File"
-                  >
-                    <AppIcon name="fileImport" className={cn("text-[10px]", isCompact && "text-[12px]")} />
-                    {isCompact ? null : "Load Caption File"}
-                  </button>
-                )}
-                <button
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[14px] font-bold text-slate-200 transition hover:bg-white/10"
-                  onClick={handleToggleChineseVariant}
-                  type="button"
-                  aria-label="Chinese variant"
-                  title="Chinese variant"
-                >
-                  {exportLanguage === "traditional" ? "繁" : "簡"}
-                </button>
-                <div className="flex items-center gap-1">
-                  <button
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[12px] font-bold text-slate-200 transition hover:bg-white/10"
-                    onClick={() => setSubtitleScale((v) => Math.max(0.8, Number((v - 0.15).toFixed(2))))}
-                    type="button"
-                    aria-label="Decrease subtitle size"
-                    title="Decrease subtitle size"
-                  >
-                    T-
-                  </button>
-                  <button
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[12px] font-bold text-slate-200 transition hover:bg-white/10"
-                    onClick={() => setSubtitleScale((v) => Math.min(2.4, Number((v + 0.15).toFixed(2))))}
-                    type="button"
-                    aria-label="Increase subtitle size"
-                    title="Increase subtitle size"
-                  >
-                    T+
-                  </button>
-                  <button
-                    className={cn(
-                      "inline-flex h-8 w-8 items-center justify-center rounded-md text-[12px] text-slate-200 transition hover:bg-white/10",
-                      !activeSubtitleSegment && "cursor-not-allowed opacity-50 hover:bg-transparent"
-                    )}
-                    onClick={() => handleSplitCaption(activeSubtitleSegment)}
-                    type="button"
-                    aria-label="Split caption"
-                    title="Split caption"
-                    disabled={!activeSubtitleSegment}
-                  >
-                    <AppIcon name="cut" className="text-[13px]" />
-                  </button>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                {!isCompact ? (
-                  <span className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Zoom</span>
-                ) : null}
-                <input
-                  type="range"
-                  min={0.5}
-                  max={3}
-                  step={0.1}
-                  value={timelineZoom}
-                  onChange={(event) => setTimelineZoom(Number(event.target.value))}
-                  className="h-1 w-28"
-                />
-              </div>
-            </div>
-
-            <div className="flex overflow-hidden">
-              <div className="flex w-full min-h-0 gap-2 pl-2">
-                <div className="flex w-8 flex-shrink-0 flex-col text-[11px] text-slate-400">
-                  <div className="flex h-10 items-center justify-center text-[10px] uppercase tracking-[0.2em] text-slate-500">
-                    ▦
-                  </div>
-                  <div className="mt-2 flex h-10 items-center justify-center">
-                    <AppIcon name="captions" className="text-[12px] text-slate-200" />
-                  </div>
-                </div>
-                <div
-                  className="flex min-h-0 flex-1 overflow-x-scroll overflow-y-hidden stt-scrollbar"
-                  ref={timelineScrollRef}
-                  onScroll={handleTimelineScroll}
-                  style={{
-                    scrollbarGutter: "stable both-edges",
-                    paddingRight: `${TIMELINE_RIGHT_PADDING_PX}px`
-                  }}
-                  onWheel={handleTimelineWheel}
-                >
-                  <div
-                    className="min-w-full pb-3"
-                    style={{ width: `${timelineScrollWidth}px` }}
-                  >
-                    <div className="relative">
-                      <div
-                        className="pointer-events-none absolute top-0 bottom-0 z-20 w-px bg-primary"
-                        style={{ left: `${playheadLeftPx}px` }}
-                      >
-                        <div className="absolute left-1/2 top-1 h-0 w-0 -translate-x-1/2 border-x-[4px] border-t-[6px] border-transparent border-t-primary" />
-                      </div>
-                      <div
-                        className="relative z-10 h-10 bg-[#0b0b0b] text-[10px] text-slate-500"
-                        style={{ width: `${timelineWidth}px` }}
-                        onPointerDown={onTrackPointerDown}
-                        onPointerMove={onTrackPointerMove}
-                        onPointerUp={onTrackPointerUp}
-                      >
-                        {ticks.map((tick, idx) => {
-                          const left = Math.max(0, tick * pxPerSec);
-                          const isFirst = idx === 0;
-                          const isLast = idx === ticks.length - 1;
-                          const translateClass = isFirst
-                            ? "translate-x-0"
-                            : isLast
-                              ? "-translate-x-full"
-                              : "-translate-x-1/2";
-                          return (
-                            <span
-                              key={`tick-${idx}`}
-                              className={cn("absolute top-1 cursor-ew-resize", translateClass)}
-                              style={{ left: `${left}px` }}
-                            >
-                              {formatTime(Math.max(0, tick))}
-                            </span>
-                          );
-                        })}
-                      </div>
-                      <div className="relative mt-2 space-y-1 pb-1" style={{ width: `${timelineWidth}px` }}>
-                        <div
-                          className="absolute -top-3 left-0 right-0 h-5 cursor-ew-resize"
-                          onPointerDown={onTrackPointerDown}
-                          onPointerMove={onTrackPointerMove}
-                          onPointerUp={onTrackPointerUp}
-                        />
-
-                        <div
-                          className="relative h-10 overflow-visible rounded-md bg-transparent"
-                          style={{ width: `${timelineWidth}px` }}
-                          ref={timelineTrackRef}
-                          onPointerDown={onTrackPointerDown}
-                          onPointerMove={onTrackPointerMove}
-                          onPointerUp={onTrackPointerUp}
-                          onMouseMove={handleCaptionHoverMove}
-                          onMouseLeave={() => {
-                            if (gapMenuOpenRef.current) return;
-                            setCaptionHover(null);
-                          }}
-                          onContextMenu={handleGapContextMenu}
-                        >
-                          {timelineSegmentEls}
-                          {gapMenu && gapMenuHighlight ? (
-                            <div
-                              className="pointer-events-none absolute top-0 z-[5] flex h-full items-center justify-center rounded-lg border border-primary/60 bg-primary/10 text-[10px] text-slate-100"
-                              style={{
-                                left: `${Math.max(0, gapMenu.gapStart * pxPerSec)}px`,
-                                width: `${Math.max(2, (gapMenu.gapEnd - gapMenu.gapStart) * pxPerSec)}px`
-                              }}
-                            />
-                          ) : null}
-                          {captionMenuGapAfter &&
-                          captionMenuGapHighlight &&
-                          captionMenuGapAfter.hasGap &&
-                          typeof captionMenuGapAfter.gapStart === "number" &&
-                          typeof captionMenuGapAfter.gapEnd === "number" ? (
-                            <div
-                              className="pointer-events-none absolute top-0 z-[5] flex h-full items-center justify-center rounded-lg border border-primary/60 bg-primary/10 text-[10px] text-slate-100"
-                              style={{
-                                left: `${Math.max(0, captionMenuGapAfter.gapStart * pxPerSec)}px`,
-                                width: `${Math.max(2, (captionMenuGapAfter.gapEnd - captionMenuGapAfter.gapStart) * pxPerSec)}px`
-                              }}
-                            />
-                          ) : null}
-                          {captionHover ? (
-                            <div
-                              className="pointer-events-auto absolute top-0 z-10 flex h-full cursor-pointer items-center justify-center rounded-lg border border-dashed border-slate-500/40 bg-white/5 text-[10px] text-slate-200 overflow-visible"
-                              style={{
-                                left: `${Math.max(0, captionHover.start * pxPerSec)}px`,
-                                width: `${Math.max(2, (captionHover.end - captionHover.start) * pxPerSec)}px`
-                              }}
-                              onPointerDown={(event) => {
-                                event.stopPropagation();
-                              }}
-                              onMouseMove={handleCaptionHoverMove}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                handleAddCaption(captionHover.start, captionHover.end);
-                                setCaptionHover(null);
-                              }}
-                            >
-                              <span className="pointer-events-none text-[12px] font-semibold text-white/90">+</span>
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                    </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          </section>
+          <TimelinePanel
+            isCompact={isCompact}
+            segmentsLength={segments.length}
+            exportLanguage={exportLanguage}
+            onClearCaptions={handleClearCaptions}
+            onLoadSrt={handleLoadSrt}
+            onToggleChineseVariant={handleToggleChineseVariant}
+            onSubtitleScaleDecrease={handleSubtitleScaleDecrease}
+            onSubtitleScaleIncrease={handleSubtitleScaleIncrease}
+            onSplitCaption={handleSplitCaption}
+            activeSubtitleSegment={activeSubtitleSegment}
+            timelineZoom={timelineZoom}
+            onTimelineZoomChange={setTimelineZoom}
+            timelineScrollRef={timelineScrollRef}
+            onTimelineScroll={handleTimelineScroll}
+            onTimelineWheel={handleTimelineWheel}
+            timelineScrollWidth={timelineScrollWidth}
+            timelineWidth={timelineWidth}
+            playheadLeftPx={playheadLeftPx}
+            ticks={ticks}
+            pxPerSec={pxPerSec}
+            onTrackPointerDown={onTrackPointerDown}
+            onTrackPointerMove={onTrackPointerMove}
+            onTrackPointerUp={onTrackPointerUp}
+            timelineSegmentEls={timelineSegmentEls}
+            gapMenu={gapMenu}
+            gapMenuHighlight={gapMenuHighlight}
+            captionMenuGapAfter={captionMenuGapAfter}
+            captionMenuGapHighlight={captionMenuGapHighlight}
+            captionHover={captionHover}
+            gapMenuOpenRef={gapMenuOpenRef}
+            onCaptionHoverMove={handleCaptionHoverMove}
+            onClearCaptionHover={() => setCaptionHover(null)}
+            onAddCaption={handleAddCaption}
+            onGapContextMenu={handleGapContextMenu}
+          />
         </div>
       </div>
 
-      {isCompact ? (
-        <>
-          <div
-            className={cn(
-              "fixed inset-0 z-[110] bg-black/60 transition-opacity",
-              isLeftDrawerOpen ? "opacity-100" : "pointer-events-none opacity-0"
-            )}
-            onClick={() => setIsLeftDrawerOpen(false)}
-          />
-          <div
-            className={cn(
-              "fixed left-0 top-0 z-[111] flex h-full w-[280px] flex-col bg-[#0b0b0b] shadow-2xl transition-transform",
-              isLeftDrawerOpen ? "translate-x-0" : "-translate-x-full"
-            )}
-          >
-            {leftPanelContent}
-          </div>
-        </>
-      ) : null}
-
-      {isPlayerModalVisible ? (
-        <div
-          className={cn(
-            "fixed inset-0 z-[140] flex flex-col bg-[#0b0b0b] transform-gpu transition-[opacity,transform] duration-200 ease-out",
-            isPlayerModalOpen ? "opacity-100 scale-100" : "pointer-events-none opacity-0 scale-[0.98]"
-          )}
-          onTransitionEnd={(event) => {
-            if (event.currentTarget !== event.target) return;
-            if (!isPlayerModalOpen) {
-              setIsPlayerModalVisible(false);
-            }
-          }}
-          aria-hidden={!isPlayerModalOpen}
-        >
-          <div {...getHeaderDragProps("flex items-center justify-between border-b border-slate-800/60 px-4 py-3")}>
-            <div className="text-xs font-semibold text-slate-200">Player Focus</div>
-              <button
-                className="pywebview-no-drag inline-flex h-7 items-center gap-1.5 rounded-md bg-[#1b1b22] px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-[#26262f]"
-                onClick={() => setIsPlayerModalOpen(false)}
-                type="button"
-              >
-                <AppIcon name="times" className="text-[10px]" />
-                Close
-              </button>
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-            <div className="flex min-h-0 flex-1">{renderPlayerPanel(true)}</div>
-            <aside className="flex min-h-0 w-full flex-col border-t border-slate-800/60 bg-[#0b0b0b] lg:w-[380px] lg:border-l lg:border-t-0">
-              <div className="flex items-center justify-between px-4 py-3 text-xs font-semibold text-slate-200">
-                <span>Caption Setting</span>
-                {segments.length > 0 ? (
-                  <button
-                    className={cn(
-                      "pywebview-no-drag inline-flex items-center gap-2 text-[10px] font-medium transition",
-                      isTranscriptEdit ? "text-slate-200" : "text-slate-500"
-                    )}
-                    onClick={() => setIsTranscriptEdit((prev) => !prev)}
-                    type="button"
-                  >
-                    <AppIcon name="edit" className="text-[11px]" />
-                    Edit
-                    <span
-                      className={cn(
-                        "relative inline-flex h-4 w-7 items-center rounded-full border transition",
-                        isTranscriptEdit ? "border-slate-500 bg-[#1b1b22]" : "border-slate-700 bg-[#151515]"
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "absolute h-3 w-3 rounded-full bg-white transition",
-                          isTranscriptEdit ? "translate-x-3" : "translate-x-1"
-                        )}
-                      />
-                    </span>
-                  </button>
-                ) : null}
-              </div>
-              <div className="min-h-0 flex-1 px-3 py-3">
-                <div className="flex h-full min-h-0 flex-col gap-3">
-                  {showCaptionSetup ? captionSetupPanel : null}
-                  <div className="min-h-0 flex-1">
-                    <TranscriptPanel
-                      mediaRef={transcriptMediaRef}
-                      notify={notify}
-                      editEnabled={isTranscriptEdit}
-                      suppressEmptyState={showCaptionSetup}
-                    />
-                  </div>
-                </div>
-              </div>
-            </aside>
-          </div>
-        </div>
-      ) : null}
-
-      {captionMenu && captionMenuPosition ? (
-        <div
-          className="fixed inset-0 z-[125]"
-          onClick={() => setCaptionMenu(null)}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            setCaptionMenu(null);
-          }}
-        >
-          <div
-            className="absolute w-[180px] overflow-hidden rounded-lg border border-slate-700/60 bg-[#121212] shadow-[0_16px_40px_rgba(0,0,0,0.55)]"
-            style={{ left: `${captionMenuPosition.left}px`, top: `${captionMenuPosition.top}px` }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button
-              className="w-full px-3 py-2 text-left text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
-              onClick={() => {
-                handleSplitCaption(captionMenu.segment);
-                setCaptionMenu(null);
-              }}
-              type="button"
-            >
-              Split caption
-            </button>
-            <button
-              className={cn(
-                "w-full px-3 py-2 text-left text-[11px] font-semibold transition",
-                captionMenuGapAfter?.hasNext
-                  ? "text-slate-200 hover:bg-[#1b1b22]"
-                  : "cursor-not-allowed text-slate-500"
-              )}
-              onClick={() => {
-                if (!captionMenuGapAfter?.hasNext) return;
-                const hasGap = Boolean(captionMenuGapAfter?.hasGap);
-                const maxRemoveMs = Math.max(
-                  0,
-                  Math.round(((captionMenuGapAfter?.gapEnd ?? 0) - (captionMenuGapAfter?.gapStart ?? 0)) * 1000)
-                );
-                setGapAdjustModal({
-                  segment: captionMenu.segment,
-                  mode: "insert",
-                  ms: "1000",
-                  maxRemoveMs,
-                  hasGap
-                });
-                setCaptionMenu(null);
-              }}
-              onMouseEnter={() => {
-                if (captionMenuGapAfter?.hasGap) {
-                  setCaptionMenuGapHighlight(true);
-                }
-              }}
-              onMouseLeave={() => setCaptionMenuGapHighlight(false)}
-              type="button"
-              disabled={!captionMenuGapAfter?.hasNext}
-            >
-              Insert/Remove Gap After…
-            </button>
-            <button
-              className="w-full px-3 py-2 text-left text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
-              onClick={() => {
-                handleDeleteCaption(captionMenu.segment);
-                setCaptionMenu(null);
-              }}
-              type="button"
-            >
-              Delete caption
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {gapMenu && gapMenuPosition ? (
-        <div
-          className="fixed inset-0 z-[125]"
-          onClick={() => {
-            closeGapMenu();
-            setCaptionHover(null);
-          }}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            closeGapMenu();
-          }}
-        >
-          <div
-            className="absolute w-max overflow-hidden rounded-lg border border-slate-700/60 bg-[#121212] shadow-[0_16px_40px_rgba(0,0,0,0.55)]"
-            style={{ left: `${gapMenuPosition.left}px`, top: `${gapMenuPosition.top}px` }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button
-              className="w-full px-3 py-2 text-left text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
-              onClick={() => {
-                handleRemoveGap(gapMenu.gapStart, gapMenu.gapEnd);
-                closeGapMenu();
-                setCaptionHover(null);
-              }}
-              onMouseEnter={() => setGapMenuHighlight(true)}
-              onMouseLeave={() => setGapMenuHighlight(false)}
-              type="button"
-            >
-              Remove Gap
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {gapAdjustModal ? (
-        <div
-          className="fixed inset-0 z-[140] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-          onClick={() => setGapAdjustModal(null)}
-        >
-          <div
-            className="w-full max-w-[420px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
-            role="dialog"
-            aria-modal="true"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="p-5">
-              <div>
-                <div className="text-sm font-semibold text-slate-100">Adjust Gap After</div>
-                <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-                  Insert or remove time after this caption (milliseconds).
-                </p>
-              </div>
-              <div className="mt-4">
-                <div className="relative flex items-center rounded-full bg-[#151515] p-1 text-[11px] font-semibold">
-                  <span
-                    className={cn(
-                      "absolute inset-y-1 w-1/2 rounded-full bg-white transition-transform duration-200",
-                      gapAdjustModal.mode === "insert" ? "translate-x-0" : "translate-x-full"
-                    )}
-                  />
-                  <button
-                    className={cn(
-                      "relative z-10 inline-flex flex-1 items-center justify-center rounded-full px-3 py-1.5 transition",
-                      gapAdjustModal.mode === "insert" ? "text-[#0b0b0b]" : "text-slate-200"
-                    )}
-                    onClick={() => {
-                      if (gapAdjustModal.mode === "insert") return;
-                      const nextMs = gapAdjustModal.ms.trim() ? gapAdjustModal.ms : "1000";
-                      setGapAdjustModal({ ...gapAdjustModal, mode: "insert", ms: nextMs });
-                    }}
-                    type="button"
-                  >
-                    Insert
-                  </button>
-                  <button
-                    className={cn(
-                      "relative z-10 inline-flex flex-1 items-center justify-center rounded-full px-3 py-1.5 transition",
-                      gapAdjustModal.hasGap
-                        ? gapAdjustModal.mode === "remove"
-                          ? "text-[#0b0b0b]"
-                          : "text-slate-200"
-                        : "cursor-not-allowed text-slate-500"
-                    )}
-                    onClick={() => {
-                      if (!gapAdjustModal.hasGap) return;
-                      const currentMs = gapAdjustModal.ms.trim();
-                      const numeric = currentMs ? Number(currentMs) : Number.NaN;
-                      const clamped =
-                        Number.isFinite(numeric) && gapAdjustModal.maxRemoveMs > 0
-                          ? Math.min(Math.max(0, numeric), gapAdjustModal.maxRemoveMs)
-                          : gapAdjustModal.maxRemoveMs;
-                      setGapAdjustModal({
-                        ...gapAdjustModal,
-                        mode: "remove",
-                        ms: String(clamped)
-                      });
-                    }}
-                    type="button"
-                    disabled={!gapAdjustModal.hasGap}
-                  >
-                    Remove
-                  </button>
-                </div>
-              </div>
-              <div className="mt-4 flex items-center gap-2">
-                <input
-                  type="number"
-                  min={0}
-                  step={100}
-                  max={gapAdjustModal.mode === "remove" ? gapAdjustModal.maxRemoveMs : undefined}
-                  value={gapAdjustModal.ms}
-                  onChange={(event) => {
-                    const nextValue = event.target.value;
-                    if (nextValue === "") {
-                      setGapAdjustModal({ ...gapAdjustModal, ms: "" });
-                      return;
-                    }
-                    if (gapAdjustModal.mode === "remove") {
-                      const numeric = Number(nextValue);
-                      if (Number.isFinite(numeric) && gapAdjustModal.maxRemoveMs > 0) {
-                        const clamped = Math.min(Math.max(0, numeric), gapAdjustModal.maxRemoveMs);
-                        setGapAdjustModal({ ...gapAdjustModal, ms: String(clamped) });
-                        return;
-                      }
-                    }
-                    setGapAdjustModal({ ...gapAdjustModal, ms: nextValue });
-                  }}
-                  className="w-full flex-1 rounded-md bg-[#0b0b0b] px-3 py-2 text-[11px] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-[#3b82f6]/60"
-                  autoFocus
-                />
-                <span className="text-[11px] text-slate-500">ms</span>
-              </div>
-              {gapAdjustModal.mode === "remove" && gapAdjustModal.hasGap ? (
-                <p className="mt-2 text-[10px] text-slate-500">
-                  Max removable: {gapAdjustModal.maxRemoveMs} ms
-                </p>
-              ) : null}
-              <div className="mt-5 flex items-center justify-end gap-2">
-                <button
-                  className="rounded-md bg-transparent px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
-                  onClick={() => setGapAdjustModal(null)}
-                  type="button"
-                >
-                  Cancel
-                </button>
-                <button
-                  className="rounded-md bg-white px-3 py-1.5 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95"
-                  onClick={() => {
-                    const valueMs = gapAdjustModal.ms.trim() ? Number(gapAdjustModal.ms) : 0;
-                    if (!Number.isFinite(valueMs) || valueMs <= 0) {
-                      notify("Please enter a valid gap in milliseconds.", "error");
-                      return;
-                    }
-                    if (gapAdjustModal.mode === "remove" && valueMs > gapAdjustModal.maxRemoveMs) {
-                      notify("Remove gap exceeds the available gap.", "error");
-                      return;
-                    }
-                    handleAdjustGapAfter(
-                      gapAdjustModal.segment,
-                      gapAdjustModal.mode,
-                      valueMs,
-                      gapAdjustModal.maxRemoveMs
-                    );
-                    setGapAdjustModal(null);
-                  }}
-                  type="button"
-                >
-                  Apply
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {alertModal ? (
-        <div
-          className="fixed inset-0 z-[140] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-          onClick={() => setAlertModal(null)}
-        >
-          <div
-            className="w-full max-w-[420px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
-            role="dialog"
-            aria-modal="true"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="p-5">
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#111827] text-[#60a5fa]">
-                  <AppIcon
-                    name={
-                      alertModal.tone === "success"
-                        ? "checkCircle"
-                        : alertModal.tone === "error"
-                          ? "exclamationTriangle"
-                          : "exclamationCircle"
-                    }
-                    className="text-[16px]"
-                  />
-                </div>
-                <div>
-                  <div className="text-sm font-semibold text-slate-100">{alertModal.title}</div>
-                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">{alertModal.message}</p>
-                </div>
-              </div>
-              <div className="mt-5 flex items-center justify-end gap-2">
-                <button
-                  className="inline-flex h-7 items-center justify-center rounded-md bg-[#1b1b22] px-3 text-[11px] font-semibold text-slate-200 transition hover:bg-[#26262f]"
-                  onClick={() => setAlertModal(null)}
-                  type="button"
-                >
-                  OK
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {showOpenModal ? (
-        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div
-            className="w-full max-w-[460px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
-            role="dialog"
-            aria-modal="true"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="p-5">
-              <div>
-                <div className="text-sm font-semibold text-slate-100">Open</div>
-                <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-                  Import a local file or load YouTube media.
-                </p>
-              </div>
-              <div className="mt-4 space-y-3">
-                <button
-                  className={cn(
-                    "group w-full rounded-xl px-4 py-3 text-left transition",
-                    youtubeImporting ? "cursor-not-allowed opacity-50" : "hover:bg-[#151515]"
-                  )}
-                  onClick={handleOpenLocalFromModal}
-                  type="button"
-                  disabled={youtubeImporting}
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center text-white">
-                      <AppIcon name="video" className="text-[16px]" />
-                    </div>
-                    <div>
-                      <div className="text-[12px] font-semibold text-slate-100">Import video / audio</div>
-                      <p className="mt-1 text-[11px] text-slate-400">
-                        Choose a local media file to continue.
-                      </p>
-                    </div>
-                  </div>
-                </button>
-                <button
-                  className={cn(
-                    "group w-full rounded-xl px-4 py-3 text-left transition",
-                    youtubeImporting ? "cursor-not-allowed opacity-50" : "hover:bg-[#151515]"
-                  )}
-                  onClick={handleOpenYoutubeModal}
-                  type="button"
-                  disabled={youtubeImporting}
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center text-[#ff0000]">
-                      <AppIcon name="youtube" className="text-[18px]" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="text-[12px] font-semibold text-slate-100">From YouTube</div>
-                      <p className="mt-1 text-[11px] text-slate-400">
-                        Load from Youtube media.
-                      </p>
-                    </div>
-                  </div>
-                </button>
-              </div>
-              <div className="mt-5 flex items-center justify-end gap-2">
-                <button
-                  className="rounded-md bg-transparent px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
-                  onClick={() => setShowOpenModal(false)}
-                  type="button"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {showYoutubeModal || youtubeImporting ? (
-        <div
-          className="fixed inset-0 z-[135] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-          onClick={() => {
-            if (!youtubeImporting) {
-              setShowYoutubeModal(false);
-            }
-          }}
-        >
-          <div
-            className="w-full max-w-[460px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
-            role="dialog"
-            aria-modal="true"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="p-5">
-              <div className="flex items-start gap-3">
-                <AppIcon name="youtube" className="text-[22px] text-[#ff0000]" />
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-semibold text-slate-100 truncate">
-                    {youtubeImportTitle ? youtubeImportTitle : "Load YouTube media"}
-                  </div>
-                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-                    Paste a YouTube link to import media.
-                  </p>
-                </div>
-              </div>
-              <div className="mt-4 space-y-3">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="url"
-                    value={youtubeUrl}
-                    onChange={(event) => {
-                      setYoutubeUrl(event.target.value);
-                      if (youtubeError) {
-                        setYoutubeError(null);
-                      }
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        if (!youtubeImporting) {
-                          void handleImportYoutube();
-                        }
-                      }
-                    }}
-                    placeholder="Paste a YouTube link"
-                    className={cn(
-                      "w-full flex-1 rounded-xl bg-[#0b0b0b] px-3 py-2 text-[11px] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-[#3b82f6]/60",
-                      youtubeImporting && "cursor-not-allowed opacity-60"
-                    )}
-                    disabled={youtubeImporting}
-                  />
-                  {youtubeImporting ? (
-                    <div className="flex h-8 w-8 items-center justify-center">
-                      <AppIcon name="spinner" className="text-[14px] text-slate-200" spin />
-                    </div>
-                  ) : (
-                    <button
-                      className="rounded-md bg-white px-3 py-2 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95 disabled:opacity-60"
-                      onClick={() => void handleImportYoutube()}
-                      type="button"
-                      disabled={!youtubeUrl.trim()}
-                    >
-                      Import
-                    </button>
-                  )}
-                </div>
-                {youtubeError ? <p className="text-[11px] text-rose-400">{youtubeError}</p> : null}
-                {youtubeImporting ? (
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#1b1b22]">
-                    <div
-                      className={cn(
-                        "h-full rounded-full transition-all",
-                        isYoutubeIndeterminate ? "youtube-progress-active" : "bg-white"
-                      )}
-                      style={{
-                        width: `${Math.max(0, Math.min(100, youtubeProgressValue))}%`
-                      }}
-                    />
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {showPremiumModal ? (
-        <div
-          className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-          onClick={() => setShowPremiumModal(false)}
-        >
-          <div
-            className="w-full max-w-[720px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
-            role="dialog"
-            aria-modal="true"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex h-[70vh] w-full flex-col">
-              <div className="relative flex-1">
-                {premiumWebviewStatus !== "error" ? (
-                  <iframe
-                    key={premiumIframeKey}
-                    ref={premiumWebviewRef}
-                    title="Premium Webview"
-                    src={`/premium/webview?url=${encodeURIComponent(
-                      (import.meta as any)?.env?.VITE_PREMIUM_PAGE_URL || "https://www.google.com"
-                    )}`}
-                    className="h-full w-full border-0 bg-black"
-                    onLoad={handlePremiumWebviewLoad}
-                    onError={handlePremiumWebviewError}
-                  />
-                ) : null}
-                {premiumWebviewStatus === "loading" ? (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#0f0f10] text-slate-200">
-                    <AppIcon name="spinner" className="text-[18px] text-white/80" spin />
-                    <div className="text-[12px] font-semibold">Loading content…</div>
-                    <div className="text-[10px] text-slate-400">Fetching the latest Premium page</div>
-                  </div>
-                ) : null}
-                {premiumWebviewStatus === "error" ? (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-[#0f0f10] px-8 text-center text-slate-200">
-                    <div className="flex h-20 w-20 items-center justify-center">
-                      <svg
-                        viewBox="0 0 120 120"
-                        className="h-14 w-14 text-slate-200/80"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="3"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M20 62c0-18 16-32 35-32 9 0 18 4 24 10 3-1 6-2 9-2 11 0 20 9 20 20 0 12-9 22-21 22H42c-12 0-22-10-22-22z" />
-                        <path d="M38 82l44-36" />
-                        <path d="M46 90l-8 8" />
-                        <path d="M74 90l8 8" />
-                      </svg>
-                    </div>
-                    <div className="text-[15px] font-semibold text-slate-100">Unable to load</div>
-                    <div className="max-w-[360px] text-[12px] text-slate-400">
-                      {premiumWebviewError ?? "Please check your connection and try again."}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handlePremiumRetry}
-                      className="inline-flex h-8 items-center justify-center rounded-full px-3 text-[11px] font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
-                    >
-                      Try again
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-              <div className="px-4 py-4">
-                <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-slate-200">
-                  <span className="text-slate-400">Your machine code</span>
-                  <span className="break-all font-mono">
-                    {machineIdLoading ? "Loading..." : machineId ?? "Unknown"}
-                  </span>
-                  <button
-                    className={cn(
-                      "inline-flex h-5 w-5 items-center justify-center rounded-md text-[9px] text-slate-300 transition hover:bg-white/10 hover:text-white",
-                      machineIdCopied && "text-emerald-300"
-                    )}
-                    onClick={handleCopyMachineId}
-                    type="button"
-                    disabled={!machineId || machineIdLoading}
-                    aria-label={machineIdCopied ? "Copied" : "Copy machine code"}
-                    title={machineIdCopied ? "Copied" : "Copy"}
-                  >
-                    <AppIcon name={machineIdCopied ? "check" : "copy"} className="text-[9px]" />
-                  </button>
-                </div>
-                <div className="mt-3 flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={premiumKey}
-                    onChange={(event) => setPremiumKey(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void handleConfirmPremiumKey();
-                      }
-                    }}
-                    placeholder="Enter your key"
-                    className="w-full flex-1 rounded-full border-0 bg-[#151515] px-4 py-2 text-[11px] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-[#3b82f6]/60"
-                    disabled={isPremium || premiumKeySubmitting}
-                  />
-                  <button
-                    className="rounded-full bg-white px-4 py-2 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95 disabled:opacity-60"
-                    type="button"
-                    onClick={() => void handleConfirmPremiumKey()}
-                    disabled={!premiumKey.trim() || isPremium || premiumKeySubmitting}
-                  >
-                    {premiumKeySubmitting ? "Verifying..." : isPremium ? "Activated" : "Confirm"}
-                  </button>
-                </div>
-                {isPremium ? (
-                  <p className="mt-2 text-[11px] font-semibold text-emerald-300">
-                    Premium is active on this machine.
-                  </p>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {showPremiumStatusModal ? (
-        <div
-          className="fixed inset-0 z-[131] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-          onClick={() => setShowPremiumStatusModal(false)}
-        >
-          <div
-            className="w-full max-w-[420px] overflow-hidden rounded-2xl border border-emerald-500/20 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
-            role="dialog"
-            aria-modal="true"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="p-5">
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-200">
-                  <AppIcon name="user" className="text-[14px]" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-semibold text-slate-100">Premium Member</div>
-                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-                    This machine is activated for Premium.
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-2 text-[11px] text-slate-300">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-slate-500">Machine code</span>
-                  <span className="max-w-[230px] break-all text-right font-mono text-slate-200">
-                    {premiumDetails?.machineId ?? machineId ?? "Unknown"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-slate-500">Activated</span>
-                  <span className="text-slate-200">
-                    {formatTimestamp(premiumDetails?.activatedAt)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-slate-500">Expires</span>
-                  <span className="text-emerald-300">Lifetime</span>
-                </div>
-              </div>
-
-              <div className="mt-4 flex items-center justify-between">
-                <button
-                  className="inline-flex h-8 items-center justify-center rounded-full border border-emerald-500/30 px-3 text-[11px] font-semibold text-emerald-200 transition hover:bg-emerald-500/10 disabled:opacity-60"
-                  onClick={handleCopyMachineId}
-                  type="button"
-                  disabled={!machineId || machineIdLoading}
-                >
-                  Copy machine code
-                </button>
-                <button
-                  className="inline-flex h-8 items-center justify-center rounded-full bg-white px-4 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95"
-                  onClick={() => setShowPremiumStatusModal(false)}
-                  type="button"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {updateModal ? (
-        <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div
-            className="w-full max-w-[420px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
-            role="dialog"
-            aria-modal="true"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="p-5">
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 items-center justify-center text-white">
-                  <svg
-                    viewBox="0 0 24 24"
-                    className="h-5 w-5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M20 16.5a4.5 4.5 0 0 0-2-8.5h-0.6A7 7 0 1 0 5 16.2" />
-                    <path d="M12 12v7" />
-                    <path d="m8.5 15.5 3.5 3.5 3.5-3.5" />
-                  </svg>
-                </div>
-                <div>
-                  <div className="text-sm font-semibold text-slate-100">
-                    {updateForceRequired ? "Update required" : "Update available"}
-                  </div>
-                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-                    Latest version is available.
-                  </p>
-                </div>
-              </div>
-              <div className="mt-4 grid gap-2 text-[11px] text-slate-300">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500">Current version</span>
-                  <span>{updateCurrentVersion ?? "Unknown"}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500">Latest version</span>
-                  <span>{updateLatestVersion ?? "Unknown"}</span>
-                </div>
-                {updateModal.publishedAt ? (
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Published</span>
-                    <span>{updateModal.publishedAt}</span>
-                  </div>
-                ) : null}
-              </div>
-              <div className="mt-5 flex items-center justify-end gap-2">
-                <button
-                  className="rounded-md bg-transparent px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
-                  onClick={() => {
-                    if (updateForceRequired) {
-                      handleWindowAction("close");
-                      return;
-                    }
-                    setUpdateModal(null);
-                  }}
-                  type="button"
-                >
-                  {updateForceRequired ? "Exit" : "Later"}
-                </button>
-                {updateAvailable ? (
-                  <button
-                    className={cn(
-                      "rounded-md bg-white px-3 py-1.5 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95",
-                      !updateModal.downloadUrl && "cursor-not-allowed opacity-60"
-                    )}
-                    onClick={() => {
-                      if (updateModal.downloadUrl) {
-                        openExternalUrl(updateModal.downloadUrl);
-                        handleWindowAction("close");
-                      }
-                    }}
-                    type="button"
-                    disabled={!updateModal.downloadUrl}
-                  >
-                    {updateForceRequired ? "Update now" : "Update"}
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {showExportModal ? (
-        <div
-          className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-          onClick={() => setShowExportModal(false)}
-        >
-          <div
-            className="w-full max-w-[420px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
-            role="dialog"
-            aria-modal="true"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="p-5">
-              <div>
-                <div className="text-sm font-semibold text-slate-100">Export</div>
-                <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-                  Choose a format to export your captions.
-                </p>
-              </div>
-              <div className="mt-4 space-y-3">
-                <button
-                  className={cn(
-                    "group w-full rounded-xl px-4 py-3 text-left transition",
-                    isExporting ? "cursor-not-allowed opacity-50" : "hover:bg-[#151515]"
-                  )}
-                  onClick={() => {
-                    if (isExporting) return;
-                    setShowExportModal(false);
-                    void handleExportSrt();
-                  }}
-                  disabled={isExporting}
-                  type="button"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center text-white">
-                      <AppIcon name="captions" className="text-[18px]" />
-                    </div>
-                    <div>
-                      <div className="text-[12px] font-semibold text-slate-100">Standard SRT</div>
-                      <p className="mt-1 text-[11px] text-slate-400">
-                        Best for video editors and media players.
-                      </p>
-                    </div>
-                  </div>
-                </button>
-                <button
-                  className={cn(
-                    "group w-full rounded-xl px-4 py-3 text-left transition",
-                    isExporting ? "cursor-not-allowed opacity-50" : "hover:bg-[#151515]"
-                  )}
-                  onClick={() => {
-                    if (isExporting) return;
-                    setShowExportModal(false);
-                    void handleExportTranscript();
-                  }}
-                  disabled={isExporting}
-                  type="button"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center text-white">
-                      <AppIcon name="edit" className="text-[17px]" />
-                    </div>
-                    <div>
-                      <div className="text-[12px] font-semibold text-slate-100">Plain Text</div>
-                      <p className="mt-1 text-[11px] text-slate-400">
-                        A clean transcript without timestamps.
-                      </p>
-                    </div>
-                  </div>
-                </button>
-              </div>
-              <div className="mt-5 flex items-center justify-end gap-2">
-                <button
-                  className="rounded-md bg-transparent px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
-                  onClick={() => setShowExportModal(false)}
-                  type="button"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {modelDownloadActive ? (
-        <div className="fixed inset-0 z-[135] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div
-            className="w-full max-w-[460px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
-            role="dialog"
-            aria-modal="true"
-          >
-            <div className="p-5">
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#111827] text-[#60a5fa]">
-                  <AppIcon
-                    name={modelDownload.status === "error" ? "exclamationTriangle" : "download"}
-                    className="text-[16px]"
-                  />
-                </div>
-                <div className="flex-1">
-                  <div className="text-sm font-semibold text-slate-100">{modelDownloadTitle}</div>
-                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">{modelDownload.message}</p>
-                </div>
-              </div>
-
-              {modelDownload.status !== "error" ? (
-                <div className="mt-4 space-y-2">
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-[#1f2937]">
-                    {modelDownload.progress !== null ? (
-                      <div
-                        className="h-full rounded-full bg-primary transition-all"
-                        style={{ width: `${Math.max(2, Math.min(100, modelDownload.progress))}%` }}
-                      />
-                    ) : (
-                      <div className="h-full w-full animate-pulse rounded-full bg-primary/60" />
-                    )}
-                  </div>
-                  <div className="flex items-center justify-between text-[10px] text-slate-400">
-                    <span>{modelDownload.progress !== null ? `${modelDownload.progress}%` : "Preparing..."}</span>
-                    <span>{modelProgressText ?? ""}</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="mt-4 space-y-2 text-[11px] text-slate-400">
-                  {modelDownload.detail ? <p>{modelDownload.detail}</p> : null}
-                  {modelDownload.downloadUrl ? (
-                    <p>
-                      Download URL:
-                      <span className="ml-1 break-all text-slate-200">{modelDownload.downloadUrl}</span>
-                    </p>
-                  ) : null}
-                  {modelDownload.expectedPath ? (
-                    <p>
-                      Save the model to:
-                      <span className="ml-1 break-all text-slate-200">{modelDownload.expectedPath}</span>
-                    </p>
-                  ) : null}
-                </div>
-              )}
-
-              {modelDownload.status === "error" ? (
-                <div className="mt-5 flex items-center justify-end gap-2">
-                  <button
-                    className="rounded-md border border-slate-700 bg-[#151515] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500"
-                    onClick={clearModelDownload}
-                    type="button"
-                  >
-                    Close
-                  </button>
-                  <button
-                    className="rounded-md bg-white px-3 py-1.5 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95"
-                    onClick={handleRetryModelDownload}
-                    type="button"
-                  >
-                    Retry Download
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {showImportModal ? (
-        <div
-          className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-          onClick={() => setShowImportModal(false)}
-        >
-          <div
-            className="w-full max-w-[420px] overflow-hidden rounded-2xl border border-slate-700/40 bg-[#0f0f10] shadow-[0_24px_60px_rgba(0,0,0,0.55)]"
-            role="dialog"
-            aria-modal="true"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="p-5">
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#111827] text-[#60a5fa]">
-                  <AppIcon name="exclamationTriangle" className="text-[16px]" />
-                </div>
-                <div>
-                  <div className="text-sm font-semibold text-slate-100">Open media to generate captions</div>
-                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-                    Open a video or audio file first, then run AI captions.
-                  </p>
-                </div>
-              </div>
-              <div className="mt-5 flex items-center justify-end gap-2">
-                <button
-                  className="rounded-md bg-transparent px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:bg-[#1b1b22]"
-                  onClick={() => setShowImportModal(false)}
-                  type="button"
-                >
-                  Cancel
-                </button>
-                <button
-                  className="rounded-md bg-white px-3 py-1.5 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95"
-                  onClick={() => {
-                    setShowImportModal(false);
-                    handleOpenModal();
-                  }}
-                  type="button"
-                >
-                  Open Media
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <AppOverlays
+        isCompact={isCompact}
+        isLeftDrawerOpen={isLeftDrawerOpen}
+        onCloseLeftDrawer={() => setIsLeftDrawerOpen(false)}
+        leftPanelContent={leftPanelContent}
+        isPlayerModalVisible={isPlayerModalVisible}
+        isPlayerModalOpen={isPlayerModalOpen}
+        onClosePlayerModal={() => setIsPlayerModalOpen(false)}
+        onPlayerModalTransitionEnd={() => setIsPlayerModalVisible(false)}
+        getHeaderDragProps={getHeaderDragProps}
+        playerPanel={playerModalPanel}
+        captionSidebarContent={captionSidebarModalContent}
+        segmentsLength={segments.length}
+        isTranscriptEdit={isTranscriptEdit}
+        onToggleTranscriptEdit={() => setIsTranscriptEdit((prev) => !prev)}
+        captionMenu={captionMenu}
+        captionMenuPosition={captionMenuPosition}
+        captionMenuGapAfter={captionMenuGapAfter}
+        captionMenuGapHighlight={captionMenuGapHighlight}
+        setCaptionMenuGapHighlight={setCaptionMenuGapHighlight}
+        onSplitCaption={handleSplitCaption}
+        onDeleteCaption={handleDeleteCaption}
+        onOpenGapAdjust={handleOpenGapAdjust}
+        onCloseCaptionMenu={closeCaptionMenu}
+        gapMenu={gapMenu}
+        gapMenuPosition={gapMenuPosition}
+        gapMenuHighlight={gapMenuHighlight}
+        setGapMenuHighlight={setGapMenuHighlight}
+        onRemoveGap={handleRemoveGap}
+        onCloseGapMenu={handleCloseGapMenu}
+        gapAdjustModal={gapAdjustModal}
+        setGapAdjustModal={setGapAdjustModal}
+        onAdjustGapAfter={handleAdjustGapAfter}
+        notify={notify}
+        alertModal={alertModal}
+        setAlertModal={setAlertModal}
+        showOpenModal={showOpenModal}
+        setShowOpenModal={setShowOpenModal}
+        youtubeImporting={youtubeImporting}
+        onOpenLocalFromModal={handleOpenLocalFromModal}
+        onOpenYoutubeModal={handleOpenYoutubeModal}
+        showYoutubeModal={showYoutubeModal}
+        setShowYoutubeModal={setShowYoutubeModal}
+        youtubeImportTitle={youtubeImportTitle}
+        youtubeUrl={youtubeUrl}
+        setYoutubeUrl={setYoutubeUrl}
+        youtubeError={youtubeError}
+        setYoutubeError={setYoutubeError}
+        onImportYoutube={handleImportYoutube}
+        isYoutubeIndeterminate={isYoutubeIndeterminate}
+        youtubeProgressValue={youtubeProgressValue}
+        showPremiumModal={showPremiumModal}
+        setShowPremiumModal={setShowPremiumModal}
+        premiumWebviewStatus={premiumWebviewStatus}
+        premiumIframeKey={premiumIframeKey}
+        premiumWebviewRef={premiumWebviewRef}
+        onPremiumWebviewLoad={handlePremiumWebviewLoad}
+        onPremiumWebviewError={handlePremiumWebviewError}
+        premiumWebviewError={premiumWebviewError}
+        onPremiumRetry={handlePremiumRetry}
+        machineIdLoading={machineIdLoading}
+        machineId={machineId}
+        machineIdCopied={machineIdCopied}
+        onCopyMachineId={handleCopyMachineId}
+        premiumKey={premiumKey}
+        setPremiumKey={setPremiumKey}
+        onConfirmPremiumKey={handleConfirmPremiumKey}
+        premiumKeySubmitting={premiumKeySubmitting}
+        isPremium={isPremium}
+        showPremiumStatusModal={showPremiumStatusModal}
+        setShowPremiumStatusModal={setShowPremiumStatusModal}
+        premiumDetails={premiumDetails}
+        updateModal={updateModal}
+        updateForceRequired={updateForceRequired}
+        updateAvailable={updateAvailable}
+        updateCurrentVersion={updateCurrentVersion}
+        updateLatestVersion={updateLatestVersion}
+        onOpenExternalUrl={openExternalUrl}
+        onWindowAction={handleWindowAction}
+        clearUpdateModal={() => setUpdateModal(null)}
+        showExportModal={showExportModal}
+        setShowExportModal={setShowExportModal}
+        isExporting={isExporting}
+        onExportSrt={handleExportSrt}
+        onExportTranscript={handleExportTranscript}
+        modelDownloadActive={modelDownloadActive}
+        modelDownload={modelDownload}
+        modelDownloadTitle={modelDownloadTitle}
+        modelProgressText={modelProgressText}
+        onClearModelDownload={clearModelDownload}
+        onRetryModelDownload={handleRetryModelDownload}
+        showImportModal={showImportModal}
+        setShowImportModal={setShowImportModal}
+        onOpenModal={handleOpenModal}
+      />
 
       <input
         ref={srtInputRef}
@@ -7080,7 +5026,6 @@ export function App() {
         }}
       />
       <audio ref={audioRef} preload="auto" src={audioPreviewSrc || undefined} className="sr-only" />
-
     </>
   );
 }
