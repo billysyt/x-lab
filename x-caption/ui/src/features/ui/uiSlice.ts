@@ -4,11 +4,25 @@ import type { AppTab } from "../../shared/types";
 type AppState = {
   activeTab: AppTab;
   version: string | null;
+  showExportModal: boolean;
+  showPremiumModal: boolean;
+  showPremiumStatusModal: boolean;
+  isPlayerModalOpen: boolean;
+  isPlayerModalVisible: boolean;
+  isLeftDrawerOpen: boolean;
+  isTranscriptEdit: boolean;
 };
 
 const initialState: AppState = {
   activeTab: "media",
-  version: null
+  version: null,
+  showExportModal: false,
+  showPremiumModal: false,
+  showPremiumStatusModal: false,
+  isPlayerModalOpen: false,
+  isPlayerModalVisible: false,
+  isLeftDrawerOpen: false,
+  isTranscriptEdit: false
 };
 
 const slice = createSlice({
@@ -20,9 +34,40 @@ const slice = createSlice({
     },
     setVersion(state, action: PayloadAction<string>) {
       state.version = action.payload;
+    },
+    setShowExportModal(state, action: PayloadAction<boolean>) {
+      state.showExportModal = action.payload;
+    },
+    setShowPremiumModal(state, action: PayloadAction<boolean>) {
+      state.showPremiumModal = action.payload;
+    },
+    setShowPremiumStatusModal(state, action: PayloadAction<boolean>) {
+      state.showPremiumStatusModal = action.payload;
+    },
+    setIsPlayerModalOpen(state, action: PayloadAction<boolean>) {
+      state.isPlayerModalOpen = action.payload;
+    },
+    setIsPlayerModalVisible(state, action: PayloadAction<boolean>) {
+      state.isPlayerModalVisible = action.payload;
+    },
+    setIsLeftDrawerOpen(state, action: PayloadAction<boolean>) {
+      state.isLeftDrawerOpen = action.payload;
+    },
+    setIsTranscriptEdit(state, action: PayloadAction<boolean>) {
+      state.isTranscriptEdit = action.payload;
     }
   }
 });
 
-export const { setActiveTab, setVersion } = slice.actions;
+export const {
+  setActiveTab,
+  setVersion,
+  setShowExportModal,
+  setShowPremiumModal,
+  setShowPremiumStatusModal,
+  setIsPlayerModalOpen,
+  setIsPlayerModalVisible,
+  setIsLeftDrawerOpen,
+  setIsTranscriptEdit
+} = slice.actions;
 export const uiReducer = slice.reducer;

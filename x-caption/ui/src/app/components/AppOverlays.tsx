@@ -31,6 +31,101 @@ export type PremiumDetails = {
   activatedAt: string | null;
 } | null;
 
+export type AlertOverlayProps = {
+  notify: (message: string, type?: ToastType) => void;
+  alertModal: { title: string; message: string; tone: ToastType } | null;
+  setAlertModal: (value: { title: string; message: string; tone: ToastType } | null) => void;
+};
+
+export type MediaImportOverlayProps = {
+  modals: {
+    showOpenModal: boolean;
+    setShowOpenModal: (value: boolean) => void;
+    showYoutubeModal: boolean;
+    setShowYoutubeModal: (value: boolean) => void;
+    showImportModal: boolean;
+    setShowImportModal: (value: boolean) => void;
+  };
+  youtube: {
+    importing: boolean;
+    importTitle: string | null;
+    url: string;
+    setUrl: (value: string) => void;
+    error: string | null;
+    setError: (value: string | null) => void;
+    isIndeterminate: boolean;
+    progressValue: number;
+  };
+  actions: {
+    openLocalFromModal: () => void;
+    openYoutubeModal: () => void;
+    importYoutube: () => void;
+    openModal: () => void;
+  };
+};
+
+export type PremiumOverlayProps = {
+  showPremiumModal: boolean;
+  setShowPremiumModal: (value: boolean) => void;
+  premiumWebviewStatus: "idle" | "loading" | "ready" | "error";
+  premiumIframeKey: number;
+  premiumWebviewRef: RefObject<HTMLIFrameElement>;
+  onPremiumWebviewLoad: () => void;
+  onPremiumWebviewError: () => void;
+  premiumWebviewError: string | null;
+  onPremiumRetry: () => void;
+  machineIdLoading: boolean;
+  machineId: string | null;
+  machineIdCopied: boolean;
+  onCopyMachineId: () => void;
+  premiumKey: string;
+  setPremiumKey: (value: string) => void;
+  onConfirmPremiumKey: () => void;
+  premiumKeySubmitting: boolean;
+  isPremium: boolean;
+  showPremiumStatusModal: boolean;
+  setShowPremiumStatusModal: (value: boolean) => void;
+  premiumDetails: PremiumDetails;
+};
+
+export type UpdateOverlayProps = {
+  updateModal: {
+    downloadUrl: string | null;
+    publishedAt: string | null;
+  } | null;
+  updateForceRequired: boolean;
+  updateAvailable: boolean;
+  updateCurrentVersion: string | null;
+  updateLatestVersion: string | null;
+  onOpenExternalUrl: (url: string) => void;
+  onWindowAction: (action: "close" | "minimize" | "zoom" | "fullscreen") => void;
+  clearUpdateModal: () => void;
+};
+
+export type ExportOverlayProps = {
+  showExportModal: boolean;
+  setShowExportModal: (value: boolean) => void;
+  isExporting: boolean;
+  onExportSrt: () => void;
+  onExportTranscript: () => void;
+};
+
+export type ModelDownloadOverlayProps = {
+  modelDownloadActive: boolean;
+  modelDownload: {
+    status: "idle" | "checking" | "downloading" | "error";
+    progress: number | null;
+    message: string;
+    detail?: string | null;
+    expectedPath?: string | null;
+    downloadUrl?: string | null;
+  };
+  modelDownloadTitle: string;
+  modelProgressText: string | null;
+  onClearModelDownload: () => void;
+  onRetryModelDownload: () => void;
+};
+
 export type AppOverlaysProps = {
   isCompact: boolean;
   isLeftDrawerOpen: boolean;
@@ -72,77 +167,12 @@ export type AppOverlaysProps = {
   gapAdjustModal: GapAdjustModalState | null;
   setGapAdjustModal: (value: GapAdjustModalState | null) => void;
   onAdjustGapAfter: (segment: TranscriptSegment, mode: "insert" | "remove", ms: number, maxRemoveMs: number) => void;
-  notify: (message: string, type?: ToastType) => void;
-  alertModal: { title: string; message: string; tone: ToastType } | null;
-  setAlertModal: (value: { title: string; message: string; tone: ToastType } | null) => void;
-  showOpenModal: boolean;
-  setShowOpenModal: (value: boolean) => void;
-  youtubeImporting: boolean;
-  onOpenLocalFromModal: () => void;
-  onOpenYoutubeModal: () => void;
-  showYoutubeModal: boolean;
-  setShowYoutubeModal: (value: boolean) => void;
-  youtubeImportTitle: string | null;
-  youtubeUrl: string;
-  setYoutubeUrl: (value: string) => void;
-  youtubeError: string | null;
-  setYoutubeError: (value: string | null) => void;
-  onImportYoutube: () => void;
-  isYoutubeIndeterminate: boolean;
-  youtubeProgressValue: number;
-  showPremiumModal: boolean;
-  setShowPremiumModal: (value: boolean) => void;
-  premiumWebviewStatus: "idle" | "loading" | "ready" | "error";
-  premiumIframeKey: number;
-  premiumWebviewRef: RefObject<HTMLIFrameElement>;
-  onPremiumWebviewLoad: () => void;
-  onPremiumWebviewError: () => void;
-  premiumWebviewError: string | null;
-  onPremiumRetry: () => void;
-  machineIdLoading: boolean;
-  machineId: string | null;
-  machineIdCopied: boolean;
-  onCopyMachineId: () => void;
-  premiumKey: string;
-  setPremiumKey: (value: string) => void;
-  onConfirmPremiumKey: () => void;
-  premiumKeySubmitting: boolean;
-  isPremium: boolean;
-  showPremiumStatusModal: boolean;
-  setShowPremiumStatusModal: (value: boolean) => void;
-  premiumDetails: PremiumDetails;
-  updateModal: {
-    downloadUrl: string | null;
-    publishedAt: string | null;
-  } | null;
-  updateForceRequired: boolean;
-  updateAvailable: boolean;
-  updateCurrentVersion: string | null;
-  updateLatestVersion: string | null;
-  onOpenExternalUrl: (url: string) => void;
-  onWindowAction: (action: "close" | "minimize" | "zoom" | "fullscreen") => void;
-  clearUpdateModal: () => void;
-  showExportModal: boolean;
-  setShowExportModal: (value: boolean) => void;
-  isExporting: boolean;
-  onExportSrt: () => void;
-  onExportTranscript: () => void;
-  modelDownloadActive: boolean;
-  modelDownload: {
-    status: "idle" | "checking" | "downloading" | "error";
-    progress: number | null;
-    message: string;
-    detail?: string | null;
-    expectedPath?: string | null;
-    downloadUrl?: string | null;
-  };
-  modelDownloadTitle: string;
-  modelProgressText: string | null;
-  onClearModelDownload: () => void;
-  onRetryModelDownload: () => void;
-  showImportModal: boolean;
-  setShowImportModal: (value: boolean) => void;
-  onOpenModal: () => void;
+  alerts: AlertOverlayProps;
+  mediaImport: MediaImportOverlayProps;
+  premium: PremiumOverlayProps;
+  updates: UpdateOverlayProps;
+  exporting: ExportOverlayProps;
+  modelDownload: ModelDownloadOverlayProps;
 };
 
 export function AppOverlays({
@@ -178,68 +208,82 @@ export function AppOverlays({
   gapAdjustModal,
   setGapAdjustModal,
   onAdjustGapAfter,
-  notify,
-  alertModal,
-  setAlertModal,
-  showOpenModal,
-  setShowOpenModal,
-  youtubeImporting,
-  onOpenLocalFromModal,
-  onOpenYoutubeModal,
-  showYoutubeModal,
-  setShowYoutubeModal,
-  youtubeImportTitle,
-  youtubeUrl,
-  setYoutubeUrl,
-  youtubeError,
-  setYoutubeError,
-  onImportYoutube,
-  isYoutubeIndeterminate,
-  youtubeProgressValue,
-  showPremiumModal,
-  setShowPremiumModal,
-  premiumWebviewStatus,
-  premiumIframeKey,
-  premiumWebviewRef,
-  onPremiumWebviewLoad,
-  onPremiumWebviewError,
-  premiumWebviewError,
-  onPremiumRetry,
-  machineIdLoading,
-  machineId,
-  machineIdCopied,
-  onCopyMachineId,
-  premiumKey,
-  setPremiumKey,
-  onConfirmPremiumKey,
-  premiumKeySubmitting,
-  isPremium,
-  showPremiumStatusModal,
-  setShowPremiumStatusModal,
-  premiumDetails,
-  updateModal,
-  updateForceRequired,
-  updateAvailable,
-  updateCurrentVersion,
-  updateLatestVersion,
-  onOpenExternalUrl,
-  onWindowAction,
-  clearUpdateModal,
-  showExportModal,
-  setShowExportModal,
-  isExporting,
-  onExportSrt,
-  onExportTranscript,
-  modelDownloadActive,
-  modelDownload,
-  modelDownloadTitle,
-  modelProgressText,
-  onClearModelDownload,
-  onRetryModelDownload,
-  showImportModal,
-  setShowImportModal,
-  onOpenModal
+  alerts,
+  mediaImport,
+  premium,
+  updates,
+  exporting,
+  modelDownload
 }: AppOverlaysProps) {
+  const { notify, alertModal, setAlertModal } = alerts;
+  const {
+    modals: {
+      showOpenModal,
+      setShowOpenModal,
+      showYoutubeModal,
+      setShowYoutubeModal,
+      showImportModal,
+      setShowImportModal
+    },
+    youtube: {
+      importing: youtubeImporting,
+      importTitle: youtubeImportTitle,
+      url: youtubeUrl,
+      setUrl: setYoutubeUrl,
+      error: youtubeError,
+      setError: setYoutubeError,
+      isIndeterminate: isYoutubeIndeterminate,
+      progressValue: youtubeProgressValue
+    },
+    actions: {
+      openLocalFromModal: handleOpenLocalFromModal,
+      openYoutubeModal: handleOpenYoutubeModal,
+      importYoutube: handleImportYoutube,
+      openModal: handleOpenModal
+    }
+  } = mediaImport;
+  const {
+    showPremiumModal,
+    setShowPremiumModal,
+    premiumWebviewStatus,
+    premiumIframeKey,
+    premiumWebviewRef,
+    onPremiumWebviewLoad,
+    onPremiumWebviewError,
+    premiumWebviewError,
+    onPremiumRetry,
+    machineIdLoading,
+    machineId,
+    machineIdCopied,
+    onCopyMachineId,
+    premiumKey,
+    setPremiumKey,
+    onConfirmPremiumKey,
+    premiumKeySubmitting,
+    isPremium,
+    showPremiumStatusModal,
+    setShowPremiumStatusModal,
+    premiumDetails
+  } = premium;
+  const {
+    updateModal,
+    updateForceRequired,
+    updateAvailable,
+    updateCurrentVersion,
+    updateLatestVersion,
+    onOpenExternalUrl,
+    onWindowAction,
+    clearUpdateModal
+  } = updates;
+  const { showExportModal, setShowExportModal, isExporting, onExportSrt, onExportTranscript } = exporting;
+  const {
+    modelDownloadActive,
+    modelDownload: modelDownloadState,
+    modelDownloadTitle,
+    modelProgressText,
+    onClearModelDownload,
+    onRetryModelDownload
+  } = modelDownload;
   return (
     <>
       {isCompact ? (
@@ -1128,52 +1172,58 @@ export function AppOverlays({
               <div className="flex items-start gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#111827] text-[#60a5fa]">
                   <AppIcon
-                    name={modelDownload.status === "error" ? "exclamationTriangle" : "download"}
+                    name={modelDownloadState.status === "error" ? "exclamationTriangle" : "download"}
                     className="text-[16px]"
                   />
                 </div>
                 <div className="flex-1">
                   <div className="text-sm font-semibold text-slate-100">{modelDownloadTitle}</div>
-                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">{modelDownload.message}</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                    {modelDownloadState.message}
+                  </p>
                 </div>
               </div>
 
-              {modelDownload.status !== "error" ? (
+              {modelDownloadState.status !== "error" ? (
                 <div className="mt-4 space-y-2">
                   <div className="h-2 w-full overflow-hidden rounded-full bg-[#1f2937]">
-                    {modelDownload.progress !== null ? (
+                    {modelDownloadState.progress !== null ? (
                       <div
                         className="h-full rounded-full bg-primary transition-all"
-                        style={{ width: `${Math.max(2, Math.min(100, modelDownload.progress))}%` }}
+                        style={{ width: `${Math.max(2, Math.min(100, modelDownloadState.progress))}%` }}
                       />
                     ) : (
                       <div className="h-full w-full animate-pulse rounded-full bg-primary/60" />
                     )}
                   </div>
                   <div className="flex items-center justify-between text-[10px] text-slate-400">
-                    <span>{modelDownload.progress !== null ? `${modelDownload.progress}%` : "Preparing..."}</span>
+                    <span>
+                      {modelDownloadState.progress !== null
+                        ? `${modelDownloadState.progress}%`
+                        : "Preparing..."}
+                    </span>
                     <span>{modelProgressText ?? ""}</span>
                   </div>
                 </div>
               ) : (
                 <div className="mt-4 space-y-2 text-[11px] text-slate-400">
-                  {modelDownload.detail ? <p>{modelDownload.detail}</p> : null}
-                  {modelDownload.downloadUrl ? (
+                  {modelDownloadState.detail ? <p>{modelDownloadState.detail}</p> : null}
+                  {modelDownloadState.downloadUrl ? (
                     <p>
                       Download URL:
-                      <span className="ml-1 break-all text-slate-200">{modelDownload.downloadUrl}</span>
+                      <span className="ml-1 break-all text-slate-200">{modelDownloadState.downloadUrl}</span>
                     </p>
                   ) : null}
-                  {modelDownload.expectedPath ? (
+                  {modelDownloadState.expectedPath ? (
                     <p>
                       Save the model to:
-                      <span className="ml-1 break-all text-slate-200">{modelDownload.expectedPath}</span>
+                      <span className="ml-1 break-all text-slate-200">{modelDownloadState.expectedPath}</span>
                     </p>
                   ) : null}
                 </div>
               )}
 
-              {modelDownload.status === "error" ? (
+              {modelDownloadState.status === "error" ? (
                 <div className="mt-5 flex items-center justify-end gap-2">
                   <button
                     className="rounded-md border border-slate-700 bg-[#151515] px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500"
@@ -1231,7 +1281,7 @@ export function AppOverlays({
                   className="rounded-md bg-white px-3 py-1.5 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95"
                   onClick={() => {
                     setShowImportModal(false);
-                    onOpenModal();
+                    handleOpenModal();
                   }}
                   type="button"
                 >
