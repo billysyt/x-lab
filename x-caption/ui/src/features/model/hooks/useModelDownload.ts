@@ -1,10 +1,10 @@
 import { useCallback, useState } from "react";
-import type { WhisperModelDownload, WhisperModelStatus } from "../../shared/types";
+import type { WhisperModelDownload, WhisperModelStatus } from "../../../shared/types";
 import {
   apiGetWhisperModelDownload,
   apiGetWhisperModelStatus,
   apiStartWhisperModelDownload
-} from "../../shared/api/sttApi";
+} from "../../../shared/api/sttApi";
 
 export type ModelDownloadState = {
   status: "idle" | "checking" | "downloading" | "error";

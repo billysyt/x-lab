@@ -1,4 +1,4 @@
-import { PlayerPanel, type PlayerPanelProps } from "../../features/player/components/PlayerPanel";
+import { PlayerPanel, type PlayerPanelProps } from "../components/PlayerPanel";
 
 type PlayerPanelBaseProps = Omit<PlayerPanelProps, "isModal">;
 

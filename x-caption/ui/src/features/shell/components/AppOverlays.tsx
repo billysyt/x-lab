@@ -1,9 +1,9 @@
 import type { MouseEvent, ReactNode, RefObject } from "react";
-import { AppIcon } from "../../shared/components/AppIcon";
-import { cn } from "../../shared/lib/cn";
-import { formatTimestamp } from "../lib/format";
-import type { ToastType } from "../../shared/components/ToastHost";
-import type { TranscriptSegment } from "../../shared/types";
+import { AppIcon } from "../../../shared/components/AppIcon";
+import { cn } from "../../../shared/lib/cn";
+import { formatTimestamp } from "../../../app/lib/format";
+import type { ToastType } from "../../../shared/components/ToastHost";
+import type { TranscriptSegment } from "../../../shared/types";
 
 export type CaptionMenuState = {
   x: number;

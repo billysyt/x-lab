@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
-import { cn } from "../../shared/lib/cn";
-import { callApiMethod } from "../lib/pywebview";
+import { cn } from "../../../shared/lib/cn";
+import { callApiMethod } from "../../../app/lib/pywebview";
 
 export function useWindowState() {
   const isWindows =

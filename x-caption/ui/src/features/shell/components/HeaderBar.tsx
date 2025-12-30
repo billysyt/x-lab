@@ -1,6 +1,6 @@
 import type { MouseEvent, RefObject } from "react";
-import { AppIcon } from "../../shared/components/AppIcon";
-import { cn } from "../../shared/lib/cn";
+import { AppIcon } from "../../../shared/components/AppIcon";
+import { cn } from "../../../shared/lib/cn";
 
 export type HeaderBarProps = {
   isMac: boolean;

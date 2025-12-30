@@ -1,7 +1,7 @@
 import { useEffect } from "react";
-import { pollJobUpdates } from "../../features/jobs/jobsSlice";
-import type { AppDispatch } from "../store";
-import type { Job } from "../../shared/types";
+import { pollJobUpdates } from "../jobsSlice";
+import type { AppDispatch } from "../../../app/store";
+import type { Job } from "../../../shared/types";
 
 export function useJobPolling(
   dispatch: AppDispatch,

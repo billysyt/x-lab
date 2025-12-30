@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
-import type { UploadTabHandle } from "../../features/upload/components/UploadTab";
-import { apiGetYoutubeImport, apiStartYoutubeImport } from "../../shared/api/sttApi";
-import { useAppDispatch, useAppSelector } from "../hooks";
-import { patchMediaImport } from "../../features/mediaImport/mediaImportSlice";
+import type { UploadTabHandle } from "../../upload/components/UploadTab";
+import { apiGetYoutubeImport, apiStartYoutubeImport } from "../../../shared/api/sttApi";
+import { useAppDispatch, useAppSelector } from "../../../app/hooks";
+import { patchMediaImport } from "../mediaImportSlice";
 
 export function useMediaImport(params: {
   isCompact: boolean;

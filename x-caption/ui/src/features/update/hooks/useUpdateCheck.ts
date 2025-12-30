@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo } from "react";
-import { buildUpdateModalInfo, type UpdateModalInfo } from "../lib/update";
-import { compareVersions } from "../lib/format";
-import { useAppDispatch, useAppSelector } from "../hooks";
-import { setUpdateModal as setUpdateModalAction } from "../../features/ui/uiSlice";
+import { buildUpdateModalInfo, type UpdateModalInfo } from "../../../app/lib/update";
+import { compareVersions } from "../../../app/lib/format";
+import { useAppDispatch, useAppSelector } from "../../../app/hooks";
+import { setUpdateModal as setUpdateModalAction } from "../../ui/uiSlice";
 
 export function useUpdateCheck(appVersion: string | null) {
   const dispatch = useAppDispatch();

@@ -1,7 +1,7 @@
-import { useMediaImport } from "./useMediaImport";
-import { usePremiumState } from "./usePremiumState";
-import { useUpdateCheck } from "./useUpdateCheck";
-import type { UploadTabHandle } from "../../features/upload/components/UploadTab";
+import { useMediaImport } from "../../mediaImport/hooks/useMediaImport";
+import { usePremiumState } from "../../premium/hooks/usePremiumState";
+import { useUpdateCheck } from "../../update/hooks/useUpdateCheck";
+import type { UploadTabHandle } from "../../upload/components/UploadTab";
 import type { RefObject } from "react";
 
 export function useOverlayState(params: {

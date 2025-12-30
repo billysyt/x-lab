@@ -1,8 +1,8 @@
 import type { RefObject } from "react";
-import { CaptionSetupPanel } from "../../features/transcript/components/CaptionSetupPanel";
-import { CaptionPanelBody } from "../../features/transcript/components/CaptionPanelBody";
-import type { SettingsState } from "../../features/settings/settingsSlice";
-import type { ToastType } from "../../shared/components/ToastHost";
+import { CaptionSetupPanel } from "../components/CaptionSetupPanel";
+import { CaptionPanelBody } from "../components/CaptionPanelBody";
+import type { SettingsState } from "../../settings/settingsSlice";
+import type { ToastType } from "../../../shared/components/ToastHost";
 
 export function useCaptionState(params: {
   settings: SettingsState;

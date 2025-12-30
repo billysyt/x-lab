@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { callApiMethod } from "../lib/pywebview";
-import { useAppDispatch, useAppSelector } from "../hooks";
+import { callApiMethod } from "../../../app/lib/pywebview";
+import { useAppDispatch, useAppSelector } from "../../../app/hooks";
 import {
   setShowPremiumModal as setShowPremiumModalAction,
   setShowPremiumStatusModal as setShowPremiumStatusModalAction
-} from "../../features/ui/uiSlice";
+} from "../../ui/uiSlice";
 
 function getLocalMachineId(): string | null {
   return null;
