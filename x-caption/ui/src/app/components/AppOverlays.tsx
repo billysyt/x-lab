@@ -673,7 +673,7 @@ export function AppOverlays({
                     "group w-full rounded-xl px-4 py-3 text-left transition",
                     youtubeImporting ? "cursor-not-allowed opacity-50" : "hover:bg-[#151515]"
                   )}
-                  onClick={onOpenLocalFromModal}
+                  onClick={handleOpenLocalFromModal}
                   type="button"
                   disabled={youtubeImporting}
                 >
@@ -694,7 +694,7 @@ export function AppOverlays({
                     "group w-full rounded-xl px-4 py-3 text-left transition",
                     youtubeImporting ? "cursor-not-allowed opacity-50" : "hover:bg-[#151515]"
                   )}
-                  onClick={onOpenYoutubeModal}
+                  onClick={handleOpenYoutubeModal}
                   type="button"
                   disabled={youtubeImporting}
                 >
@@ -765,7 +765,7 @@ export function AppOverlays({
                       if (event.key === "Enter") {
                         event.preventDefault();
                         if (!youtubeImporting) {
-                          onImportYoutube();
+                          handleImportYoutube();
                         }
                       }
                     }}
@@ -783,7 +783,7 @@ export function AppOverlays({
                   ) : (
                     <button
                       className="rounded-md bg-white px-3 py-2 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95 disabled:opacity-60"
-                      onClick={onImportYoutube}
+                      onClick={handleImportYoutube}
                       type="button"
                       disabled={!youtubeUrl.trim()}
                     >

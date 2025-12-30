@@ -1,0 +1,103 @@
+import type { RefObject } from "react";
+import { CaptionSetupPanel } from "../components/CaptionSetupPanel";
+import { CaptionPanelBody } from "../components/CaptionPanelBody";
+import type { SettingsState } from "../../features/settings/settingsSlice";
+import type { ToastType } from "../../shared/components/ToastHost";
+
+export function useCaptionState(params: {
+  settings: SettingsState;
+  captionControlsDisabled: boolean;
+  isCantoneseLanguage: boolean;
+  isSecondCaptionActive: boolean;
+  secondCaptionLanguage: "yue" | "zh" | "en";
+  onLanguageChange: (value: SettingsState["language"]) => void;
+  onChineseStyleChange: (value: SettingsState["chineseStyle"]) => void;
+  onToggleSecondCaption: () => void;
+  onSecondCaptionLanguageChange: (value: "yue" | "zh" | "en") => void;
+  generateCaptionLabel: string;
+  onGenerateCaptions: () => void | Promise<void>;
+  isGenerateDisabled: boolean;
+  showCaptionSetup: boolean;
+  transcriptMediaRef: RefObject<HTMLMediaElement>;
+  notify: (message: string, type?: ToastType) => void;
+  editEnabled: boolean;
+}) {
+  const {
+    settings,
+    captionControlsDisabled,
+    isCantoneseLanguage,
+    isSecondCaptionActive,
+    secondCaptionLanguage,
+    onLanguageChange,
+    onChineseStyleChange,
+    onToggleSecondCaption,
+    onSecondCaptionLanguageChange,
+    generateCaptionLabel,
+    onGenerateCaptions,
+    isGenerateDisabled,
+    showCaptionSetup,
+    transcriptMediaRef,
+    notify,
+    editEnabled
+  } = params;
+
+  const captionSetupPanel = (
+    <CaptionSetupPanel
+      settings={settings}
+      captionControlsDisabled={captionControlsDisabled}
+      isCantoneseLanguage={isCantoneseLanguage}
+      isSecondCaptionActive={isSecondCaptionActive}
+      secondCaptionLanguage={secondCaptionLanguage}
+      onLanguageChange={onLanguageChange}
+      onChineseStyleChange={onChineseStyleChange}
+      onToggleSecondCaption={onToggleSecondCaption}
+      onSecondCaptionLanguageChange={onSecondCaptionLanguageChange}
+      generateCaptionLabel={generateCaptionLabel}
+      onGenerateCaptions={onGenerateCaptions}
+      isGenerateDisabled={isGenerateDisabled}
+    />
+  );
+
+  const compactCaptionsPanel = (
+    <CaptionPanelBody
+      captionSetupPanel={captionSetupPanel}
+      showCaptionSetup={showCaptionSetup}
+      transcriptMediaRef={transcriptMediaRef}
+      notify={notify}
+      editEnabled={editEnabled}
+      suppressEmptyState={showCaptionSetup}
+      containerClassName="min-h-0 h-[calc(100vh-320px)] max-h-[calc(100vh-320px)] w-full overflow-hidden"
+    />
+  );
+
+  const captionSidebarContent = (
+    <CaptionPanelBody
+      captionSetupPanel={captionSetupPanel}
+      showCaptionSetup={showCaptionSetup}
+      transcriptMediaRef={transcriptMediaRef}
+      notify={notify}
+      editEnabled={editEnabled}
+      suppressEmptyState={showCaptionSetup}
+      containerClassName="min-h-0 h-[calc(100vh-340px)] max-h-[calc(100vh-340px)] overflow-hidden"
+    />
+  );
+
+  const captionSidebarModalContent = (
+    <CaptionPanelBody
+      captionSetupPanel={captionSetupPanel}
+      showCaptionSetup={showCaptionSetup}
+      transcriptMediaRef={transcriptMediaRef}
+      notify={notify}
+      editEnabled={editEnabled}
+      suppressEmptyState={showCaptionSetup}
+      containerClassName="flex h-full min-h-0 flex-col"
+    />
+  );
+
+  return {
+    captionSetupPanel,
+    compactCaptionsPanel,
+    captionSidebarContent,
+    captionSidebarModalContent
+  };
+}

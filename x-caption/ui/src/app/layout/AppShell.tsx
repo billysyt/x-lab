@@ -7,23 +7,6 @@ import { cn } from "../../shared/lib/cn";
 
 export function AppShell(props: AppState) {
   const {
-    isMac,
-    isWindowFocused,
-    isAltPressed,
-    isHeaderCompact,
-    isHeaderMenuOpen,
-    showCustomWindowControls,
-    isPinned,
-    isExporting,
-    isPremium,
-    premiumStatusLoading,
-    headerMenuRef,
-    headerMenuButtonRef,
-    getHeaderDragProps,
-    handleTogglePinned,
-    handleOpenPremiumModal,
-    handleWindowAction,
-    setIsHeaderMenuOpen,
     layoutClass,
     isCompact,
     dragRegionClass,
@@ -36,219 +19,20 @@ export function AppShell(props: AppState) {
     playerPanel,
     leftPanelContent,
     captionSidebarContent,
-    timelineZoom,
-    setTimelineZoom,
-    timelineScrollRef,
-    handleTimelineScroll,
-    handleTimelineWheel,
-    timelineScrollWidth,
-    timelineWidth,
-    playheadLeftPx,
-    ticks,
-    pxPerSec,
-    onTrackPointerDown,
-    onTrackPointerMove,
-    onTrackPointerUp,
-    timelineSegmentEls,
-    gapMenu,
-    gapMenuHighlight,
-    captionMenuGapAfter,
-    captionMenuGapHighlight,
-    captionHover,
-    gapMenuOpenRef,
-    handleCaptionHoverMove,
-    setCaptionHover,
-    handleAddCaption,
-    handleGapContextMenu,
-    exportLanguage,
-    handleClearCaptions,
-    handleLoadSrt,
-    handleToggleChineseVariant,
-    handleSubtitleScaleDecrease,
-    handleSubtitleScaleIncrease,
-    handleSplitCaption,
-    activeSubtitleSegment,
-    isLeftDrawerOpen,
+    timelinePanelProps,
     isPlayerModalVisible,
-    isPlayerModalOpen,
-    setIsPlayerModalOpen,
-    setIsPlayerModalVisible,
-    playerModalPanel,
-    captionSidebarModalContent,
-    captionMenu,
-    captionMenuPosition,
-    setCaptionMenuGapHighlight,
-    handleDeleteCaption,
-    handleOpenGapAdjust,
-    closeCaptionMenu,
-    gapMenuPosition,
-    setGapMenuHighlight,
-    handleRemoveGap,
-    handleCloseGapMenu,
-    gapAdjustModal,
-    setGapAdjustModal,
-    handleAdjustGapAfter,
-    notify,
-    alertModal,
-    setAlertModal,
-    mediaImport,
-    showPremiumModal,
-    setShowPremiumModal,
-    premiumWebviewStatus,
-    premiumIframeKey,
-    premiumWebviewRef,
-    handlePremiumWebviewLoad,
-    handlePremiumWebviewError,
-    premiumWebviewError,
-    handlePremiumRetry,
-    machineIdLoading,
-    machineId,
-    machineIdCopied,
-    handleCopyMachineId,
-    premiumKey,
-    setPremiumKey,
-    handleConfirmPremiumKey,
-    premiumKeySubmitting,
-    showPremiumStatusModal,
-    setShowPremiumStatusModal,
-    premiumDetails,
-    updateModal,
-    updateForceRequired,
-    updateAvailable,
-    updateCurrentVersion,
-    updateLatestVersion,
-    openExternalUrl,
-    setUpdateModal,
-    showExportModal,
-    setShowExportModal,
-    handleExportSrt,
-    handleExportTranscript,
-    modelDownloadActive,
-    modelDownload,
-    modelDownloadTitle,
-    modelProgressText,
-    clearModelDownload,
-    handleRetryModelDownload,
+    headerBarProps,
+    overlaysProps,
     srtInputRef,
     handleSrtSelected,
     audioRef,
     audioPreviewSrc
   } = props;
 
-  const overlays = {
-    isCompact,
-    isLeftDrawerOpen,
-    onCloseLeftDrawer: () => setIsLeftDrawerOpen(false),
-    leftPanelContent,
-    isPlayerModalVisible,
-    isPlayerModalOpen,
-    onClosePlayerModal: () => setIsPlayerModalOpen(false),
-    onPlayerModalTransitionEnd: () => setIsPlayerModalVisible(false),
-    getHeaderDragProps,
-    playerPanel: playerModalPanel,
-    captionSidebarContent: captionSidebarModalContent,
-    segmentsLength: segments.length,
-    isTranscriptEdit,
-    onToggleTranscriptEdit: () => setIsTranscriptEdit((prev) => !prev),
-    captionMenu,
-    captionMenuPosition,
-    captionMenuGapAfter,
-    captionMenuGapHighlight,
-    setCaptionMenuGapHighlight,
-    onSplitCaption: handleSplitCaption,
-    onDeleteCaption: handleDeleteCaption,
-    onOpenGapAdjust: handleOpenGapAdjust,
-    onCloseCaptionMenu: closeCaptionMenu,
-    gapMenu,
-    gapMenuPosition,
-    gapMenuHighlight,
-    setGapMenuHighlight,
-    onRemoveGap: handleRemoveGap,
-    onCloseGapMenu: handleCloseGapMenu,
-    gapAdjustModal,
-    setGapAdjustModal,
-    onAdjustGapAfter: handleAdjustGapAfter,
-    alerts: {
-      notify,
-      alertModal,
-      setAlertModal
-    },
-    mediaImport,
-    premium: {
-      showPremiumModal,
-      setShowPremiumModal,
-      premiumWebviewStatus,
-      premiumIframeKey,
-      premiumWebviewRef,
-      onPremiumWebviewLoad: handlePremiumWebviewLoad,
-      onPremiumWebviewError: handlePremiumWebviewError,
-      premiumWebviewError,
-      onPremiumRetry: handlePremiumRetry,
-      machineIdLoading,
-      machineId,
-      machineIdCopied,
-      onCopyMachineId: handleCopyMachineId,
-      premiumKey,
-      setPremiumKey,
-      onConfirmPremiumKey: handleConfirmPremiumKey,
-      premiumKeySubmitting,
-      isPremium,
-      showPremiumStatusModal,
-      setShowPremiumStatusModal,
-      premiumDetails
-    },
-    updates: {
-      updateModal,
-      updateForceRequired,
-      updateAvailable,
-      updateCurrentVersion,
-      updateLatestVersion,
-      onOpenExternalUrl: openExternalUrl,
-      onWindowAction: handleWindowAction,
-      clearUpdateModal: () => setUpdateModal(null)
-    },
-    exporting: {
-      showExportModal,
-      setShowExportModal,
-      isExporting,
-      onExportSrt: handleExportSrt,
-      onExportTranscript: handleExportTranscript
-    },
-    modelDownload: {
-      modelDownloadActive,
-      modelDownload,
-      modelDownloadTitle,
-      modelProgressText,
-      onClearModelDownload: clearModelDownload,
-      onRetryModelDownload: handleRetryModelDownload
-    }
-  };
-
   return (
     <>
       <div className="flex h-full w-full flex-col bg-[#0b0b0b] text-slate-100">
-        <HeaderBar
-          isMac={isMac}
-          isWindowFocused={isWindowFocused}
-          isAltPressed={isAltPressed}
-          isHeaderCompact={isHeaderCompact}
-          isHeaderMenuOpen={isHeaderMenuOpen}
-          showCustomWindowControls={showCustomWindowControls}
-          isPinned={isPinned}
-          isExporting={isExporting}
-          isPremium={isPremium}
-          premiumStatusLoading={premiumStatusLoading}
-          headerMenuRef={headerMenuRef}
-          headerMenuButtonRef={headerMenuButtonRef}
-          getHeaderDragProps={getHeaderDragProps}
-          onOpenModal={mediaImport.actions.openModal}
-          onTogglePinned={handleTogglePinned}
-          onOpenExport={() => setShowExportModal(true)}
-          onOpenPremium={handleOpenPremiumModal}
-          onWindowAction={handleWindowAction}
-          onToggleHeaderMenu={() => setIsHeaderMenuOpen((prev) => !prev)}
-          onCloseHeaderMenu={() => setIsHeaderMenuOpen(false)}
-        />
+        <HeaderBar {...headerBarProps} />
         <div className={cn(layoutClass, "flex-1")}>
           {!isCompact ? (
             <aside className="row-start-1 row-end-2 flex min-h-0 flex-col bg-[#0b0b0b]">
@@ -381,45 +165,12 @@ export function AppShell(props: AppState) {
           ) : null}
 
           <TimelinePanel
-            isCompact={isCompact}
-            segmentsLength={segments.length}
-            exportLanguage={exportLanguage}
-            onClearCaptions={handleClearCaptions}
-            onLoadSrt={handleLoadSrt}
-            onToggleChineseVariant={handleToggleChineseVariant}
-            onSubtitleScaleDecrease={handleSubtitleScaleDecrease}
-            onSubtitleScaleIncrease={handleSubtitleScaleIncrease}
-            onSplitCaption={handleSplitCaption}
-            activeSubtitleSegment={activeSubtitleSegment}
-            timelineZoom={timelineZoom}
-            onTimelineZoomChange={setTimelineZoom}
-            timelineScrollRef={timelineScrollRef}
-            onTimelineScroll={handleTimelineScroll}
-            onTimelineWheel={handleTimelineWheel}
-            timelineScrollWidth={timelineScrollWidth}
-            timelineWidth={timelineWidth}
-            playheadLeftPx={playheadLeftPx}
-            ticks={ticks}
-            pxPerSec={pxPerSec}
-            onTrackPointerDown={onTrackPointerDown}
-            onTrackPointerMove={onTrackPointerMove}
-            onTrackPointerUp={onTrackPointerUp}
-            timelineSegmentEls={timelineSegmentEls}
-            gapMenu={gapMenu}
-            gapMenuHighlight={gapMenuHighlight}
-            captionMenuGapAfter={captionMenuGapAfter}
-            captionMenuGapHighlight={captionMenuGapHighlight}
-            captionHover={captionHover}
-            gapMenuOpenRef={gapMenuOpenRef}
-            onCaptionHoverMove={handleCaptionHoverMove}
-            onClearCaptionHover={() => setCaptionHover(null)}
-            onAddCaption={handleAddCaption}
-            onGapContextMenu={handleGapContextMenu}
+            {...timelinePanelProps}
           />
         </div>
       </div>
 
-      <AppOverlays {...overlays} />
+      <AppOverlays {...overlaysProps} />
 
       <input
         ref={srtInputRef}

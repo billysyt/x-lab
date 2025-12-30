@@ -6,7 +6,8 @@ import {
   setIsPlayerModalOpen as setIsPlayerModalOpenAction,
   setIsPlayerModalVisible as setIsPlayerModalVisibleAction,
   setIsTranscriptEdit as setIsTranscriptEditAction,
-  setShowExportModal as setShowExportModalAction
+  setShowExportModal as setShowExportModalAction,
+  setAlertModal as setAlertModalAction
 } from "../../features/ui/uiSlice";
 import { useAppDispatch, useAppSelector } from "../hooks";
 import {
@@ -38,9 +39,6 @@ import {
   clamp,
   normalizeClips
 } from "../lib/timeline";
-import { CaptionSetupPanel } from "../components/CaptionSetupPanel";
-import { CaptionPanelBody } from "../components/CaptionPanelBody";
-import { PlayerPanel } from "../components/PlayerPanel";
 import { MediaSidebar } from "../components/MediaSidebar";
 import {
   apiEditSegment,
@@ -57,9 +55,10 @@ import { useAppBootstrap } from "./useAppBootstrap";
 import { useJobPolling } from "./useJobPolling";
 import { useOnlineStatus } from "./useOnlineStatus";
 import { useWindowState } from "./useWindowState";
-import { useUpdateCheck } from "./useUpdateCheck";
-import { usePremiumState } from "./usePremiumState";
-import { useMediaImport } from "./useMediaImport";
+import { useOverlayState } from "./useOverlayState";
+import { useCaptionState } from "./useCaptionState";
+import { usePlayerState } from "./usePlayerState";
+import { useTimelineState } from "./useTimelineState";
 import { useModelDownload } from "./useModelDownload";
 import { useExportHandlers } from "./useExportHandlers";
 
@@ -72,6 +71,7 @@ export function useAppState() {
   const isPlayerModalVisible = useAppSelector((s) => s.app.isPlayerModalVisible);
   const isLeftDrawerOpen = useAppSelector((s) => s.app.isLeftDrawerOpen);
   const isTranscriptEdit = useAppSelector((s) => s.app.isTranscriptEdit);
+  const alertModal = useAppSelector((s) => s.app.alertModal);
   const dispatch = useAppDispatch();
 
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -117,16 +117,17 @@ export function useAppState() {
   } = windowState;
 
 
-  const [alertModal, setAlertModal] = useState<{
-    title: string;
-    message: string;
-    tone: ToastType;
-  } | null>(null);
+  const setAlertModal = useCallback(
+    (value: { title: string; message: string; tone: ToastType } | null) => {
+      dispatch(setAlertModalAction(value));
+    },
+    [dispatch]
+  );
   const notify = useCallback((message: string, type: ToastType = "info") => {
     const title =
       type === "error" ? "Something went wrong" : type === "success" ? "Done" : "Notice";
     setAlertModal({ title, message, tone: type });
-  }, []);
+  }, [setAlertModal]);
   const setShowExportModal = useCallback(
     (value: boolean) => {
       dispatch(setShowExportModalAction(value));
@@ -134,41 +135,6 @@ export function useAppState() {
     [dispatch]
   );
   const isOnline = useOnlineStatus();
-  const updateState = useUpdateCheck(appVersion);
-  const premiumState = usePremiumState({ notify, isOnline });
-  const {
-    showPremiumModal,
-    setShowPremiumModal,
-    showPremiumStatusModal,
-    setShowPremiumStatusModal,
-    isPremium,
-    premiumStatusLoading,
-    premiumDetails,
-    premiumWebviewStatus,
-    premiumWebviewError,
-    machineId,
-    machineIdLoading,
-    machineIdCopied,
-    premiumKey,
-    setPremiumKey,
-    premiumKeySubmitting,
-    premiumIframeKey,
-    premiumWebviewRef,
-    handleOpenPremiumModal,
-    handlePremiumWebviewLoad,
-    handlePremiumWebviewError,
-    handlePremiumRetry,
-    handleCopyMachineId,
-    handleConfirmPremiumKey
-  } = premiumState;
-  const {
-    updateModal,
-    setUpdateModal,
-    updateAvailable,
-    updateForceRequired,
-    updateLatestVersion,
-    updateCurrentVersion
-  } = updateState;
   const setIsPlayerModalOpen = useCallback(
     (value: boolean) => {
       dispatch(setIsPlayerModalOpenAction(value));
@@ -306,12 +272,49 @@ export function useAppState() {
     }
     uploadRef.current?.openFilePicker?.();
   }, [isCompact, setIsLeftDrawerOpen]);
-  const mediaImport = useMediaImport({
+  const overlayState = useOverlayState({
+    appVersion,
+    isOnline,
+    notify,
     isCompact,
     uploadRef,
     onOpenLocalPicker: handleOpenFiles,
     onOpenLeftDrawer: () => setIsLeftDrawerOpen(true)
   });
+  const { updateState, premiumState, mediaImport } = overlayState;
+  const {
+    showPremiumModal,
+    setShowPremiumModal,
+    showPremiumStatusModal,
+    setShowPremiumStatusModal,
+    isPremium,
+    premiumStatusLoading,
+    premiumDetails,
+    premiumWebviewStatus,
+    premiumWebviewError,
+    machineId,
+    machineIdLoading,
+    machineIdCopied,
+    premiumKey,
+    setPremiumKey,
+    premiumKeySubmitting,
+    premiumIframeKey,
+    premiumWebviewRef,
+    handleOpenPremiumModal,
+    handlePremiumWebviewLoad,
+    handlePremiumWebviewError,
+    handlePremiumRetry,
+    handleCopyMachineId,
+    handleConfirmPremiumKey
+  } = premiumState;
+  const {
+    updateModal,
+    setUpdateModal,
+    updateAvailable,
+    updateForceRequired,
+    updateLatestVersion,
+    updateCurrentVersion
+  } = updateState;
   const { modals: mediaImportModals } = mediaImport;
   const { setShowImportModal } = mediaImportModals;
   const [timelineClips, setTimelineClips] = useState<
@@ -3519,60 +3522,27 @@ export function useAppState() {
       return next;
     });
   }, [captionControlsDisabled]);
-  const captionSetupPanel = (
-    <CaptionSetupPanel
-      settings={settings}
-      captionControlsDisabled={captionControlsDisabled}
-      isCantoneseLanguage={isCantoneseLanguage}
-      isSecondCaptionActive={isSecondCaptionActive}
-      secondCaptionLanguage={secondCaptionLanguage}
-      onLanguageChange={(value) => dispatch(setLanguage(value))}
-      onChineseStyleChange={(value) => dispatch(setChineseStyle(value))}
-      onToggleSecondCaption={handleToggleSecondCaption}
-      onSecondCaptionLanguageChange={setSecondCaptionLanguage}
-      generateCaptionLabel={generateCaptionLabel}
-      onGenerateCaptions={handleGenerateCaptions}
-      isGenerateDisabled={isGenerateDisabled}
-    />
-  );
+  const { captionSetupPanel, compactCaptionsPanel, captionSidebarContent, captionSidebarModalContent } =
+    useCaptionState({
+      settings,
+      captionControlsDisabled,
+      isCantoneseLanguage,
+      isSecondCaptionActive,
+      secondCaptionLanguage,
+      onLanguageChange: (value) => dispatch(setLanguage(value)),
+      onChineseStyleChange: (value) => dispatch(setChineseStyle(value)),
+      onToggleSecondCaption: handleToggleSecondCaption,
+      onSecondCaptionLanguageChange: setSecondCaptionLanguage,
+      generateCaptionLabel,
+      onGenerateCaptions: handleGenerateCaptions,
+      isGenerateDisabled,
+      showCaptionSetup,
+      transcriptMediaRef,
+      notify,
+      editEnabled: isTranscriptEdit
+    });
 
-  const compactCaptionsPanel = (
-    <CaptionPanelBody
-      captionSetupPanel={captionSetupPanel}
-      showCaptionSetup={showCaptionSetup}
-      transcriptMediaRef={transcriptMediaRef}
-      notify={notify}
-      editEnabled={isTranscriptEdit}
-      suppressEmptyState={showCaptionSetup}
-      containerClassName="min-h-0 h-[calc(100vh-320px)] max-h-[calc(100vh-320px)] w-full overflow-hidden"
-    />
-  );
-
-  const captionSidebarContent = (
-    <CaptionPanelBody
-      captionSetupPanel={captionSetupPanel}
-      showCaptionSetup={showCaptionSetup}
-      transcriptMediaRef={transcriptMediaRef}
-      notify={notify}
-      editEnabled={isTranscriptEdit}
-      suppressEmptyState={showCaptionSetup}
-      containerClassName="min-h-0 h-[calc(100vh-340px)] max-h-[calc(100vh-340px)] overflow-hidden"
-    />
-  );
-
-  const captionSidebarModalContent = (
-    <CaptionPanelBody
-      captionSetupPanel={captionSetupPanel}
-      showCaptionSetup={showCaptionSetup}
-      transcriptMediaRef={transcriptMediaRef}
-      notify={notify}
-      editEnabled={isTranscriptEdit}
-      suppressEmptyState={showCaptionSetup}
-      containerClassName="flex h-full min-h-0 flex-col"
-    />
-  );
-
-  const playerPanelProps = {
+  const { playerPanelProps, playerPanel, playerModalPanel } = usePlayerState({
     isCompact,
     compactTab,
     compactCaptionsPanel,
@@ -3631,10 +3601,44 @@ export function useAppState() {
     startPlayerScrub,
     endPlayerScrub,
     toggleFullscreen
-  };
+  });
 
-  const playerPanel = <PlayerPanel isModal={false} {...playerPanelProps} />;
-  const playerModalPanel = <PlayerPanel isModal {...playerPanelProps} />;
+  const { timelinePanelProps } = useTimelineState({
+    isCompact,
+    segmentsLength: segments.length,
+    exportLanguage,
+    onClearCaptions: handleClearCaptions,
+    onLoadSrt: handleLoadSrt,
+    onToggleChineseVariant: handleToggleChineseVariant,
+    onSubtitleScaleDecrease: handleSubtitleScaleDecrease,
+    onSubtitleScaleIncrease: handleSubtitleScaleIncrease,
+    onSplitCaption: handleSplitCaption,
+    activeSubtitleSegment,
+    timelineZoom,
+    onTimelineZoomChange: setTimelineZoom,
+    timelineScrollRef,
+    onTimelineScroll: handleTimelineScroll,
+    onTimelineWheel: handleTimelineWheel,
+    timelineScrollWidth,
+    timelineWidth,
+    playheadLeftPx,
+    ticks,
+    pxPerSec,
+    onTrackPointerDown,
+    onTrackPointerMove,
+    onTrackPointerUp,
+    timelineSegmentEls,
+    gapMenu,
+    gapMenuHighlight,
+    captionMenuGapAfter,
+    captionMenuGapHighlight,
+    captionHover,
+    gapMenuOpenRef,
+    onCaptionHoverMove: handleCaptionHoverMove,
+    onClearCaptionHover: () => setCaptionHover(null),
+    onAddCaption: handleAddCaption,
+    onGapContextMenu: handleGapContextMenu
+  });
 
   const leftPanelContent = (
     <MediaSidebar
@@ -3652,6 +3656,118 @@ export function useAppState() {
       secondCaptionLanguage={secondCaptionLanguage}
     />
   );
+
+  const headerBarProps = {
+    isMac,
+    isWindowFocused,
+    isAltPressed,
+    isHeaderCompact,
+    isHeaderMenuOpen,
+    showCustomWindowControls,
+    isPinned,
+    isExporting,
+    isPremium,
+    premiumStatusLoading,
+    headerMenuRef,
+    headerMenuButtonRef,
+    getHeaderDragProps,
+    onOpenModal: mediaImport.actions.openModal,
+    onTogglePinned: handleTogglePinned,
+    onOpenExport: () => setShowExportModal(true),
+    onOpenPremium: handleOpenPremiumModal,
+    onWindowAction: handleWindowAction,
+    onToggleHeaderMenu: () => setIsHeaderMenuOpen((prev) => !prev),
+    onCloseHeaderMenu: () => setIsHeaderMenuOpen(false)
+  };
+
+  const overlaysProps = {
+    isCompact,
+    isLeftDrawerOpen,
+    onCloseLeftDrawer: () => setIsLeftDrawerOpen(false),
+    leftPanelContent,
+    isPlayerModalVisible,
+    isPlayerModalOpen,
+    onClosePlayerModal: () => setIsPlayerModalOpen(false),
+    onPlayerModalTransitionEnd: () => setIsPlayerModalVisible(false),
+    getHeaderDragProps,
+    playerPanel: playerModalPanel,
+    captionSidebarContent: captionSidebarModalContent,
+    segmentsLength: segments.length,
+    isTranscriptEdit,
+    onToggleTranscriptEdit: () => setIsTranscriptEdit((prev) => !prev),
+    captionMenu,
+    captionMenuPosition,
+    captionMenuGapAfter,
+    captionMenuGapHighlight,
+    setCaptionMenuGapHighlight,
+    onSplitCaption: handleSplitCaption,
+    onDeleteCaption: handleDeleteCaption,
+    onOpenGapAdjust: handleOpenGapAdjust,
+    onCloseCaptionMenu: closeCaptionMenu,
+    gapMenu,
+    gapMenuPosition,
+    gapMenuHighlight,
+    setGapMenuHighlight,
+    onRemoveGap: handleRemoveGap,
+    onCloseGapMenu: handleCloseGapMenu,
+    gapAdjustModal,
+    setGapAdjustModal,
+    onAdjustGapAfter: handleAdjustGapAfter,
+    alerts: {
+      notify,
+      alertModal,
+      setAlertModal
+    },
+    mediaImport,
+    premium: {
+      showPremiumModal,
+      setShowPremiumModal,
+      premiumWebviewStatus,
+      premiumIframeKey,
+      premiumWebviewRef,
+      onPremiumWebviewLoad: handlePremiumWebviewLoad,
+      onPremiumWebviewError: handlePremiumWebviewError,
+      premiumWebviewError,
+      onPremiumRetry: handlePremiumRetry,
+      machineIdLoading,
+      machineId,
+      machineIdCopied,
+      onCopyMachineId: handleCopyMachineId,
+      premiumKey,
+      setPremiumKey,
+      onConfirmPremiumKey: handleConfirmPremiumKey,
+      premiumKeySubmitting,
+      isPremium,
+      showPremiumStatusModal,
+      setShowPremiumStatusModal,
+      premiumDetails
+    },
+    updates: {
+      updateModal,
+      updateForceRequired,
+      updateAvailable,
+      updateCurrentVersion,
+      updateLatestVersion,
+      onOpenExternalUrl: openExternalUrl,
+      onWindowAction: handleWindowAction,
+      clearUpdateModal: () => setUpdateModal(null)
+    },
+    exporting: {
+      showExportModal,
+      setShowExportModal,
+      isExporting,
+      onExportSrt: handleExportSrt,
+      onExportTranscript: handleExportTranscript
+    },
+    modelDownload: {
+      modelDownloadActive,
+      modelDownload,
+      modelDownloadTitle,
+      modelProgressText,
+      onClearModelDownload: clearModelDownload,
+      onRetryModelDownload: handleRetryModelDownload
+    }
+  };
 
   // youtube progress flags provided by hook.
   // update state provided by hook.
@@ -3980,6 +4096,9 @@ export function useAppState() {
     compactCaptionsPanel,
     captionSidebarContent,
     captionSidebarModalContent,
+    timelinePanelProps,
+    headerBarProps,
+    overlaysProps,
     playerPanelProps,
     playerPanel,
     playerModalPanel,

@@ -1,5 +1,7 @@
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 import type { AppTab } from "../../shared/types";
+import type { UpdateModalInfo } from "../../app/lib/update";
+import type { ToastType } from "../../shared/components/ToastHost";
 
 type AppState = {
   activeTab: AppTab;
@@ -7,6 +9,8 @@ type AppState = {
   showExportModal: boolean;
   showPremiumModal: boolean;
   showPremiumStatusModal: boolean;
+  updateModal: UpdateModalInfo | null;
+  alertModal: { title: string; message: string; tone: ToastType } | null;
   isPlayerModalOpen: boolean;
   isPlayerModalVisible: boolean;
   isLeftDrawerOpen: boolean;
@@ -19,6 +23,8 @@ const initialState: AppState = {
   showExportModal: false,
   showPremiumModal: false,
   showPremiumStatusModal: false,
+  updateModal: null,
+  alertModal: null,
   isPlayerModalOpen: false,
   isPlayerModalVisible: false,
   isLeftDrawerOpen: false,
@@ -44,6 +50,12 @@ const slice = createSlice({
     setShowPremiumStatusModal(state, action: PayloadAction<boolean>) {
       state.showPremiumStatusModal = action.payload;
     },
+    setUpdateModal(state, action: PayloadAction<UpdateModalInfo | null>) {
+      state.updateModal = action.payload;
+    },
+    setAlertModal(state, action: PayloadAction<{ title: string; message: string; tone: ToastType } | null>) {
+      state.alertModal = action.payload;
+    },
     setIsPlayerModalOpen(state, action: PayloadAction<boolean>) {
       state.isPlayerModalOpen = action.payload;
     },
@@ -65,6 +77,8 @@ export const {
   setShowExportModal,
   setShowPremiumModal,
   setShowPremiumStatusModal,
+  setUpdateModal,
+  setAlertModal,
   setIsPlayerModalOpen,
   setIsPlayerModalVisible,
   setIsLeftDrawerOpen,

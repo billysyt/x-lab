@@ -1,9 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { buildUpdateModalInfo, type UpdateModalInfo } from "../lib/update";
 import { compareVersions } from "../lib/format";
+import { useAppDispatch, useAppSelector } from "../hooks";
+import { setUpdateModal as setUpdateModalAction } from "../../features/ui/uiSlice";
 
 export function useUpdateCheck(appVersion: string | null) {
-  const [updateModal, setUpdateModal] = useState<UpdateModalInfo | null>(null);
+  const dispatch = useAppDispatch();
+  const updateModal = useAppSelector((state) => state.app.updateModal);
+  const setUpdateModal = useCallback(
+    (value: UpdateModalInfo | null) => {
+      dispatch(setUpdateModalAction(value));
+    },
+    [dispatch]
+  );
 
   useEffect(() => {
     const updateUrl = (import.meta as any)?.env?.VITE_UPDATE_CHECK_URL;
@@ -71,7 +80,7 @@ export function useUpdateCheck(appVersion: string | null) {
     return () => {
       cancelled = true;
     };
-  }, [appVersion]);
+  }, [appVersion, setUpdateModal]);
 
   const { updateAvailable, updateForceRequired, updateLatestVersion, updateCurrentVersion } = useMemo(() => {
     const updateLatest = updateModal?.latestVersion ?? null;
