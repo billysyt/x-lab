@@ -19,6 +19,7 @@ export type TimelinePanelProps = {
   timelineZoom: number;
   onTimelineZoomChange: (value: number) => void;
   timelineScrollRef: RefObject<HTMLDivElement>;
+  timelineTrackRef: RefObject<HTMLDivElement>;
   onTimelineScroll: (event: UIEvent<HTMLDivElement>) => void;
   onTimelineWheel: (event: WheelEvent<HTMLDivElement>) => void;
   timelineScrollWidth: number;
@@ -56,6 +57,7 @@ export function TimelinePanel({
   timelineZoom,
   onTimelineZoomChange,
   timelineScrollRef,
+  timelineTrackRef,
   onTimelineScroll,
   onTimelineWheel,
   timelineScrollWidth,
@@ -241,6 +243,7 @@ export function TimelinePanel({
                   />
 
                   <div
+                    ref={timelineTrackRef}
                     className="relative h-10 overflow-visible rounded-md bg-transparent"
                     style={{ width: `${timelineWidth}px` }}
                     onPointerDown={onTrackPointerDown}

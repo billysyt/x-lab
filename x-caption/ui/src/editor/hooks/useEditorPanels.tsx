@@ -249,6 +249,7 @@ export function useEditorPanels(params: EditorPanelsParams) {
     timelineZoom: timelineViewState.timelineZoom,
     onTimelineZoomChange: timelineViewState.setTimelineZoom,
     timelineScrollRef: timelineViewState.timelineScrollRef,
+    timelineTrackRef: timelineViewState.timelineTrackRef,
     onTimelineScroll: timelineViewState.handleTimelineScroll,
     onTimelineWheel: timelineViewState.handleTimelineWheel,
     timelineScrollWidth: timelineViewState.timelineScrollWidth,

@@ -1052,6 +1052,7 @@ export const UploadTab = memo(forwardRef(function UploadTab(
       id: item.id,
       disabled: !canReorder
     });
+    const pointerStartRef = useRef<{ x: number; y: number; id: number } | null>(null);
     const style = {
       transform: CSS.Transform.toString(transform),
       transition
@@ -1063,12 +1064,81 @@ export const UploadTab = memo(forwardRef(function UploadTab(
     const displayThumbnail = item.thumbnailUrl ?? item.externalSource?.thumbnailUrl ?? null;
     const displayName = item.displayName ?? item.name;
 
+    const handleActivate = () => {
+      if (item.invalid) {
+        const shouldRemove = window.confirm("This media file has changed or is missing. Remove this job?");
+        if (shouldRemove) {
+          if (item.source === "local") {
+            removeLocalItem(item);
+          } else if (item.jobId) {
+            void handleRemoveJob(null, item.jobId);
+          }
+        }
+        return;
+      }
+      const isYoutube = item.externalSource?.type === "youtube";
+      if (isYoutube) {
+        const existingStreamUrl = item.streamUrl ?? item.externalSource?.streamUrl ?? null;
+        const streamExpired = existingStreamUrl ? isYoutubeStreamExpired(existingStreamUrl) : false;
+        const shouldUseExistingStream = Boolean(existingStreamUrl) && !streamExpired && !item.streamError;
+        if (shouldUseExistingStream) {
+          const stableSource = item.externalSource
+            ? { ...item.externalSource, streamUrl: existingStreamUrl }
+            : item.externalSource;
+          const stableItem: MediaItem = {
+            ...item,
+            previewUrl: item.previewUrl ?? existingStreamUrl,
+            streamUrl: existingStreamUrl,
+            externalSource: stableSource,
+            isResolvingStream: false
+          };
+          setSelectedId(stableItem.id);
+          selectedIdRef.current = stableItem.id;
+          props.onAddToTimeline?.([stableItem]);
+          return;
+        }
+        const fallbackPreviewUrl = item.localPath ? toFileUrl(item.localPath) : item.previewUrl ?? null;
+        const pendingSource = item.externalSource
+          ? { ...item.externalSource, streamUrl: null }
+          : item.externalSource;
+        const pendingItem: MediaItem = {
+          ...item,
+          previewUrl: fallbackPreviewUrl,
+          streamUrl: null,
+          externalSource: pendingSource,
+          isResolvingStream: true,
+          streamError: null
+        };
+        setSelectedId(pendingItem.id);
+        selectedIdRef.current = pendingItem.id;
+        props.onAddToTimeline?.([pendingItem]);
+        const resolveToken = ++resolveTokenRef.current;
+        const requestedId = pendingItem.id;
+        const requestedJobId = item.source === "job" ? item.jobId ?? null : null;
+        const resolveTarget: MediaItem = {
+          ...item,
+          previewUrl: fallbackPreviewUrl ?? null
+        };
+        void resolveYoutubeStream(resolveTarget).then((refreshed) => {
+          if (!refreshed) return;
+          if (resolveTokenRef.current !== resolveToken) return;
+          if (selectedIdRef.current !== requestedId) return;
+          if (requestedJobId && selectedJobIdRef.current !== requestedJobId) return;
+          props.onAddToTimeline?.([refreshed]);
+        });
+        return;
+      }
+      setSelectedId(item.id);
+      selectedIdRef.current = item.id;
+      props.onAddToTimeline?.([item]);
+    };
+
     return (
       <div ref={setNodeRef} style={style}>
         <button
           data-media-row
           className={cn(
-            "relative w-full text-left transition focus:outline-none focus-visible:outline-none",
+            "relative w-full text-left transition focus:outline-none focus-visible:outline-none pywebview-no-drag",
             isListMode
               ? "rounded-md bg-transparent px-2 py-1.5 hover:bg-[rgba(255,255,255,0.04)]"
               : "rounded-lg bg-transparent px-3 py-2 hover:bg-[rgba(255,255,255,0.04)]",
@@ -1079,77 +1149,27 @@ export const UploadTab = memo(forwardRef(function UploadTab(
           )}
           {...attributes}
           {...listeners}
+          onPointerDownCapture={(event) => {
+            if (event.button !== 0) return;
+            pointerStartRef.current = { x: event.clientX, y: event.clientY, id: event.pointerId };
+          }}
+          onPointerUpCapture={(event) => {
+            const start = pointerStartRef.current;
+            if (!start || start.id !== event.pointerId) return;
+            pointerStartRef.current = null;
+            if (event.button !== 0) return;
+            const dx = event.clientX - start.x;
+            const dy = event.clientY - start.y;
+            if (dx * dx + dy * dy > 36) return;
+            if (isDragging) return;
+            handleActivate();
+          }}
+          onPointerCancel={() => {
+            pointerStartRef.current = null;
+          }}
           onClick={(event) => {
-            if (item.invalid) {
-              event.preventDefault();
-              event.stopPropagation();
-              const shouldRemove = window.confirm(
-                "This media file has changed or is missing. Remove this job?"
-              );
-              if (shouldRemove) {
-                if (item.source === "local") {
-                  removeLocalItem(item);
-                } else if (item.jobId) {
-                  void handleRemoveJob(null, item.jobId);
-                }
-              }
-              return;
-            }
-            const isYoutube = item.externalSource?.type === "youtube";
-            if (isYoutube) {
-              const existingStreamUrl = item.streamUrl ?? item.externalSource?.streamUrl ?? null;
-              const streamExpired = existingStreamUrl ? isYoutubeStreamExpired(existingStreamUrl) : false;
-              const shouldUseExistingStream = Boolean(existingStreamUrl) && !streamExpired && !item.streamError;
-              if (shouldUseExistingStream) {
-                const stableSource = item.externalSource
-                  ? { ...item.externalSource, streamUrl: existingStreamUrl }
-                  : item.externalSource;
-                const stableItem: MediaItem = {
-                  ...item,
-                  previewUrl: item.previewUrl ?? existingStreamUrl,
-                  streamUrl: existingStreamUrl,
-                  externalSource: stableSource,
-                  isResolvingStream: false
-                };
-                setSelectedId(stableItem.id);
-                selectedIdRef.current = stableItem.id;
-                props.onAddToTimeline?.([stableItem]);
-                return;
-              }
-              const fallbackPreviewUrl = item.localPath ? toFileUrl(item.localPath) : item.previewUrl ?? null;
-              const pendingSource = item.externalSource
-                ? { ...item.externalSource, streamUrl: null }
-                : item.externalSource;
-              const pendingItem: MediaItem = {
-                ...item,
-                previewUrl: fallbackPreviewUrl,
-                streamUrl: null,
-                externalSource: pendingSource,
-                isResolvingStream: true,
-                streamError: null
-              };
-              setSelectedId(pendingItem.id);
-              selectedIdRef.current = pendingItem.id;
-              props.onAddToTimeline?.([pendingItem]);
-              const resolveToken = ++resolveTokenRef.current;
-              const requestedId = pendingItem.id;
-              const requestedJobId = item.source === "job" ? item.jobId ?? null : null;
-              const resolveTarget: MediaItem = {
-                ...item,
-                previewUrl: fallbackPreviewUrl ?? null
-              };
-              void resolveYoutubeStream(resolveTarget).then((refreshed) => {
-                if (!refreshed) return;
-                if (resolveTokenRef.current !== resolveToken) return;
-                if (selectedIdRef.current !== requestedId) return;
-                if (requestedJobId && selectedJobIdRef.current !== requestedJobId) return;
-                props.onAddToTimeline?.([refreshed]);
-              });
-              return;
-            }
-            setSelectedId(item.id);
-            selectedIdRef.current = item.id;
-            props.onAddToTimeline?.([item]);
+            if (isDragging) return;
+            handleActivate();
           }}
           onContextMenu={(e) => {
             e.preventDefault();

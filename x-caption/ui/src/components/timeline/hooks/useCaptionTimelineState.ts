@@ -566,7 +566,7 @@ export function useCaptionTimelineState(params: CaptionTimelineParams) {
       if (captionDragRef.current) return;
       if (scrubStateRef.current || playerScrubRef.current) return;
       if (duration <= 0) return;
-      if (!activeJob?.id) return;
+      if (!activeMedia) return;
       const track = timelineTrackRef.current;
       if (!track) return;
       const rect = track.getBoundingClientRect();
@@ -606,6 +606,7 @@ export function useCaptionTimelineState(params: CaptionTimelineParams) {
     },
     [
       activeJob?.id,
+      activeMedia,
       captionHover,
       duration,
       minCaptionDuration,

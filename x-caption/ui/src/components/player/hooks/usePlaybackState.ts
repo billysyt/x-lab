@@ -13,6 +13,7 @@ type PlaybackStateParams = {
   notify: (message: string, type?: "info" | "success" | "error") => void;
   activeMedia: MediaItem | null;
   setActiveMedia: Dispatch<SetStateAction<MediaItem | null>>;
+  selectedJobId: string | null;
   timelineClips: TimelineClip[];
   setTimelineClips: Dispatch<SetStateAction<TimelineClip[]>>;
   activeClipId: string | null;
@@ -36,6 +37,7 @@ export function usePlaybackState(params: PlaybackStateParams) {
     notify,
     activeMedia,
     setActiveMedia,
+    selectedJobId,
     timelineClips,
     setTimelineClips,
     activeClipId,
@@ -1045,8 +1047,9 @@ export function usePlaybackState(params: PlaybackStateParams) {
 
   useEffect(() => {
     if (!activeMedia || activeMedia.source !== "job" || !activeMedia.jobId) return;
+    if (selectedJobId && selectedJobId !== activeMedia.jobId) return;
     dispatchSelectJob(activeMedia.jobId);
-  }, [activeMedia, dispatchSelectJob]);
+  }, [activeMedia, dispatchSelectJob, selectedJobId]);
 
   useEffect(() => {
     if (!clipTimeline.length) return;

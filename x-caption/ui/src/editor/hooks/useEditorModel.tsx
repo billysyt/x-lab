@@ -87,6 +87,7 @@ export function useEditorModel() {
     dispatch,
     notify: uiActions.notify,
     activeJob: activeJobState.activeJob,
+    selectedJobId,
     jobsById,
     mediaState,
     segmentsState,

@@ -11,12 +11,13 @@ export function useEditorPlaybackPipeline(params: {
   dispatch: AppDispatch;
   notify: (message: string, type?: "info" | "success" | "error") => void;
   activeJob: Job | null;
+  selectedJobId: string | null;
   jobsById: Record<string, Job>;
   mediaState: ReturnType<typeof useMediaState>;
   segmentsState: ReturnType<typeof useSegmentsState>;
   isOnline: boolean;
 }) {
-  const { dispatch, notify, activeJob, jobsById, mediaState, segmentsState, isOnline } = params;
+  const { dispatch, notify, activeJob, selectedJobId, jobsById, mediaState, segmentsState, isOnline } = params;
 
   const timelineDerived = useTimelineDerivedState({
     timelineClips: mediaState.timelineClips,
@@ -28,6 +29,7 @@ export function useEditorPlaybackPipeline(params: {
     notify,
     activeMedia: mediaState.activeMedia,
     setActiveMedia: mediaState.setActiveMedia,
+    selectedJobId,
     timelineClips: mediaState.timelineClips,
     setTimelineClips: mediaState.setTimelineClips,
     activeClipId: mediaState.activeClipId,
