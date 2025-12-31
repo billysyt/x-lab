@@ -588,26 +588,50 @@ export function usePlaybackState(params: PlaybackStateParams) {
       setActivePreviewUrl(null);
       return;
     }
+    console.log("[activePreviewUrl Effect] activeMedia changed:", {
+      id: activeMedia.id,
+      previewUrl: activeMedia.previewUrl,
+      streamUrl: activeMedia.streamUrl,
+      localPath: activeMedia.localPath,
+      externalSource: activeMedia.externalSource,
+      isOnline
+    });
     const toFileUrl = (path: string) => `/media?path=${encodeURIComponent(path)}`;
-    const preferLocalYoutube =
-      activeMedia.externalSource?.type === "youtube" && (activeMedia.streamError || !isOnline);
+    const preferLocalYoutube = Boolean(
+      activeMedia.externalSource?.type === "youtube" && (activeMedia.streamError || !isOnline)
+    );
+    console.log("[activePreviewUrl Effect] Checking condition:", {
+      hasPreviewUrl: Boolean(activeMedia.previewUrl),
+      previewUrl: activeMedia.previewUrl,
+      preferLocalYoutube,
+      streamError: activeMedia.streamError,
+      isOnline,
+      willEarlyReturn: Boolean(activeMedia.previewUrl && !preferLocalYoutube)
+    });
     if (activeMedia.previewUrl && !preferLocalYoutube) {
+      console.log("[activePreviewUrl Effect] Has previewUrl and not preferLocalYoutube, setting null");
       setActivePreviewUrl(null);
       return;
     }
     // For YouTube items that are resolving, don't set local audio as preview
     // Wait for the stream URL to be resolved
     if (activeMedia.externalSource?.type === "youtube" && activeMedia.isResolvingStream) {
+      console.log("[activePreviewUrl Effect] YouTube resolving, setting null");
       setActivePreviewUrl(null);
       return;
     }
     if (activeMedia.externalSource?.type === "youtube") {
+      console.log("[activePreviewUrl Effect] YouTube item, checking fallback paths");
       if (activeMedia.localPath) {
-        setActivePreviewUrl(toFileUrl(activeMedia.localPath));
+        const url = toFileUrl(activeMedia.localPath);
+        console.log("[activePreviewUrl Effect] Setting local file URL:", url);
+        setActivePreviewUrl(url);
         return;
       }
       if (activeMedia.source === "job" && activeMedia.jobId) {
-        setActivePreviewUrl(`/audio/${activeMedia.jobId}?v=${Date.now()}`);
+        const url = `/audio/${activeMedia.jobId}?v=${Date.now()}`;
+        console.log("[activePreviewUrl Effect] Setting job audio URL:", url);
+        setActivePreviewUrl(url);
         return;
       }
     }
@@ -696,7 +720,10 @@ export function usePlaybackState(params: PlaybackStateParams) {
     const handleError = () => {
       setPreviewLoading(false);
       setPreviewError("Preview failed to load.");
-      if (activeMedia?.externalSource?.type === "youtube" && !activeMedia.streamError) {
+      // Only set streamError if we DON'T have a valid previewUrl
+      // During automatic activation, we have a fresh YouTube URL that should work
+      // Don't mark it as failed just because of a transient loading error
+      if (activeMedia?.externalSource?.type === "youtube" && !activeMedia.streamError && !activeMedia.previewUrl) {
         const nextMedia = { ...activeMedia, streamError: "YouTube preview failed to load." };
         setActiveMedia(nextMedia);
         setTimelineClips((prev) =>
@@ -1415,6 +1442,13 @@ export function usePlaybackState(params: PlaybackStateParams) {
         notify("Skipped caption files. Only audio/video clips can be added to the timeline.", "info");
       }
       const item = supportedItems[0];
+      console.log("[handleAddToTimeline] Received item:", {
+        id: item.id,
+        kind: item.kind,
+        streamUrl: item.streamUrl,
+        previewUrl: item.previewUrl,
+        externalSource: item.externalSource
+      });
 
       if (activeMedia && activeMedia.id === item.id && activeMedia.isResolvingStream && !item.isResolvingStream) {
         if (pendingPlayRef.current || playbackRef.current.isPlaying) {

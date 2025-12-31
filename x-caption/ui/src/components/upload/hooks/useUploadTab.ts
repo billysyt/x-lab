@@ -49,6 +49,7 @@ export function useUploadTab(props: UploadTabProps) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mediaOrder, setMediaOrder] = useState<string[]>([]);
+  const [pendingYoutubeActivation, setPendingYoutubeActivation] = useState<string | null>(null);
   const selectedIdRef = useRef<string | null>(null);
   const selectedJobIdRef = useRef<string | null>(selectedJobId ?? null);
   const resolveTokenRef = useRef(0);
@@ -327,11 +328,14 @@ export function useUploadTab(props: UploadTabProps) {
     const previewUrl = args.previewUrl ?? args.streamUrl ?? localToFileUrl(args.path);
     const externalThumb = args.externalSource?.thumbnailUrl ?? null;
     const jobId = buildImportedJobId(args.path, args.size);
+    // For YouTube videos, always set kind to "video" regardless of file extension
+    // (backend saves as .mp3 but it's still a video source)
+    const kind = args.externalSource?.type === "youtube" ? "video" : getKind(args.name);
     return {
       id,
       name: args.name,
       displayName: args.displayName ?? (stripFileExtension(args.name) || args.name),
-      kind: getKind(args.name),
+      kind,
       source: "local",
       transcriptionKind: args.transcriptionKind,
       jobId,
@@ -565,30 +569,43 @@ export function useUploadTab(props: UploadTabProps) {
   }) {
     const item = buildLocalPathItem(args);
 
-    // For YouTube: save to DB first, then reload from DB (same as restart)
+    // For YouTube: resolve stream first, save to DB, then reload from DB (same as restart)
     // This ensures the exact same code path as restart + click
     if (args.externalSource?.type === "youtube" && item.jobId && item.localPath) {
       const displayName = item.displayName ?? (stripFileExtension(args.name) || args.name);
-      const uiState = {
-        mediaSource: {
-          type: "youtube",
-          url: args.externalSource.url ?? null,
-          streamUrl: null, // Don't save backend's stream URL, let frontend resolve
-          title: args.externalSource.title ?? null,
-          id: args.externalSource.id ?? null,
-          thumbnailUrl: args.externalSource.thumbnailUrl ?? null
-        }
-      };
 
-      // Save to DB, then reload jobs (like restart), then activate
+      // Resolve YouTube stream URL BEFORE saving to database
       void (async () => {
         try {
+          // Resolve the stream URL first
+          const resolvedItem = await resolveYoutubeStream(item);
+          if (!resolvedItem) {
+            // Failed to resolve - add as local item with error
+            setLocalMedia((prev) => [item, ...prev]);
+            setSelectedId(item.id);
+            props.onAddToTimeline?.([item]);
+            clearSelectedFile();
+            return;
+          }
+
+          // Now save to DB with the resolved streamUrl
+          const uiState = {
+            mediaSource: {
+              type: "youtube",
+              url: resolvedItem.externalSource?.url ?? args.externalSource.url ?? null,
+              streamUrl: resolvedItem.streamUrl ?? null, // Save resolved stream URL
+              title: resolvedItem.externalSource?.title ?? args.externalSource.title ?? null,
+              id: resolvedItem.externalSource?.id ?? args.externalSource.id ?? null,
+              thumbnailUrl: resolvedItem.externalSource?.thumbnailUrl ?? args.externalSource.thumbnailUrl ?? null
+            }
+          };
+
           await apiUpsertJobRecord({
             job_id: item.jobId!,
             filename: args.name,
             display_name: displayName,
             media_path: item.localPath!,
-            media_kind: item.kind,
+            media_kind: item.kind, // Use the determined kind (will be "video" for YouTube)
             status: "imported",
             ui_state: uiState
           });
@@ -596,14 +613,12 @@ export function useUploadTab(props: UploadTabProps) {
           // Reload jobs from DB (same as app restart)
           await dispatch(bootstrapJobs()).unwrap();
 
-          // Now find the job item and activate it (same as clicking after restart)
-          const jobItem = buildJobItem(item.jobId!);
-          if (jobItem) {
-            setSelectedId(jobItem.id);
-            handleMediaItemActivate(jobItem);
-          }
+          // Set state to trigger activation via effect (avoids stale closure issue)
+          // The effect will use fresh callback references after the re-render from bootstrapJobs
+          console.log("[YouTube Import] Setting pendingYoutubeActivation:", item.jobId);
+          setPendingYoutubeActivation(item.jobId!);
         } catch (e) {
-          // Fallback: add as local item if DB save fails
+          // Fallback: add as local item if DB save/resolve fails
           setLocalMedia((prev) => [item, ...prev]);
           setSelectedId(item.id);
           props.onAddToTimeline?.([item]);
@@ -688,13 +703,15 @@ export function useUploadTab(props: UploadTabProps) {
       (job.partialResult as Record<string, unknown>)?.audio_duration ||
       (job.partialResult as Record<string, unknown>)?.duration ||
       null;
-    const kind = getKind(job.filename);
+    const rawSource =
+      job.uiState && typeof job.uiState === "object" ? (job.uiState as Record<string, unknown>).mediaSource : null;
+    const isYoutubeJob = rawSource && typeof rawSource === "object" && (rawSource as { type?: string }).type === "youtube";
+    // For YouTube videos, always use "video" kind regardless of file extension
+    const kind = isYoutubeJob ? "video" : getKind(job.filename);
     if (kind === "caption") return null;
     const localMatch = localMedia.find((item) => item.name === job.filename && item.kind === "video");
     const meta = jobPreviewMeta[id];
     const mediaPath = job.audioFile?.path || (job.result as Record<string, unknown>)?.file_path || null;
-    const rawSource =
-      job.uiState && typeof job.uiState === "object" ? (job.uiState as Record<string, unknown>).mediaSource : null;
     const sourceError =
       job.uiState && typeof job.uiState === "object" ? (job.uiState as Record<string, unknown>).mediaSourceError : null;
 
@@ -943,6 +960,17 @@ export function useUploadTab(props: UploadTabProps) {
         const existingStreamUrl = item.streamUrl ?? item.externalSource?.streamUrl ?? null;
         const streamExpired = existingStreamUrl ? isYoutubeStreamExpired(existingStreamUrl) : false;
         const shouldUseExistingStream = Boolean(existingStreamUrl) && !streamExpired && !item.streamError;
+        console.log("[handleMediaItemActivate] YouTube item:", {
+          itemId: item.id,
+          itemName: item.name,
+          itemStreamUrl: item.streamUrl,
+          itemPreviewUrl: item.previewUrl,
+          externalSourceStreamUrl: item.externalSource?.streamUrl,
+          existingStreamUrl,
+          streamExpired,
+          itemStreamError: item.streamError,
+          shouldUseExistingStream
+        });
         if (shouldUseExistingStream) {
           const stableSource = item.externalSource ? { ...item.externalSource, streamUrl: existingStreamUrl } : item.externalSource;
           const stableItem: MediaItem = {
@@ -952,11 +980,17 @@ export function useUploadTab(props: UploadTabProps) {
             externalSource: stableSource,
             isResolvingStream: false
           };
+          console.log("[handleMediaItemActivate] Using existing stream, passing to timeline:", {
+            id: stableItem.id,
+            streamUrl: stableItem.streamUrl,
+            previewUrl: stableItem.previewUrl
+          });
           setSelectedId(stableItem.id);
           selectedIdRef.current = stableItem.id;
           props.onAddToTimeline?.([stableItem]);
           return;
         }
+        console.log("[handleMediaItemActivate] No valid stream, resolving...");
         const fallbackPreviewUrl = item.localPath ? localToFileUrl(item.localPath) : item.previewUrl ?? null;
         const pendingSource = item.externalSource ? { ...item.externalSource, streamUrl: null } : item.externalSource;
         const pendingItem: MediaItem = {
@@ -991,6 +1025,29 @@ export function useUploadTab(props: UploadTabProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [props.onAddToTimeline, resolveYoutubeStream]
   );
+
+  // Effect to handle pending YouTube activation after bootstrapJobs completes
+  // This ensures we use fresh callback references after the re-render
+  useEffect(() => {
+    if (!pendingYoutubeActivation) return;
+    console.log("[YouTube Activation Effect] Triggered with jobId:", pendingYoutubeActivation);
+    const jobItem = buildJobItem(pendingYoutubeActivation);
+    console.log("[YouTube Activation Effect] Built jobItem:", {
+      id: jobItem?.id,
+      name: jobItem?.name,
+      kind: jobItem?.kind,
+      streamUrl: jobItem?.streamUrl,
+      previewUrl: jobItem?.previewUrl,
+      externalSource: jobItem?.externalSource,
+      isResolvingStream: jobItem?.isResolvingStream,
+      streamError: jobItem?.streamError
+    });
+    setPendingYoutubeActivation(null); // Clear to prevent re-trigger
+    if (jobItem) {
+      setSelectedId(jobItem.id);
+      handleMediaItemActivate(jobItem);
+    }
+  }, [pendingYoutubeActivation, handleMediaItemActivate]);
 
   const handleMediaItemContextMenu = useCallback((e: React.MouseEvent, item: MediaItem) => {
     setSelectedId(item.id);
