@@ -2,10 +2,11 @@
   "nav": {
     "products": "Products",
     "pricing": "Get Premium",
+    "faq": "FAQ",
     "contact": "Contact Us",
     "download": "Download",
-    "suite": "On-prem AI suite",
-    "localeZh": "Traditional Chinese",
+    "suite": "TOP 1 Local Team",
+    "localeZh": "繁體中文",
     "localeEn": "English"
   },
   "signal": "Local TOP 1",
@@ -18,8 +19,8 @@
   },
   "products": {
     "label": "Products",
-    "title": "Designed for local AI teams.",
-    "captionDesc": "Cantonese captions with Traditional Chinese output, speaker-aware transcripts, and SRT export.",
+    "title": "Built by Hong Kong's leading AI team",
+    "captionDesc": "Spoken or written language subtitles, Traditional/Simplified output, fast editing, SRT export.",
     "minutesDesc": "Meeting minutes with speaker ID, clean transcripts, and AI summaries.",
     "codeDesc": "Low-cost Claude Code or Codex access with team controls and audit-ready usage.",
     "comingSoon": "Coming Soon"
@@ -60,7 +61,7 @@
   "comparison": {
     "label": "Comparison",
     "title": "How X-Lab compares",
-    "desc": "A quick snapshot of pricing, limits, and feature coverage.",
+    "desc": "Quick comparison of X-Lab AI with other popular platforms.",
     "columns": {
       "xlab": "X-Lab",
       "cantosub": "CantoSub AI",
@@ -212,7 +213,7 @@
     "enterprise": "Enterprise",
     "security": "Security review",
     "copyright": "Copyright 2025 X-Lab. All rights reserved.",
-    "privacy": "On-prem and privacy-first.",
+    "privacy": "Offline processing, privacy first.",
     "tagline": "Local-first AI for captions, meetings, and secure on-prem workflows."
   },
   "contactPage": {
@@ -264,8 +265,35 @@
     "mapAlt": "Stylized map of Hong Kong"
   },
   "menu": {
-    "captionDesc": "Cantonese captions + SRT",
-    "minutesDesc": "Meeting minutes + AI summary",
+    "captionDesc": "Spoken or written language subtitles, Traditional/Simplified output, fast editing, SRT export.",
+    "minutesDesc": "Meeting minutes with speaker ID, clean transcripts, and AI summaries.",
     "codeDesc": "Claude Code / Codex"
+  },
+  "faq": {
+    "label": "FAQ",
+    "title": "Frequently Asked Questions",
+    "desc": "Common questions and answers about X-Lab AI.",
+    "questions": [
+      {
+        "q": "What languages does X-Lab AI support?",
+        "a": "X-Lab AI supports Cantonese, Mandarin, English, and many other languages. The system automatically detects the language and generates accurate subtitles, with support for both Traditional and Simplified Chinese output."
+      },
+      {
+        "q": "Is my data uploaded to servers?",
+        "a": "No. X-Lab AI runs completely offline. All video and audio files are processed locally on your device and are never uploaded to any server, ensuring your data privacy and security."
+      },
+      {
+        "q": "What file formats are supported?",
+        "a": "X-Lab AI supports common video formats like MP4, MOV, AVI, MKV, as well as audio formats like MP3, WAV, M4A, and more. Subtitles can be exported in SRT, VTT, and other formats."
+      },
+      {
+        "q": "What are the limitations of the free version?",
+        "a": "The free version provides basic features including subtitle generation and export. Upgrade to Premium to unlock unlimited exports, priority processing speed, and more advanced features."
+      },
+      {
+        "q": "How can I get technical support?",
+        "a": "You can contact us through the form on our Contact page or email hello@x-lab.ai. We will respond to your inquiry within one business day."
+      }
+    ]
   }
 }

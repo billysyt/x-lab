@@ -2,9 +2,10 @@
   "nav": {
     "products": "產品",
     "pricing": "升級方案",
+    "faq": "常見問題",
     "contact": "聯絡我們",
     "download": "下載",
-    "suite": "本地部署 AI 套件",
+    "suite": "TOP 1 本地團隊",
     "localeZh": "繁體中文",
     "localeEn": "English"
   },
@@ -18,8 +19,8 @@
   },
   "products": {
     "label": "產品",
-    "title": "為本地 AI 團隊打造。",
-    "captionDesc": "廣東話字幕、繁體輸出、講者識別，支援 SRT 匯出。",
+    "title": "香港領先AI 團隊打造",
+    "captionDesc": "口語或書面語字幕、繁簡輸出、高速剪輯，支援 SRT 匯出。",
     "minutesDesc": "會議紀錄、講者識別、清晰逐字稿與 AI 摘要。",
     "codeDesc": "低成本 Claude Code 或 Codex 入口，團隊控制與用量審計。",
     "comingSoon": "即將推出"
@@ -60,7 +61,7 @@
   "comparison": {
     "label": "對比",
     "title": "X-Lab 對比其他方案",
-    "desc": "快速比較 X-Lab 本地部署套件與主流字幕工具。",
+    "desc": "快速比較 X-Lab AI 與其他主流平台。",
     "columns": {
       "xlab": "X-Lab",
       "cantosub": "CantoSub AI",
@@ -212,7 +213,7 @@
     "enterprise": "企業",
     "security": "安全審核",
     "copyright": "Copyright 2025 X-Lab. All rights reserved.",
-    "privacy": "本地部署、私隱優先。",
+    "privacy": "離線處理、私隱優先。",
     "tagline": "本地優先 AI：字幕、會議與安全部署。"
   },
   "contactPage": {
@@ -264,8 +265,35 @@
     "mapAlt": "香港地圖視覺"
   },
   "menu": {
-    "captionDesc": "廣東話字幕 + SRT",
-    "minutesDesc": "會議紀錄 + AI 摘要",
+    "captionDesc": "口語或書面語字幕、繁簡輸出、高速剪輯，支援 SRT 匯出。",
+    "minutesDesc": "會議紀錄、講者識別、清晰逐字稿與 AI 摘要。",
     "codeDesc": "Claude Code / Codex"
+  },
+  "faq": {
+    "label": "常見問題",
+    "title": "常見問題",
+    "desc": "關於 X-Lab AI 的常見問題與解答。",
+    "questions": [
+      {
+        "q": "X-Lab AI 支援哪些語言？",
+        "a": "X-Lab AI 支援廣東話、普通話、英語等多種語言。系統會自動檢測語言並生成準確的字幕，同時支援繁體及簡體中文輸出。"
+      },
+      {
+        "q": "資料會上傳到伺服器嗎？",
+        "a": "不會。X-Lab AI 完全離線運行，所有影片和音訊檔案都在你的本機處理，不會上傳到任何伺服器，確保你的資料私隱安全。"
+      },
+      {
+        "q": "支援哪些檔案格式？",
+        "a": "X-Lab AI 支援常見的影片格式如 MP4、MOV、AVI、MKV，以及音訊格式如 MP3、WAV、M4A 等。字幕可匯出為 SRT、VTT 等格式。"
+      },
+      {
+        "q": "免費版有什麼限制？",
+        "a": "免費版提供基本功能，包括字幕生成和匯出。升級至 Premium 可解鎖無限匯出、優先處理速度和更多進階功能。"
+      },
+      {
+        "q": "如何取得技術支援？",
+        "a": "你可以透過聯絡頁面的表格或電郵 hello@x-lab.ai 聯繫我們。我們會在一個工作天內回覆你的查詢。"
+      }
+    ]
   }
 }
