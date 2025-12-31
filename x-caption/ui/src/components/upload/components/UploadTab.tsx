@@ -9,6 +9,7 @@ import {
   useState,
   type Dispatch,
   type ForwardedRef,
+  type MutableRefObject,
   type SetStateAction
 } from "react";
 import {
@@ -131,6 +132,178 @@ function isYoutubeStreamExpired(streamUrl?: string | null) {
     return false;
   }
 }
+
+type SortableMediaRowProps = {
+  item: MediaItem;
+  updatedAt: number | null;
+  isSelected: boolean;
+  isProcessingJob: boolean;
+  canReorder: boolean;
+  viewMode: "list-view" | "list";
+  getPreviewKind: (item: MediaItem) => string;
+  onActivate: (item: MediaItem) => void;
+  onContextMenu: (e: React.MouseEvent, item: MediaItem) => void;
+  formatTimestamp: (ts: number) => string;
+};
+
+const SortableMediaRow = memo(function SortableMediaRow({
+  item,
+  updatedAt,
+  isSelected,
+  isProcessingJob,
+  canReorder,
+  viewMode,
+  getPreviewKind,
+  onActivate,
+  onContextMenu,
+  formatTimestamp
+}: SortableMediaRowProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: item.id,
+    disabled: !canReorder
+  });
+  const pointerStartRef = useRef<{ x: number; y: number; id: number } | null>(null);
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition
+  };
+  const isListMode = viewMode === "list";
+  const isYoutube = item.externalSource?.type === "youtube";
+  const previewKind = getPreviewKind(item);
+  const fallbackIcon = isYoutube ? "youtube" : previewKind === "video" ? "video" : "volume";
+  const displayThumbnail = item.thumbnailUrl ?? item.externalSource?.thumbnailUrl ?? null;
+  const displayName = item.displayName ?? item.name;
+
+  const handleActivate = useCallback(() => {
+    onActivate(item);
+  }, [onActivate, item]);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    onContextMenu(e, item);
+  }, [onContextMenu, item]);
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <button
+        data-media-row
+        className={cn(
+          "relative w-full text-left transition focus:outline-none focus-visible:outline-none pywebview-no-drag",
+          isListMode
+            ? "rounded-md bg-transparent px-2 py-1.5 hover:bg-[rgba(255,255,255,0.04)]"
+            : "rounded-lg bg-transparent px-3 py-2 hover:bg-[rgba(255,255,255,0.04)]",
+          canReorder && "cursor-grab active:cursor-grabbing",
+          isDragging && "shadow-[0_12px_24px_rgba(0,0,0,0.35)]",
+          isSelected && (isListMode ? "ring-1 ring-primary/40" : "ring-1 ring-primary/40 bg-[#1b1b22]"),
+          item.invalid && "ring-1 ring-rose-500/40"
+        )}
+        {...attributes}
+        {...listeners}
+        onPointerDownCapture={(event) => {
+          if (event.button !== 0) return;
+          pointerStartRef.current = { x: event.clientX, y: event.clientY, id: event.pointerId };
+        }}
+        onPointerUpCapture={(event) => {
+          const start = pointerStartRef.current;
+          if (!start || start.id !== event.pointerId) return;
+          pointerStartRef.current = null;
+          if (event.button !== 0) return;
+          const dx = event.clientX - start.x;
+          const dy = event.clientY - start.y;
+          if (dx * dx + dy * dy > 36) return;
+          if (isDragging) return;
+          handleActivate();
+        }}
+        onPointerCancel={() => {
+          pointerStartRef.current = null;
+        }}
+        onClick={(event) => {
+          if (isDragging) return;
+          handleActivate();
+        }}
+        onContextMenu={handleContextMenu}
+        type="button"
+      >
+        {isListMode ? (
+          <div className="flex w-full items-center gap-2">
+            <div
+              className={cn(
+                "flex h-7 w-7 items-center justify-center rounded-md bg-[#0f0f10]",
+                isYoutube ? "text-[#ef4444]" : "text-slate-200"
+              )}
+            >
+              <AppIcon name={fallbackIcon} className="text-[13px]" />
+            </div>
+            <span
+              className={cn(
+                "min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-100",
+                item.invalid && "text-rose-300"
+              )}
+            >
+              {displayName}
+            </span>
+          </div>
+        ) : (
+          <div className="flex w-full items-center gap-3">
+            {displayThumbnail && (previewKind === "video" || isYoutube) ? (
+              <div className="relative h-10 w-16 overflow-hidden rounded-md bg-[#0f0f10]">
+                <img src={displayThumbnail} alt="" className="h-full w-full object-cover" />
+                {isYoutube ? (
+                  <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded bg-black/60">
+                    <AppIcon name="youtube" className="text-[9px] text-[#ff0000]" />
+                  </span>
+                ) : null}
+              </div>
+            ) : (
+              <div
+                className={cn(
+                  "flex h-10 w-16 items-center justify-center rounded-md bg-[#0f0f10]",
+                  isYoutube ? "text-[#ef4444]" : "text-slate-300"
+                )}
+              >
+                <AppIcon name={fallbackIcon} className="text-[14px]" />
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <span
+                className="block text-[12px] font-semibold leading-snug text-slate-100"
+                style={{
+                  display: "-webkit-box",
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden"
+                }}
+              >
+                {displayName}
+              </span>
+              {updatedAt || item.invalid ? (
+                <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-500" style={{ whiteSpace: "nowrap" }}>
+                  {updatedAt ? <span className="truncate">{formatTimestamp(updatedAt)}</span> : null}
+                  {item.invalid ? (
+                    <span className="inline-flex items-center gap-1 text-rose-400">
+                      <AppIcon name="exclamationTriangle" className="text-[10px]" />
+                      Invalid file
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        )}
+        {isProcessingJob ? (
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/35 backdrop-blur-[1px]">
+            <div className="processing-spinner" aria-hidden>
+              <span className="processing-bar processing-bar-1" />
+              <span className="processing-bar processing-bar-2" />
+              <span className="processing-bar processing-bar-3" />
+              <span className="processing-bar processing-bar-4" />
+            </div>
+          </div>
+        ) : null}
+      </button>
+    </div>
+  );
+});
 
 export const UploadTab = memo(forwardRef(function UploadTab(
   props: UploadTabProps,
@@ -1037,231 +1210,83 @@ export const UploadTab = memo(forwardRef(function UploadTab(
     ]
   );
 
-  const SortableMediaRow = ({
-    item,
-    updatedAt,
-    isSelected,
-    isProcessingJob
-  }: {
-    item: MediaItem;
-    updatedAt: number | null;
-    isSelected: boolean;
-    isProcessingJob: boolean;
-  }) => {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-      id: item.id,
-      disabled: !canReorder
-    });
-    const pointerStartRef = useRef<{ x: number; y: number; id: number } | null>(null);
-    const style = {
-      transform: CSS.Transform.toString(transform),
-      transition
-    };
-    const isListMode = viewMode === "list";
+  const handleMediaItemActivate = useCallback((item: MediaItem) => {
+    if (item.invalid) {
+      const shouldRemove = window.confirm("This media file has changed or is missing. Remove this job?");
+      if (shouldRemove) {
+        if (item.source === "local") {
+          removeLocalItem(item);
+        } else if (item.jobId) {
+          void handleRemoveJob(null, item.jobId);
+        }
+      }
+      return;
+    }
     const isYoutube = item.externalSource?.type === "youtube";
-    const previewKind = getPreviewKind(item);
-    const fallbackIcon = isYoutube ? "youtube" : previewKind === "video" ? "video" : "volume";
-    const displayThumbnail = item.thumbnailUrl ?? item.externalSource?.thumbnailUrl ?? null;
-    const displayName = item.displayName ?? item.name;
-
-    const handleActivate = () => {
-      if (item.invalid) {
-        const shouldRemove = window.confirm("This media file has changed or is missing. Remove this job?");
-        if (shouldRemove) {
-          if (item.source === "local") {
-            removeLocalItem(item);
-          } else if (item.jobId) {
-            void handleRemoveJob(null, item.jobId);
-          }
-        }
-        return;
-      }
-      const isYoutube = item.externalSource?.type === "youtube";
-      if (isYoutube) {
-        const existingStreamUrl = item.streamUrl ?? item.externalSource?.streamUrl ?? null;
-        const streamExpired = existingStreamUrl ? isYoutubeStreamExpired(existingStreamUrl) : false;
-        const shouldUseExistingStream = Boolean(existingStreamUrl) && !streamExpired && !item.streamError;
-        if (shouldUseExistingStream) {
-          const stableSource = item.externalSource
-            ? { ...item.externalSource, streamUrl: existingStreamUrl }
-            : item.externalSource;
-          const stableItem: MediaItem = {
-            ...item,
-            previewUrl: item.previewUrl ?? existingStreamUrl,
-            streamUrl: existingStreamUrl,
-            externalSource: stableSource,
-            isResolvingStream: false
-          };
-          setSelectedId(stableItem.id);
-          selectedIdRef.current = stableItem.id;
-          props.onAddToTimeline?.([stableItem]);
-          return;
-        }
-        const fallbackPreviewUrl = item.localPath ? toFileUrl(item.localPath) : item.previewUrl ?? null;
-        const pendingSource = item.externalSource
-          ? { ...item.externalSource, streamUrl: null }
+    if (isYoutube) {
+      const existingStreamUrl = item.streamUrl ?? item.externalSource?.streamUrl ?? null;
+      const streamExpired = existingStreamUrl ? isYoutubeStreamExpired(existingStreamUrl) : false;
+      const shouldUseExistingStream = Boolean(existingStreamUrl) && !streamExpired && !item.streamError;
+      if (shouldUseExistingStream) {
+        const stableSource = item.externalSource
+          ? { ...item.externalSource, streamUrl: existingStreamUrl }
           : item.externalSource;
-        const pendingItem: MediaItem = {
+        const stableItem: MediaItem = {
           ...item,
-          previewUrl: fallbackPreviewUrl,
-          streamUrl: null,
-          externalSource: pendingSource,
-          isResolvingStream: true,
-          streamError: null
+          previewUrl: item.previewUrl ?? existingStreamUrl,
+          streamUrl: existingStreamUrl,
+          externalSource: stableSource,
+          isResolvingStream: false
         };
-        setSelectedId(pendingItem.id);
-        selectedIdRef.current = pendingItem.id;
-        props.onAddToTimeline?.([pendingItem]);
-        const resolveToken = ++resolveTokenRef.current;
-        const requestedId = pendingItem.id;
-        const requestedJobId = item.source === "job" ? item.jobId ?? null : null;
-        const resolveTarget: MediaItem = {
-          ...item,
-          previewUrl: fallbackPreviewUrl ?? null
-        };
-        void resolveYoutubeStream(resolveTarget).then((refreshed) => {
-          if (!refreshed) return;
-          if (resolveTokenRef.current !== resolveToken) return;
-          if (selectedIdRef.current !== requestedId) return;
-          if (requestedJobId && selectedJobIdRef.current !== requestedJobId) return;
-          props.onAddToTimeline?.([refreshed]);
-        });
+        setSelectedId(stableItem.id);
+        selectedIdRef.current = stableItem.id;
+        props.onAddToTimeline?.([stableItem]);
         return;
       }
-      setSelectedId(item.id);
-      selectedIdRef.current = item.id;
-      props.onAddToTimeline?.([item]);
-    };
+      const fallbackPreviewUrl = item.localPath ? toFileUrl(item.localPath) : item.previewUrl ?? null;
+      const pendingSource = item.externalSource
+        ? { ...item.externalSource, streamUrl: null }
+        : item.externalSource;
+      const pendingItem: MediaItem = {
+        ...item,
+        previewUrl: fallbackPreviewUrl,
+        streamUrl: null,
+        externalSource: pendingSource,
+        isResolvingStream: true,
+        streamError: null
+      };
+      setSelectedId(pendingItem.id);
+      selectedIdRef.current = pendingItem.id;
+      props.onAddToTimeline?.([pendingItem]);
+      const resolveToken = ++resolveTokenRef.current;
+      const requestedId = pendingItem.id;
+      const requestedJobId = item.source === "job" ? item.jobId ?? null : null;
+      const resolveTarget: MediaItem = {
+        ...item,
+        previewUrl: fallbackPreviewUrl ?? null
+      };
+      void resolveYoutubeStream(resolveTarget).then((refreshed) => {
+        if (!refreshed) return;
+        if (resolveTokenRef.current !== resolveToken) return;
+        if (selectedIdRef.current !== requestedId) return;
+        if (requestedJobId && selectedJobIdRef.current !== requestedJobId) return;
+        props.onAddToTimeline?.([refreshed]);
+      });
+      return;
+    }
+    setSelectedId(item.id);
+    selectedIdRef.current = item.id;
+    props.onAddToTimeline?.([item]);
+  }, [handleRemoveJob, props.onAddToTimeline, removeLocalItem, resolveYoutubeStream, toFileUrl]);
 
-    return (
-      <div ref={setNodeRef} style={style}>
-        <button
-          data-media-row
-          className={cn(
-            "relative w-full text-left transition focus:outline-none focus-visible:outline-none pywebview-no-drag",
-            isListMode
-              ? "rounded-md bg-transparent px-2 py-1.5 hover:bg-[rgba(255,255,255,0.04)]"
-              : "rounded-lg bg-transparent px-3 py-2 hover:bg-[rgba(255,255,255,0.04)]",
-            canReorder && "cursor-grab active:cursor-grabbing",
-            isDragging && "shadow-[0_12px_24px_rgba(0,0,0,0.35)]",
-            isSelected && (isListMode ? "ring-1 ring-primary/40" : "ring-1 ring-primary/40 bg-[#1b1b22]"),
-            item.invalid && "ring-1 ring-rose-500/40"
-          )}
-          {...attributes}
-          {...listeners}
-          onPointerDownCapture={(event) => {
-            if (event.button !== 0) return;
-            pointerStartRef.current = { x: event.clientX, y: event.clientY, id: event.pointerId };
-          }}
-          onPointerUpCapture={(event) => {
-            const start = pointerStartRef.current;
-            if (!start || start.id !== event.pointerId) return;
-            pointerStartRef.current = null;
-            if (event.button !== 0) return;
-            const dx = event.clientX - start.x;
-            const dy = event.clientY - start.y;
-            if (dx * dx + dy * dy > 36) return;
-            if (isDragging) return;
-            handleActivate();
-          }}
-          onPointerCancel={() => {
-            pointerStartRef.current = null;
-          }}
-          onClick={(event) => {
-            if (isDragging) return;
-            handleActivate();
-          }}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setSelectedId(item.id);
-            setContextMenu({
-              x: e.clientX,
-              y: e.clientY,
-              item
-            });
-          }}
-          type="button"
-        >
-          {isListMode ? (
-            <div className="flex w-full items-center gap-2">
-              <div
-                className={cn(
-                  "flex h-7 w-7 items-center justify-center rounded-md bg-[#0f0f10]",
-                  isYoutube ? "text-[#ef4444]" : "text-slate-200"
-                )}
-              >
-                <AppIcon name={fallbackIcon} className="text-[13px]" />
-              </div>
-              <span
-                className={cn(
-                  "min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-100",
-                  item.invalid && "text-rose-300"
-                )}
-              >
-                {displayName}
-              </span>
-            </div>
-          ) : (
-            <div className="flex w-full items-center gap-3">
-              {displayThumbnail && (previewKind === "video" || isYoutube) ? (
-                <div className="relative h-10 w-16 overflow-hidden rounded-md bg-[#0f0f10]">
-                  <img src={displayThumbnail} alt="" className="h-full w-full object-cover" />
-                  {isYoutube ? (
-                    <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded bg-black/60">
-                      <AppIcon name="youtube" className="text-[9px] text-[#ff0000]" />
-                    </span>
-                  ) : null}
-                </div>
-              ) : (
-                <div
-                  className={cn(
-                    "flex h-10 w-16 items-center justify-center rounded-md bg-[#0f0f10]",
-                    isYoutube ? "text-[#ef4444]" : "text-slate-300"
-                  )}
-                >
-                  <AppIcon name={fallbackIcon} className="text-[14px]" />
-                </div>
-              )}
-              <div className="min-w-0 flex-1">
-                <span
-                  className="block text-[12px] font-semibold leading-snug text-slate-100"
-                  style={{
-                    display: "-webkit-box",
-                    WebkitLineClamp: 2,
-                    WebkitBoxOrient: "vertical",
-                    overflow: "hidden"
-                  }}
-                >
-                  {displayName}
-                </span>
-                {updatedAt || item.invalid ? (
-                  <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-500" style={{ whiteSpace: "nowrap" }}>
-                    {updatedAt ? <span className="truncate">{formatTimestamp(updatedAt)}</span> : null}
-                    {item.invalid ? (
-                      <span className="inline-flex items-center gap-1 text-rose-400">
-                        <AppIcon name="exclamationTriangle" className="text-[10px]" />
-                        Invalid file
-                      </span>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          )}
-          {isProcessingJob ? (
-            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/35 backdrop-blur-[1px]">
-              <div className="processing-spinner" aria-hidden>
-                <span className="processing-bar processing-bar-1" />
-                <span className="processing-bar processing-bar-2" />
-                <span className="processing-bar processing-bar-3" />
-                <span className="processing-bar processing-bar-4" />
-              </div>
-            </div>
-          ) : null}
-        </button>
-      </div>
-    );
-  };
+  const handleMediaItemContextMenu = useCallback((e: React.MouseEvent, item: MediaItem) => {
+    setSelectedId(item.id);
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      item
+    });
+  }, []);
 
   useEffect(() => {
     if (selectedId && !mediaItems.some((item) => item.id === selectedId)) {
@@ -1668,6 +1693,12 @@ export const UploadTab = memo(forwardRef(function UploadTab(
                       updatedAt={updatedAt}
                       isSelected={isSelected}
                       isProcessingJob={isProcessingJob}
+                      canReorder={canReorder}
+                      viewMode={viewMode}
+                      getPreviewKind={getPreviewKind}
+                      onActivate={handleMediaItemActivate}
+                      onContextMenu={handleMediaItemContextMenu}
+                      formatTimestamp={formatTimestamp}
                     />
                   );
                 })}

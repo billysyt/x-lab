@@ -204,17 +204,15 @@
   },
   "footer": {
     "products": "Products",
-    "company": "Company",
-    "deployment": "Deployment",
+    "quickLinks": "Quick Links",
+    "policies": "Policies",
     "why": "Why X-Lab",
     "pricing": "Get Premium",
-    "contact": "Contact",
-    "onPrem": "On-prem",
-    "enterprise": "Enterprise",
-    "security": "Security review",
+    "contact": "Contact Us",
+    "terms": "Terms of Service",
+    "privacyPolicy": "Privacy Policy",
     "copyright": "Copyright 2025 X-Lab. All rights reserved.",
-    "privacy": "Offline processing, privacy first.",
-    "tagline": "Local-first AI for captions, meetings, and secure on-prem workflows."
+    "offlinePrivacy": "Offline processing, privacy first."
   },
   "contactPage": {
     "label": "Contact",
@@ -293,6 +291,106 @@
       {
         "q": "How can I get technical support?",
         "a": "You can contact us through the form on our Contact page or email hello@x-lab.ai. We will respond to your inquiry within one business day."
+      }
+    ]
+  },
+  "termsPage": {
+    "label": "Terms of Service",
+    "title": "Terms of Service",
+    "desc": "Terms and conditions for using X-Lab products and services.",
+    "lastUpdated": "Last Updated: January 1, 2025",
+    "sections": [
+      {
+        "title": "1. Acceptance of Terms",
+        "content": "By using X-Lab (the \"Service\"), you agree to be bound by these Terms of Service. If you do not agree to any part, please do not use our services."
+      },
+      {
+        "title": "2. Description of Service",
+        "content": "X-Lab provides offline AI-powered subtitle generation, meeting transcription, and related tools. All processing occurs on your local device, and we do not collect or store your media files."
+      },
+      {
+        "title": "3. License to Use",
+        "content": "We grant you a limited, non-exclusive, non-transferable license to use the software for personal or commercial purposes in accordance with these terms."
+      },
+      {
+        "title": "4. Restrictions",
+        "content": "You agree not to: (a) reverse engineer, decompile, or disassemble the software; (b) circumvent any technical protection measures; (c) use the software for any unlawful purpose; (d) redistribute or resell the software."
+      },
+      {
+        "title": "5. Intellectual Property",
+        "content": "X-Lab and its licensors retain all right, title, and interest in and to the software and related materials, including all intellectual property rights."
+      },
+      {
+        "title": "6. Disclaimer of Warranties",
+        "content": "The Service is provided \"as is\" without warranties of any kind, either express or implied. We do not warrant that the Service will be uninterrupted, error-free, or completely secure."
+      },
+      {
+        "title": "7. Limitation of Liability",
+        "content": "To the maximum extent permitted by law, X-Lab shall not be liable for any indirect, incidental, special, consequential, or punitive damages arising out of or relating to your use or inability to use the Service."
+      },
+      {
+        "title": "8. Modifications to Terms",
+        "content": "We reserve the right to modify these terms at any time. Your continued use of the Service constitutes acceptance of any modifications."
+      },
+      {
+        "title": "9. Governing Law",
+        "content": "These terms shall be governed by and construed in accordance with the laws of the Hong Kong Special Administrative Region."
+      },
+      {
+        "title": "10. Contact Us",
+        "content": "If you have any questions about these Terms, please contact us at hello@x-lab.ai."
+      }
+    ]
+  },
+  "privacyPage": {
+    "label": "Privacy Policy",
+    "title": "Privacy Policy",
+    "desc": "How we handle and protect your data.",
+    "lastUpdated": "Last Updated: January 1, 2025",
+    "sections": [
+      {
+        "title": "1. Overview",
+        "content": "X-Lab is committed to protecting your privacy. This policy explains how we collect, use, and protect information when you use our services."
+      },
+      {
+        "title": "2. Offline-First Approach",
+        "content": "Our core products (X-Caption, X-Minutes) run entirely on your local device. Your videos, audio, and generated subtitles are never uploaded to our servers."
+      },
+      {
+        "title": "3. Information We Collect",
+        "content": "We collect minimal data to provide our services: (a) Account information: email address for license verification; (b) Usage statistics: anonymous usage patterns to improve our products; (c) Support communications: information you submit through our contact form."
+      },
+      {
+        "title": "4. Information We Don't Collect",
+        "content": "We do not collect, store, or access: (a) your video or audio files; (b) generated subtitles or transcripts; (c) any media content on your device."
+      },
+      {
+        "title": "5. How We Use Information",
+        "content": "We use collected information to: (a) provide and maintain our services; (b) process your account and license; (c) respond to support requests; (d) improve our products and services."
+      },
+      {
+        "title": "6. Data Security",
+        "content": "We implement industry-standard security measures to protect your data. However, no method of transmission over the Internet can be guaranteed to be 100% secure."
+      },
+      {
+        "title": "7. Third-Party Services",
+        "content": "We may use third-party services for payment processing and analytics. These services have their own privacy policies governing their use of your information."
+      },
+      {
+        "title": "8. Your Rights",
+        "content": "You have the right to: (a) access your personal data; (b) correct inaccurate data; (c) request deletion of your data; (d) opt out of marketing communications."
+      },
+      {
+        "title": "9. Cookies",
+        "content": "Our website uses minimal cookies for essential functionality. We do not use tracking cookies or third-party advertising cookies."
+      },
+      {
+        "title": "10. Changes to This Policy",
+        "content": "We may update this privacy policy from time to time. Any changes will be posted on this page with an updated \"Last Updated\" date."
+      },
+      {
+        "title": "11. Contact Us",
+        "content": "If you have any questions about this Privacy Policy, please contact us at hello@x-lab.ai."
       }
     ]
   }
