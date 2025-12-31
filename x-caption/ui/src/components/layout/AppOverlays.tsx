@@ -7,6 +7,7 @@ import { GapAdjustModalOverlay } from "../timeline/components/GapAdjustModalOver
 import { AlertModalOverlay } from "../common/AlertModalOverlay";
 import { OpenMediaModal } from "../mediaImport/components/OpenMediaModal";
 import { YoutubeImportModal } from "../mediaImport/components/YoutubeImportModal";
+import { InternetImportModal } from "../mediaImport/components/InternetImportModal";
 import { PremiumModalOverlay } from "../premium/components/PremiumModalOverlay";
 import { PremiumStatusModalOverlay } from "../premium/components/PremiumStatusModalOverlay";
 import { UpdateModalOverlay } from "../updates/components/UpdateModalOverlay";
@@ -55,7 +56,7 @@ export function AppOverlays({
 }: AppOverlaysProps) {
   const { notify, alertModal, setAlertModal } = alerts;
   const {
-    modals: { showOpenModal, setShowOpenModal, showYoutubeModal, setShowYoutubeModal, showImportModal, setShowImportModal },
+    modals: { showOpenModal, setShowOpenModal, showYoutubeModal, setShowYoutubeModal, showInternetModal, setShowInternetModal, showImportModal, setShowImportModal },
     youtube: {
       importing: youtubeImporting,
       importTitle: youtubeImportTitle,
@@ -66,10 +67,22 @@ export function AppOverlays({
       isIndeterminate: isYoutubeIndeterminate,
       progressValue: youtubeProgressValue
     },
+    internet: {
+      importing: internetImporting,
+      importTitle: internetImportTitle,
+      url: internetUrl,
+      setUrl: setInternetUrl,
+      error: internetError,
+      setError: setInternetError,
+      isIndeterminate: isInternetIndeterminate,
+      progressValue: internetProgressValue
+    },
     actions: {
       openLocalFromModal: handleOpenLocalFromModal,
       openYoutubeModal: handleOpenYoutubeModal,
+      openInternetModal: handleOpenInternetModal,
       importYoutube: handleImportYoutube,
+      importInternet: handleImportInternet,
       openModal: handleOpenModal
     }
   } = mediaImport;
@@ -174,8 +187,10 @@ export function AppOverlays({
       <OpenMediaModal
         showOpenModal={showOpenModal}
         youtubeImporting={youtubeImporting}
+        internetImporting={internetImporting}
         onOpenLocalFromModal={handleOpenLocalFromModal}
         onOpenYoutubeModal={handleOpenYoutubeModal}
+        onOpenInternetModal={handleOpenInternetModal}
         setShowOpenModal={setShowOpenModal}
       />
 
@@ -191,6 +206,20 @@ export function AppOverlays({
         youtubeProgressValue={youtubeProgressValue}
         onImportYoutube={handleImportYoutube}
         setShowYoutubeModal={setShowYoutubeModal}
+      />
+
+      <InternetImportModal
+        isOpen={showInternetModal || internetImporting}
+        internetImporting={internetImporting}
+        internetImportTitle={internetImportTitle}
+        internetUrl={internetUrl}
+        setInternetUrl={setInternetUrl}
+        internetError={internetError}
+        setInternetError={setInternetError}
+        isInternetIndeterminate={isInternetIndeterminate}
+        internetProgressValue={internetProgressValue}
+        onImportInternet={handleImportInternet}
+        setShowInternetModal={setShowInternetModal}
       />
 
       <PremiumModalOverlay
@@ -218,9 +247,6 @@ export function AppOverlays({
         showPremiumStatusModal={showPremiumStatusModal}
         setShowPremiumStatusModal={setShowPremiumStatusModal}
         premiumDetails={premiumDetails}
-        machineIdLoading={machineIdLoading}
-        machineId={machineId}
-        onCopyMachineId={onCopyMachineId}
       />
 
       <UpdateModalOverlay

@@ -40,6 +40,8 @@ export type MediaImportOverlayProps = {
     setShowOpenModal: (value: boolean) => void;
     showYoutubeModal: boolean;
     setShowYoutubeModal: (value: boolean) => void;
+    showInternetModal: boolean;
+    setShowInternetModal: (value: boolean) => void;
     showImportModal: boolean;
     setShowImportModal: (value: boolean) => void;
   };
@@ -53,10 +55,22 @@ export type MediaImportOverlayProps = {
     isIndeterminate: boolean;
     progressValue: number;
   };
+  internet: {
+    importing: boolean;
+    importTitle: string | null;
+    url: string;
+    setUrl: (value: string) => void;
+    error: string | null;
+    setError: (value: string | null) => void;
+    isIndeterminate: boolean;
+    progressValue: number;
+  };
   actions: {
     openLocalFromModal: () => void;
     openYoutubeModal: () => void;
+    openInternetModal: () => void;
     importYoutube: () => void;
+    importInternet: () => void;
     openModal: () => void;
   };
 };

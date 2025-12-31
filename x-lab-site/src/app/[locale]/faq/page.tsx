@@ -70,13 +70,6 @@ export default function FAQPage() {
 
   return (
     <div className="relative">
-      {/* Background elements */}
-      <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-        <div className="absolute inset-0 grid-overlay opacity-20" />
-        <div className="absolute -top-48 right-[-120px] h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle,rgba(122,168,255,0.25),transparent_60%)] blur-3xl" />
-        <div className="absolute -left-40 top-40 h-[420px] w-[420px] rounded-full bg-[radial-gradient(circle,rgba(116,240,218,0.22),transparent_60%)] blur-3xl" />
-      </div>
-
       <section className="mx-auto w-[min(800px,92vw)] pt-8 md:pt-16">
         {/* Header */}
         <div className="text-center">

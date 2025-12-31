@@ -4,18 +4,23 @@ import { cn } from "../../../lib/cn";
 type OpenMediaModalProps = {
   showOpenModal: boolean;
   youtubeImporting: boolean;
+  internetImporting: boolean;
   onOpenLocalFromModal: () => void;
   onOpenYoutubeModal: () => void;
+  onOpenInternetModal: () => void;
   setShowOpenModal: (value: boolean) => void;
 };
 
 export function OpenMediaModal({
   showOpenModal,
   youtubeImporting,
+  internetImporting,
   onOpenLocalFromModal,
   onOpenYoutubeModal,
+  onOpenInternetModal,
   setShowOpenModal
 }: OpenMediaModalProps) {
+  const isImporting = youtubeImporting || internetImporting;
   if (!showOpenModal) return null;
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
@@ -29,18 +34,18 @@ export function OpenMediaModal({
           <div>
             <div className="text-sm font-semibold text-slate-100">Open</div>
             <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-              Import a local file or load YouTube media.
+              Import a local file or load media from the internet.
             </p>
           </div>
           <div className="mt-4 space-y-3">
             <button
               className={cn(
                 "group w-full rounded-xl px-4 py-3 text-left transition",
-                youtubeImporting ? "cursor-not-allowed opacity-50" : "hover:bg-[#151515]"
+                isImporting ? "cursor-not-allowed opacity-50" : "hover:bg-[#151515]"
               )}
               onClick={onOpenLocalFromModal}
               type="button"
-              disabled={youtubeImporting}
+              disabled={isImporting}
             >
               <div className="flex items-start gap-3">
                 <div className="flex h-10 w-10 items-center justify-center text-white">
@@ -57,11 +62,11 @@ export function OpenMediaModal({
             <button
               className={cn(
                 "group w-full rounded-xl px-4 py-3 text-left transition",
-                youtubeImporting ? "cursor-not-allowed opacity-50" : "hover:bg-[#151515]"
+                isImporting ? "cursor-not-allowed opacity-50" : "hover:bg-[#151515]"
               )}
               onClick={onOpenYoutubeModal}
               type="button"
-              disabled={youtubeImporting}
+              disabled={isImporting}
             >
               <div className="flex items-start gap-3">
                 <div className="flex h-10 w-10 items-center justify-center text-[#ff0000]">
@@ -70,6 +75,25 @@ export function OpenMediaModal({
                 <div className="flex-1">
                   <div className="text-[12px] font-semibold text-slate-100">From YouTube</div>
                   <p className="mt-1 text-[11px] text-slate-400">Load from Youtube media.</p>
+                </div>
+              </div>
+            </button>
+            <button
+              className={cn(
+                "group w-full rounded-xl px-4 py-3 text-left transition",
+                isImporting ? "cursor-not-allowed opacity-50" : "hover:bg-[#151515]"
+              )}
+              onClick={onOpenInternetModal}
+              type="button"
+              disabled={isImporting}
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 items-center justify-center text-[#60a5fa]">
+                  <AppIcon name="globe" className="text-[18px]" />
+                </div>
+                <div className="flex-1">
+                  <div className="text-[12px] font-semibold text-slate-100">From Internet</div>
+                  <p className="mt-1 text-[11px] text-slate-400">Auto-detect and import from any video site.</p>
                 </div>
               </div>
             </button>

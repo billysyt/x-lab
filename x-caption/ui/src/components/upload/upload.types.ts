@@ -2,7 +2,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type { ToastType } from "../common/ToastHost";
 
 export type MediaSourceInfo = {
-  type: "youtube";
+  type: "youtube" | "internet";
   url?: string | null;
   streamUrl?: string | null;
   title?: string | null;

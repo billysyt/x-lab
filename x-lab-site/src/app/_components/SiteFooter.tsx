@@ -10,7 +10,7 @@ export default function SiteFooter() {
 
   return (
     <footer className="border-t border-x-line bg-x-bg">
-      <div className="mx-auto w-[min(1120px,92vw)] py-12">
+      <div className="mx-auto w-[min(1120px,92vw)] py-6 md:py-12">
         {/* Desktop/Tablet: All in one row */}
         <div className="hidden md:grid md:grid-cols-[1.6fr_repeat(3,1fr)] md:gap-8">
           <div>
@@ -43,7 +43,7 @@ export default function SiteFooter() {
 
         {/* Mobile: Logo on top, then 3 columns */}
         <div className="md:hidden">
-          <div className="mb-6">
+          <div className="mb-4">
             <Link href={withLocale("/")} className="text-lg font-bold tracking-tight">
               <span className="bg-gradient-to-r from-x-accent to-x-accent-2 bg-clip-text text-transparent">
                 X-Lab
@@ -73,7 +73,7 @@ export default function SiteFooter() {
           </div>
         </div>
       </div>
-      <div className="mx-auto flex w-[min(1120px,92vw)] flex-wrap items-center justify-between gap-3 border-t border-x-line py-6 text-xs text-x-soft">
+      <div className="mx-auto flex w-[min(1120px,92vw)] flex-wrap items-center justify-between gap-3 border-t border-x-line py-4 text-xs text-x-soft md:py-6">
         <span>{t("footer.copyright")}</span>
         <span>{t("footer.offlinePrivacy")}</span>
       </div>

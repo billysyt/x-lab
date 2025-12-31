@@ -77,14 +77,6 @@ export default async function Home({
 
   return (
     <div className="relative">
-      <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-        <div className="absolute inset-0 grid-overlay opacity-20" />
-        <div className="absolute -top-48 right-[-120px] h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle,rgba(122,168,255,0.35),transparent_60%)] blur-3xl" />
-        <div className="absolute -left-40 top-40 h-[420px] w-[420px] rounded-full bg-[radial-gradient(circle,rgba(116,240,218,0.32),transparent_60%)] blur-3xl" />
-        <div className="absolute left-20 top-24 h-2 w-2 animate-[twinkle_4s_ease-in-out_infinite] rounded-full bg-white/70" />
-        <div className="absolute right-40 top-64 h-1.5 w-1.5 animate-[twinkle_5s_ease-in-out_infinite] rounded-full bg-white/70" />
-      </div>
-
       <section className="mx-auto flex w-[min(1120px,92vw)] flex-col gap-10 pt-8 md:gap-14 md:pt-16">
         <div className="grid items-center gap-8 md:gap-12 lg:grid-cols-[1.05fr_0.95fr]">
           <div className="space-y-5 md:space-y-6">
@@ -123,14 +115,14 @@ export default async function Home({
             title="X-Caption"
             desc={t("products.captionDesc")}
           >
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              <Image src="/badge-macos.svg" alt="Download on macOS" width={130} height={40} className="h-10 w-auto sm:h-[46px]" />
-              <div className="relative">
+            <div className="flex flex-nowrap items-center gap-2 sm:gap-3">
+              <Image src="/badge-macos.svg" alt="Download on macOS" width={130} height={40} className="h-10 w-auto shrink-0 sm:h-[46px]" />
+              <div className="relative shrink-0">
                 <span className="absolute -right-1 -top-2 z-10 rounded-full bg-x-accent px-1.5 py-0.5 text-[10px] font-semibold text-x-bg">
                   {t("products.comingSoon")}
                 </span>
                 <div className="pointer-events-none opacity-40 grayscale">
-                  <Image src="/badge-windows.svg" alt="Download on Windows" width={130} height={40} className="h-10 w-auto sm:h-[46px]" />
+                  <Image src="/badge-windows.svg" alt="Download on Windows" width={130} height={40} className="h-10 w-auto shrink-0 sm:h-[46px]" />
                 </div>
               </div>
             </div>
@@ -141,21 +133,21 @@ export default async function Home({
             title="X-Minutes"
             desc={t("products.minutesDesc")}
           >
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              <div className="relative">
-                <span className="absolute -right-1 -top-2 z-10 rounded-full bg-x-accent px-1.5 py-0.5 text-[10px] font-semibold text-x-bg">
+            <div className="flex flex-nowrap items-center gap-2 sm:gap-3">
+              <div className="relative shrink-0">
+                <span className="absolute -right-1 -top-2 z-10 whitespace-nowrap rounded-full bg-x-accent px-1.5 py-0.5 text-[10px] font-semibold text-x-bg">
                   {t("products.comingSoon")}
                 </span>
                 <div className="pointer-events-none opacity-40 grayscale">
-                  <Image src="/badge-macos.svg" alt="Download on macOS" width={130} height={40} className="h-10 w-auto sm:h-[46px]" />
+                  <Image src="/badge-macos.svg" alt="Download on macOS" width={130} height={40} className="h-10 w-auto shrink-0 sm:h-[46px]" />
                 </div>
               </div>
-              <div className="relative">
-                <span className="absolute -right-1 -top-2 z-10 rounded-full bg-x-accent px-1.5 py-0.5 text-[10px] font-semibold text-x-bg">
+              <div className="relative shrink-0">
+                <span className="absolute -right-1 -top-2 z-10 whitespace-nowrap rounded-full bg-x-accent px-1.5 py-0.5 text-[10px] font-semibold text-x-bg">
                   {t("products.comingSoon")}
                 </span>
                 <div className="pointer-events-none opacity-40 grayscale">
-                  <Image src="/badge-windows.svg" alt="Download on Windows" width={130} height={40} className="h-10 w-auto sm:h-[46px]" />
+                  <Image src="/badge-windows.svg" alt="Download on Windows" width={130} height={40} className="h-10 w-auto shrink-0 sm:h-[46px]" />
                 </div>
               </div>
             </div>
@@ -192,8 +184,11 @@ export default async function Home({
             style={{ gridTemplateColumns: comparisonTemplate }}
             >
               <div className="px-3 py-3" />
-              <div className="px-3 py-3 text-x-text">
-                <span className="text-xs font-semibold">{comparisonColumns.xlab}</span>
+              <div className="px-3 py-3">
+                <span className="text-xs font-bold">
+                  <span className="bg-gradient-to-r from-x-accent to-x-accent-2 bg-clip-text text-transparent">X-Lab</span>
+                  <span className="text-x-soft">.HK</span>
+                </span>
               </div>
               <div className="px-3 py-3 pl-6">
                 <div className="flex items-center gap-2">
@@ -203,7 +198,9 @@ export default async function Home({
               </div>
               <div className="px-3 py-3">
                 <div className="flex items-center gap-2">
-                  <Image src="/brands/subanana.png" alt="Subanana" width={18} height={18} />
+                  <span className="flex items-center justify-center rounded bg-white/90 p-0.5">
+                    <Image src="/brands/subanana.png" alt="Subanana" width={18} height={18} className="rounded-sm" />
+                  </span>
                   <span>{comparisonColumns.subanana}</span>
                 </div>
               </div>
@@ -240,7 +237,7 @@ export default async function Home({
           </div>
       </section>
 
-      <section id="cta" className="mx-auto mt-6 w-[min(1120px,92vw)] pb-4 md:mt-20 md:pb-0">
+      <section id="cta" className="mx-auto my-6 w-[min(1120px,92vw)] md:my-0 md:mt-20">
         <div className="relative overflow-hidden rounded-2xl border border-x-line bg-x-surface p-5 sm:rounded-[28px] sm:p-6 md:rounded-[32px] md:p-8">
           <NeuralNet />
           <div className="relative z-10 flex flex-col items-start justify-between gap-5 sm:gap-6 md:flex-row md:items-center">

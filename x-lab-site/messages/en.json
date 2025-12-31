@@ -19,8 +19,8 @@
   },
   "products": {
     "label": "Products",
-    "title": "Built by Hong Kong's leading AI team",
-    "captionDesc": "Spoken or written language subtitles, Traditional/Simplified output, fast editing, SRT export.",
+    "title": "Built by Hong Kong AI team",
+    "captionDesc": "Written language subtitles, Traditional/Simplified output, fast editing, SRT export.",
     "minutesDesc": "Meeting minutes with speaker ID, clean transcripts, and AI summaries.",
     "codeDesc": "Low-cost Claude Code or Codex access with team controls and audit-ready usage.",
     "comingSoon": "Coming Soon"
@@ -79,7 +79,7 @@
     "title": "How X-Lab compares",
     "desc": "Quick comparison of X-Lab AI with other popular platforms",
     "columns": {
-      "xlab": "X-Lab",
+      "xlab": "X-Lab.HK",
       "cantosub": "CantoSub",
       "subanana": "Subanana"
     },
@@ -247,7 +247,7 @@
     "wechatAlt": "WeChat group QR code"
   },
   "menu": {
-    "captionDesc": "Spoken or written language subtitles, Traditional/Simplified output, fast editing, SRT export.",
+    "captionDesc": "Written language subtitles, Traditional/Simplified output, fast editing, SRT export.",
     "minutesDesc": "Meeting minutes with speaker ID, clean transcripts, and AI summaries.",
     "codeDesc": "Claude Code / Codex"
   },
@@ -279,102 +279,98 @@
     ]
   },
   "termsPage": {
-    "label": "Terms of Service",
     "title": "Terms of Service",
-    "desc": "Terms and conditions for using X-Lab products and services.",
     "lastUpdated": "Last Updated: January 1, 2025",
     "sections": [
       {
         "title": "1. Acceptance of Terms",
-        "content": "By using X-Lab (the \"Service\"), you agree to be bound by these Terms of Service. If you do not agree to any part, please do not use our services."
+        "content": "Welcome to the products and services provided by X-Lab (hereinafter referred to as the \"Service\"). Before using our services, please carefully read the following terms of service. By downloading, installing, or using any X-Lab product, you acknowledge that you have read, understood, and agreed to be bound by these terms. If you do not agree to any part of these terms, please do not use our services. These terms constitute a legally binding agreement between you and X-Lab. We recommend that you review these terms regularly, as we may update them from time to time. Your continued use of the Service will be deemed acceptance of any updated terms."
       },
       {
         "title": "2. Description of Service",
-        "content": "X-Lab provides offline AI-powered subtitle generation, meeting transcription, and related tools. All processing occurs on your local device, and we do not collect or store your media files."
+        "content": "X-Lab is a Hong Kong-based company focused on artificial intelligence technology, dedicated to providing users with high-quality offline AI tools. Our core products include X-Caption (intelligent subtitle generation tool) and X-Minutes (meeting transcription tool). These products are designed with an \"offline-first\" philosophy, meaning all data processing is completed on your local device without uploading any sensitive information to cloud servers. Our AI models are specifically optimized to accurately recognize Cantonese, Mandarin, English, and various other languages, converting spoken content into written language subtitles. We continuously improve our technology to provide faster and more accurate service experiences."
       },
       {
         "title": "3. License to Use",
-        "content": "We grant you a limited, non-exclusive, non-transferable license to use the software for personal or commercial purposes in accordance with these terms."
+        "content": "Subject to your compliance with these terms of service, X-Lab grants you a limited, non-exclusive, non-transferable, revocable license to use our software products in personal or commercial environments. This license is limited to your personal use and does not include any rights to resell, redistribute, or commercially license the software. For free versions of the products, you may use the basic features indefinitely. For paid versions or premium features, your usage rights depend on your subscription status and payment. We reserve the right to terminate your access if you violate these terms."
       },
       {
         "title": "4. Restrictions",
-        "content": "You agree not to: (a) reverse engineer, decompile, or disassemble the software; (b) circumvent any technical protection measures; (c) use the software for any unlawful purpose; (d) redistribute or resell the software."
+        "content": "When using our services, you agree not to engage in the following behaviors: reverse engineer, decompile, disassemble, or otherwise attempt to obtain the source code of the software; circumvent, disable, or otherwise interfere with any security-related features or restrictions on use or copying of the software; use the software for any illegal purpose or in violation of any applicable laws or regulations; copy, modify, distribute, or resell the software without authorization; attempt to gain unauthorized access to systems or networks; upload content containing viruses, trojans, or other malicious code; impersonate others or misrepresent your relationship with any person or entity; interfere with or disrupt the normal operation of the Service. Violation of these restrictions may result in immediate termination of your access rights and potential legal liability."
       },
       {
         "title": "5. Intellectual Property",
-        "content": "X-Lab and its licensors retain all right, title, and interest in and to the software and related materials, including all intellectual property rights."
+        "content": "X-Lab and its licensors own and retain all intellectual property rights in the Service and all related content, including but not limited to software code, user interface designs, graphics, logos, trademarks, patents, and copyrights. These terms of service do not grant you any ownership or other interest in X-Lab's intellectual property. You acknowledge and agree that all proprietary information and technology contained in the Service are trade secrets and confidential information of X-Lab. Without the prior written consent of X-Lab, you may not use X-Lab's name, logo, or trademarks. The intellectual property rights to any content you create using the Service (such as generated subtitles) belong to you, but you grant X-Lab a limited license to use such content to improve the Service."
       },
       {
         "title": "6. Disclaimer of Warranties",
-        "content": "The Service is provided \"as is\" without warranties of any kind, either express or implied. We do not warrant that the Service will be uninterrupted, error-free, or completely secure."
+        "content": "The Service is provided on an \"as is\" and \"as available\" basis, and X-Lab makes no warranties of any kind, either express or implied, including but not limited to implied warranties of merchantability, fitness for a particular purpose, non-infringement, or uninterrupted, error-free operation of the Service. While we strive to ensure the accuracy of AI recognition, due to the inherent limitations of speech recognition technology, we cannot guarantee 100% accuracy of transcription results. You understand and agree that your use of the Service is entirely at your own risk. We are not responsible for any data loss, work interruption, or other losses resulting from the use or inability to use the Service. We recommend that you always keep backups of original media files for important work."
       },
       {
         "title": "7. Limitation of Liability",
-        "content": "To the maximum extent permitted by law, X-Lab shall not be liable for any indirect, incidental, special, consequential, or punitive damages arising out of or relating to your use or inability to use the Service."
+        "content": "To the maximum extent permitted by applicable law, X-Lab and its directors, employees, partners, and agents shall not be liable for any indirect, incidental, special, consequential, punitive, or exemplary damages, whether such damages are based on contract, tort (including negligence), strict liability, or other theory, even if X-Lab has been advised of the possibility of such damages. In no event shall X-Lab's total liability to you exceed the amount you paid to X-Lab in the twelve months preceding the claim, or one hundred US dollars, whichever is greater. Some jurisdictions do not allow the exclusion or limitation of incidental or consequential damages, so the above limitation may not apply to you."
       },
       {
         "title": "8. Modifications to Terms",
-        "content": "We reserve the right to modify these terms at any time. Your continued use of the Service constitutes acceptance of any modifications."
+        "content": "X-Lab reserves the right to modify or update these terms of service at its sole discretion at any time. If we make material changes to the terms, we will notify you by posting the updated terms on the website, by email notification, or through in-app notifications. Changes will take effect immediately upon posting. Your continued use of the Service after the changes take effect constitutes your acceptance of the modified terms. If you do not agree to the modified terms, please stop using the Service. We recommend that you regularly review these terms to stay informed of any changes."
       },
       {
-        "title": "9. Governing Law",
-        "content": "These terms shall be governed by and construed in accordance with the laws of the Hong Kong Special Administrative Region."
+        "title": "9. Governing Law and Dispute Resolution",
+        "content": "These terms of service shall be governed by and construed in accordance with the laws of the Hong Kong Special Administrative Region, without regard to its conflict of law principles. Any dispute arising out of or relating to these terms or the Service shall first be attempted to be resolved through friendly negotiation between the parties. If negotiation fails to resolve the dispute within thirty days, either party may submit the dispute to the Hong Kong International Arbitration Centre for arbitration in accordance with its then-effective arbitration rules. The seat of arbitration shall be Hong Kong, and the language of arbitration shall be Chinese or English. The arbitration award shall be final and binding on both parties."
       },
       {
         "title": "10. Contact Us",
-        "content": "If you have any questions about these Terms, please contact us at hello@x-lab.ai."
+        "content": "If you have any questions, comments, or concerns about these terms of service, or need to report any violations, please contact us at: hello@x-lab.hk. Our customer service team will respond to your inquiry as soon as possible, usually within one to two business days. We value every user's feedback and are committed to continuously improving our services and policies to better protect your rights."
       }
     ]
   },
   "privacyPage": {
-    "label": "Privacy Policy",
     "title": "Privacy Policy",
-    "desc": "How we handle and protect your data.",
     "lastUpdated": "Last Updated: January 1, 2025",
     "sections": [
       {
         "title": "1. Overview",
-        "content": "X-Lab is committed to protecting your privacy. This policy explains how we collect, use, and protect information when you use our services."
+        "content": "X-Lab deeply understands the importance of personal privacy and is committed to protecting your personal information. This privacy policy is designed to help you understand how we collect, use, store, and protect your information, as well as what rights you have. We are committed to handling your personal data in a transparent and responsible manner, in compliance with Hong Kong's Personal Data (Privacy) Ordinance and other applicable data protection laws. By using our services, you agree to the practices described in this privacy policy. We recommend that you read this policy carefully, and if you have any questions, please feel free to contact us at any time."
       },
       {
         "title": "2. Offline-First Approach",
-        "content": "Our core products (X-Caption, X-Minutes) run entirely on your local device. Your videos, audio, and generated subtitles are never uploaded to our servers."
+        "content": "X-Lab's core products adopt an \"offline-first\" design philosophy, which is our key strategy for protecting user privacy. Our products X-Caption and X-Minutes run entirely on your local device, which means your videos, audio files, generated subtitles, and meeting transcripts never leave your device or are uploaded to any cloud server. All AI processing, including speech recognition, language conversion, and text generation, is done locally on your computer. This architecture ensures that you have complete control over sensitive content, eliminating the risk of data being intercepted during transmission or unauthorized access on remote servers. Even if your device is not connected to the Internet, our products can function normally."
       },
       {
         "title": "3. Information We Collect",
-        "content": "We collect minimal data to provide our services: (a) Account information: email address for license verification; (b) Usage statistics: anonymous usage patterns to improve our products; (c) Support communications: information you submit through our contact form."
+        "content": "Although our core functionality runs entirely offline, we may collect limited information to provide a better service experience. This information includes: Account information, such as your email address, used for account creation, authentication, and important notifications; Device information, such as device type, operating system version, and unique device identifiers, used to optimize software performance and compatibility; Usage statistics, such as feature usage frequency and application crash reports (this data is anonymous and does not contain any personally identifiable information), used to improve products and fix issues; Support communications, such as information you send to us through contact forms or email, used to respond to your inquiries and provide technical support; Payment information, if you purchase a paid version, our payment processor will handle your payment information, and we do not directly store your credit card or bank account details."
       },
       {
         "title": "4. Information We Don't Collect",
-        "content": "We do not collect, store, or access: (a) your video or audio files; (b) generated subtitles or transcripts; (c) any media content on your device."
+        "content": "To clearly demonstrate our commitment to privacy, the following are types of information we explicitly do not collect, store, or access: any content of video or audio files you process; any subtitles, transcripts, or meeting notes generated using our products; any other media content or files on your device; your browsing history, search records, or other online activities; your geographic location or mobile data; contacts, calendar, or other personal application data on your device. Our products are designed with a data minimization principle — we only collect data that is absolutely necessary to provide you with services, and nothing more."
       },
       {
         "title": "5. How We Use Information",
-        "content": "We use collected information to: (a) provide and maintain our services; (b) process your account and license; (c) respond to support requests; (d) improve our products and services."
+        "content": "The limited information we collect is used only for the following specific purposes: providing, maintaining, and improving our services to ensure software stability and performance; processing your account registration, authentication, and authorization management; responding to your customer support requests and technical issues; sending important service notifications, such as security updates, feature changes, or account-related information; analyzing anonymous usage trends to improve product functionality and user experience; complying with legal obligations and protecting X-Lab's legitimate interests. We do not sell your personal data to third parties, nor do we use it for any purposes unrelated to those described above. We regularly review our data collection and usage practices to ensure they comply with this policy and applicable laws."
       },
       {
         "title": "6. Data Security",
-        "content": "We implement industry-standard security measures to protect your data. However, no method of transmission over the Internet can be guaranteed to be 100% secure."
+        "content": "X-Lab employs multi-layered technical and organizational measures to protect your personal information from unauthorized access, use, modification, or disclosure. These measures include: using industry-standard encryption technology (such as TLS/SSL) to protect data transmission; implementing strict access controls to ensure that only authorized personnel can access user data; regularly conducting security audits and vulnerability assessments; using secure cloud infrastructure (only for non-sensitive data); and providing employees with data protection and security awareness training. However, please note that no method of Internet transmission or electronic storage is completely secure. While we strive to protect your personal data, we cannot guarantee its absolute security. If you have reason to believe that your interaction with us is no longer secure, please notify us immediately through the contact information at the bottom of this policy."
       },
       {
         "title": "7. Third-Party Services",
-        "content": "We may use third-party services for payment processing and analytics. These services have their own privacy policies governing their use of your information."
+        "content": "To provide better services, we may use certain third-party service providers. These providers only access your personal data when necessary to perform specific functions on our behalf, and are obligated not to disclose or use it for other purposes. Third-party services we use may include: payment processing services, used to process purchase transactions for paid versions; analytics services, used to collect anonymous usage statistics to improve our products; email service providers, used to send important service notifications. Each third-party service provider has its own privacy policy governing how they use your information. We encourage you to review these policies. We carefully select third-party partners and require them to maintain appropriate data protection measures."
       },
       {
         "title": "8. Your Rights",
-        "content": "You have the right to: (a) access your personal data; (b) correct inaccurate data; (c) request deletion of your data; (d) opt out of marketing communications."
+        "content": "Under applicable data protection laws, you have certain rights regarding your personal data. These rights may include: Right of access — you have the right to request confirmation of whether we process your personal data and to obtain a copy of such data; Right to rectification — you have the right to request correction of any inaccurate or incomplete personal data; Right to erasure — in certain circumstances, you have the right to request deletion of your personal data; Right to restrict processing — in certain circumstances, you have the right to request restriction of processing of your personal data; Right to data portability — you have the right to obtain your personal data in a structured, commonly used, and machine-readable format; Right to object — you have the right to object to processing of your personal data in certain circumstances; Right to withdraw consent — if processing is based on your consent, you have the right to withdraw that consent at any time. To exercise these rights, please contact us through the contact information at the bottom of this policy. We will respond to your request within a reasonable timeframe."
       },
       {
-        "title": "9. Cookies",
-        "content": "Our website uses minimal cookies for essential functionality. We do not use tracking cookies or third-party advertising cookies."
+        "title": "9. Cookies and Tracking Technologies",
+        "content": "Our website uses limited cookies and similar technologies to enhance your browsing experience. Cookies are small text files stored on your device that help websites remember your preference settings. The types of cookies we use include: Essential cookies, which are necessary for the website to function properly, such as remembering your language preference or login status; Functional cookies, which help us remember your choices to provide a more personalized experience. We do not use any third-party tracking cookies, advertising cookies, or social media trackers. You can manage or delete cookies through your browser settings. Please note that disabling certain cookies may affect the functionality of the website. Our desktop applications do not use cookies."
       },
       {
         "title": "10. Changes to This Policy",
-        "content": "We may update this privacy policy from time to time. Any changes will be posted on this page with an updated \"Last Updated\" date."
+        "content": "We may update this privacy policy from time to time to reflect changes in our practices or for other operational, legal, or regulatory reasons. When we make material changes to this policy, we will notify you by posting the updated policy on our website, by email notification, or through in-app notifications. The updated policy will take effect upon posting unless otherwise stated. We encourage you to regularly review this policy to understand how we protect your data. The \"Last Updated\" date at the top of this page indicates when this policy was last revised. Your continued use of our services after any changes constitutes your acceptance of the modified privacy policy."
       },
       {
         "title": "11. Contact Us",
-        "content": "If you have any questions about this Privacy Policy, please contact us at hello@x-lab.ai."
+        "content": "If you have any questions, comments, or concerns about this privacy policy, or wish to exercise your data protection rights, please contact us at: hello@x-lab.hk. Our data protection team will carefully handle each inquiry and respond to your request as soon as possible, usually within two business days. We are committed to handling your personal data in a transparent and responsible manner, and welcome your feedback to help us continuously improve our privacy practices."
       }
     ]
   }

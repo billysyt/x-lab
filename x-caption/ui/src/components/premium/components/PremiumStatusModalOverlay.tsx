@@ -7,18 +7,12 @@ type PremiumStatusModalOverlayProps = Pick<
   | "showPremiumStatusModal"
   | "setShowPremiumStatusModal"
   | "premiumDetails"
-  | "machineIdLoading"
-  | "machineId"
-  | "onCopyMachineId"
 >;
 
 export function PremiumStatusModalOverlay({
   showPremiumStatusModal,
   setShowPremiumStatusModal,
-  premiumDetails,
-  machineIdLoading,
-  machineId,
-  onCopyMachineId
+  premiumDetails
 }: PremiumStatusModalOverlayProps) {
   if (!showPremiumStatusModal) return null;
   return (
@@ -34,8 +28,8 @@ export function PremiumStatusModalOverlay({
       >
         <div className="p-5">
           <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-200">
-              <AppIcon name="user" className="text-[14px]" />
+            <div className="flex h-10 w-10 items-center justify-center">
+              <AppIcon name="userSimple" className="text-[18px] text-white" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="text-sm font-semibold text-slate-100">Premium Member</div>
@@ -47,12 +41,6 @@ export function PremiumStatusModalOverlay({
 
           <div className="mt-4 grid gap-2 text-[11px] text-slate-300">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-slate-500">Machine code</span>
-              <span className="max-w-[230px] break-all text-right font-mono text-slate-200">
-                {premiumDetails?.machineId ?? machineId ?? "Unknown"}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
               <span className="text-slate-500">Activated</span>
               <span className="text-slate-200">{formatTimestamp(premiumDetails?.activatedAt)}</span>
             </div>
@@ -62,21 +50,13 @@ export function PremiumStatusModalOverlay({
             </div>
           </div>
 
-          <div className="mt-4 flex items-center justify-between">
+          <div className="mt-5 flex items-center justify-end">
             <button
-              className="inline-flex h-8 items-center justify-center rounded-full border border-emerald-500/30 px-3 text-[11px] font-semibold text-emerald-200 transition hover:bg-emerald-500/10 disabled:opacity-60"
-              onClick={onCopyMachineId}
-              type="button"
-              disabled={!machineId || machineIdLoading}
-            >
-              Copy machine code
-            </button>
-            <button
-              className="inline-flex h-8 items-center justify-center rounded-full bg-white px-4 text-[11px] font-semibold text-[#0b0b0b] transition hover:brightness-95"
+              className="inline-flex h-7 items-center justify-center rounded-md bg-[#1b1b22] px-3 text-[11px] font-semibold text-slate-200 transition hover:bg-[#26262f]"
               onClick={() => setShowPremiumStatusModal(false)}
               type="button"
             >
-              Close
+              OK
             </button>
           </div>
         </div>

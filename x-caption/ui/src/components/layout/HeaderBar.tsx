@@ -210,8 +210,8 @@ export function HeaderBar({
               type="button"
               disabled={premiumStatusLoading}
             >
-              <AppIcon name={isPremium ? "user" : "aiStar"} className="text-[11px]" />
-              {isPremium ? "Premium Member" : "Get Premium"}
+              <AppIcon name={isPremium ? "userSimple" : "aiStar"} className={cn("text-[11px]", isPremium && "text-white")} />
+              {isPremium ? "Premium" : "Get Premium"}
             </button>
             {showCustomWindowControls && !isMac ? (
               <div className="ml-2 flex items-center gap-1 pl-2">
@@ -292,8 +292,8 @@ export function HeaderBar({
             type="button"
             disabled={premiumStatusLoading}
           >
-            <AppIcon name={isPremium ? "user" : "aiStar"} />
-            {isPremium ? "Premium Member" : "Get Premium"}
+            <AppIcon name={isPremium ? "userSimple" : "aiStar"} className={cn(isPremium && "text-white")} />
+            {isPremium ? "Premium" : "Get Premium"}
           </button>
           <button
             className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#1b1b22]"

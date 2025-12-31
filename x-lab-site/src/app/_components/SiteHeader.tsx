@@ -29,11 +29,22 @@ export default function SiteHeader() {
   const pathParts = pathname.split("/");
   const restPath = pathParts.length > 2 ? `/${pathParts.slice(2).join("/")}` : "";
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
 
   const withLocale = (path: string) => `/${locale}${path}`;
   const switchLocale = (target: string) => `/${target}${restPath || ""}`;
 
   const otherLocale = locale === "zh-Hant" ? "en" : "zh-Hant";
+
+  // Detect scroll for header background
+  useEffect(() => {
+    const handleScroll = () => {
+      setScrolled(window.scrollY > 10);
+    };
+    handleScroll();
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
 
   // Prevent body scroll when menu is open
   useEffect(() => {
@@ -55,7 +66,7 @@ export default function SiteHeader() {
 
   return (
     <>
-      <header className="sticky top-0 z-30 border-b border-x-line bg-x-bg/80 backdrop-blur">
+      <header className={`sticky top-0 z-30 border-b transition-all duration-300 ${scrolled ? "border-x-line bg-x-bg/80 backdrop-blur" : "border-transparent"}`}>
         <div className="mx-auto flex w-[min(1120px,92vw)] items-center justify-between gap-4 py-3 md:gap-6 md:py-4">
           {/* Logo */}
           <div className="flex flex-col gap-0.5 md:gap-1">
@@ -116,16 +127,48 @@ export default function SiteHeader() {
 
           {/* Desktop Actions */}
           <div className="hidden items-center gap-2 lg:flex">
-            {/* Language Toggle Button */}
-            <button
-              onClick={handleLocaleSwitch}
-              className="flex h-9 items-center gap-1.5 rounded-full border border-x-line bg-x-surface px-3 text-xs font-medium text-x-muted transition hover:border-x-accent/50 hover:text-x-text"
-            >
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
-              </svg>
-              <span>{locale === "zh-Hant" ? "EN" : "中"}</span>
-            </button>
+            {/* Language Dropdown */}
+            <div className="group relative">
+              <button
+                className="flex h-9 items-center gap-1.5 rounded-full border border-x-line bg-x-surface px-3 text-xs font-medium text-x-muted transition hover:border-x-accent/50 hover:text-x-text"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+                </svg>
+                <span>{locale === "zh-Hant" ? "繁中" : "EN"}</span>
+                <svg className="h-3 w-3 transition-transform duration-200 group-hover:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {/* Dropdown Menu */}
+              <div className="pointer-events-none absolute right-0 top-full z-20 mt-2 w-[180px] translate-y-2 rounded-2xl border border-x-line bg-x-surface p-2 opacity-0 shadow-deep transition-all duration-200 group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100">
+                <div className="absolute -top-2 right-0 h-2 w-full" />
+                <button
+                  onClick={() => router.push(switchLocale("zh-Hant"))}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-x-muted transition-colors hover:bg-x-surface-2 hover:text-x-text"
+                >
+                  <span className="text-base">🇭🇰</span>
+                  <span className="flex-1 text-left">繁體中文</span>
+                  {locale === "zh-Hant" && (
+                    <svg className="h-4 w-4 text-x-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </button>
+                <button
+                  onClick={() => router.push(switchLocale("en"))}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-x-muted transition-colors hover:bg-x-surface-2 hover:text-x-text"
+                >
+                  <span className="text-base">🇺🇸</span>
+                  <span className="flex-1 text-left">English</span>
+                  {locale === "en" && (
+                    <svg className="h-4 w-4 text-x-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </div>
             <Link className="btn-primary" href={withLocale("/#products")}>
               {t("nav.download")}
             </Link>
@@ -136,9 +179,19 @@ export default function SiteHeader() {
             {/* Mobile Language Toggle */}
             <button
               onClick={handleLocaleSwitch}
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-x-line text-xs font-bold text-x-muted transition hover:bg-x-surface hover:text-x-text"
+              className="group relative flex h-10 items-center justify-center gap-1 rounded-xl border border-x-line px-3 text-xs font-medium text-x-muted transition hover:border-x-accent/50 hover:bg-x-surface hover:text-x-text overflow-hidden"
             >
-              {locale === "zh-Hant" ? "EN" : "中"}
+              <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+              </svg>
+              <span className="relative h-4 w-6 overflow-hidden">
+                <span className={`absolute inset-0 flex items-center justify-center transition-transform duration-300 ${locale === "zh-Hant" ? "translate-y-0" : "-translate-y-full"}`}>
+                  EN
+                </span>
+                <span className={`absolute inset-0 flex items-center justify-center transition-transform duration-300 ${locale === "en" ? "translate-y-0" : "translate-y-full"}`}>
+                  中
+                </span>
+              </span>
             </button>
             <Link
               className="btn-primary px-3 py-2 text-xs sm:px-4 sm:text-sm"
@@ -173,7 +226,7 @@ export default function SiteHeader() {
 
       {/* Mobile Menu Overlay */}
       <div
-        className={`fixed inset-0 z-20 bg-x-bg/60 backdrop-blur-sm transition-opacity duration-300 lg:hidden ${
+        className={`fixed inset-0 z-40 bg-x-bg/60 backdrop-blur-sm transition-opacity duration-300 lg:hidden ${
           mobileMenuOpen ? "opacity-100" : "pointer-events-none opacity-0"
         }`}
         onClick={closeMobileMenu}
@@ -181,7 +234,7 @@ export default function SiteHeader() {
 
       {/* Mobile Menu Panel */}
       <div
-        className={`fixed right-0 top-0 z-20 h-full w-[min(320px,85vw)] transform bg-x-bg shadow-2xl transition-transform duration-300 ease-out lg:hidden ${
+        className={`fixed right-0 top-0 z-50 h-full w-[min(320px,85vw)] transform bg-x-bg shadow-2xl transition-transform duration-300 ease-out lg:hidden ${
           mobileMenuOpen ? "translate-x-0" : "translate-x-full"
         }`}
       >

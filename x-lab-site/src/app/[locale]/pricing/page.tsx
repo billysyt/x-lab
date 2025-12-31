@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import NeuralNet from "../../_components/NeuralNet";
+import MobilePricingCard from "../../_components/MobilePricingCard";
 
 export default async function PricingPage({
   params,
@@ -16,14 +17,6 @@ export default async function PricingPage({
 
   return (
     <div className="relative">
-      <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-        <div className="absolute inset-0 grid-overlay opacity-20" />
-        <div className="absolute -top-48 right-[-120px] h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle,rgba(122,168,255,0.35),transparent_60%)] blur-3xl" />
-        <div className="absolute -left-40 top-40 h-[420px] w-[420px] rounded-full bg-[radial-gradient(circle,rgba(116,240,218,0.32),transparent_60%)] blur-3xl" />
-        <div className="absolute left-20 top-24 h-2 w-2 animate-[twinkle_4s_ease-in-out_infinite] rounded-full bg-white/70" />
-        <div className="absolute right-40 top-64 h-1.5 w-1.5 animate-[twinkle_5s_ease-in-out_infinite] rounded-full bg-white/70" />
-      </div>
-
       <section className="mx-auto flex w-[min(1120px,92vw)] flex-col gap-10 pt-16">
         <div className="space-y-4">
           <div className="section-label">{t("pricing.label")}</div>
@@ -35,7 +28,53 @@ export default async function PricingPage({
       </section>
 
       <section id="pricing" className="mx-auto mt-10 w-[min(1120px,92vw)]">
-        <div className="grid gap-6 lg:grid-cols-3">
+        {/* Mobile/Tablet View - Combined Card with Toggle */}
+        <div className="lg:hidden">
+          <MobilePricingCard
+            freeFeatures={freeFeatures}
+            premiumFeatures={premiumFeatures}
+            translations={{
+              freeTag: t("pricing.freeTag"),
+              freeTitle: t("pricing.freeTitle"),
+              freeDesc: t("pricing.freeDesc"),
+              freeCta: t("pricing.freeCta"),
+              premiumTag: t("pricing.premiumTag"),
+              premiumPrice: t("pricing.premiumPrice"),
+              premiumPriceUnit: t("pricing.premiumPriceUnit"),
+              premiumDesc: t("pricing.premiumDesc"),
+              premiumCta: t("pricing.premiumCta"),
+            }}
+            contactPath={withLocale("/contact")}
+          />
+
+          {/* Enterprise Card for Mobile */}
+          <div className="mt-6 flex flex-col rounded-[26px] border border-x-line bg-x-surface p-7">
+            <div className="text-xs uppercase tracking-[0.3em] text-x-soft">
+              {t("pricing.enterpriseTag")}
+            </div>
+            <h3 className="mt-3 text-2xl font-semibold">{t("pricing.enterpriseTitle")}</h3>
+            <p className="mt-2 text-sm text-x-muted">{t("pricing.enterpriseDesc")}</p>
+            <div className="mt-6 flex-1 space-y-3 text-sm text-x-muted">
+              {enterpriseFeatures.map((item) => (
+                <p key={item} className="flex items-start gap-2">
+                  <span className="mt-0.5 text-emerald-400">✓</span>
+                  <span>{item}</span>
+                </p>
+              ))}
+            </div>
+            <div className="mt-6">
+              <Link
+                href={withLocale("/contact")}
+                className="block w-full rounded-full border border-x-line bg-x-surface-2 px-6 py-3 text-center text-sm font-medium text-x-soft opacity-60 transition hover:opacity-100 hover:border-x-accent/50 hover:text-x-text"
+              >
+                {t("pricing.enterpriseCta")}
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        {/* Desktop View - Full 3 Cards */}
+        <div className="hidden gap-6 lg:grid lg:grid-cols-3">
           {/* Free Plan */}
           <div className="flex flex-col rounded-[26px] border border-x-line bg-x-surface p-7">
             <div className="text-xs uppercase tracking-[0.3em] text-x-soft">
@@ -105,18 +144,19 @@ export default async function PricingPage({
               ))}
             </div>
             <div className="mt-6">
-              <button
-                disabled
-                className="w-full rounded-full border border-x-line bg-x-surface-2 px-6 py-3 text-sm font-medium text-x-soft opacity-60 cursor-not-allowed"
+              <Link
+                href={withLocale("/contact")}
+                className="block w-full rounded-full border border-x-line bg-x-surface-2 px-6 py-3 text-center text-sm font-medium text-x-soft opacity-60 transition hover:opacity-100 hover:border-x-accent/50 hover:text-x-text"
               >
                 {t("pricing.enterpriseCta")}
-              </button>
+              </Link>
             </div>
           </div>
         </div>
       </section>
 
-      <section id="cta" className="mx-auto mt-20 w-[min(1120px,92vw)]">
+      {/* Contact CTA - Desktop Only */}
+      <section id="cta" className="mx-auto mt-20 hidden w-[min(1120px,92vw)] lg:block">
         <div className="relative overflow-hidden rounded-[32px] border border-x-line bg-x-surface p-8">
           <NeuralNet />
           <div className="relative z-10 flex flex-col items-start justify-between gap-6 md:flex-row md:items-center">

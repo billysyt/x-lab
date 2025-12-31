@@ -34,6 +34,14 @@ export default function MobileComparisonTable({
 }) {
   const [activeTab, setActiveTab] = useState<TabKey>("xlab");
 
+  const getSlidePosition = () => {
+    switch (activeTab) {
+      case "xlab": return "left-1";
+      case "cantosub": return "left-[calc(33.333%+1px)]";
+      case "subanana": return "left-[calc(66.666%+1px)]";
+    }
+  };
+
   const renderMark = (value: boolean) => (
     <span
       className={[
@@ -56,22 +64,34 @@ export default function MobileComparisonTable({
 
   return (
     <div className="mt-6">
-      {/* Tab Switcher */}
-      <div className="flex rounded-xl border border-x-line bg-x-surface p-1">
+      {/* Segmented Tab Switcher */}
+      <div className="relative flex rounded-full border border-x-line bg-x-surface p-1">
+        {/* Sliding Background */}
+        <div
+          className={`absolute top-1 bottom-1 w-[calc(33.333%-3px)] rounded-full bg-x-accent/20 border border-x-accent/40 transition-all duration-300 ease-out ${getSlidePosition()}`}
+        />
+
         {tabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={[
-              "flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-xs font-medium transition-all",
+            className={`relative z-10 flex flex-1 items-center justify-center gap-1.5 rounded-full px-2 py-2.5 text-xs font-medium transition-colors duration-300 ${
               activeTab === tab.key
-                ? tab.key === "xlab"
-                  ? "bg-x-accent/15 text-x-accent shadow-sm"
-                  : "bg-x-surface-2 text-x-text"
-                : "text-x-soft hover:text-x-muted",
-            ].join(" ")}
+                ? "text-x-accent"
+                : "text-x-soft hover:text-x-muted"
+            }`}
           >
-            {tab.icon && <Image src={tab.icon} alt={tab.alt} width={16} height={16} />}
+            {tab.icon && (
+              <span className={`flex items-center justify-center rounded ${tab.key === 'subanana' ? 'bg-white/90 p-0.5' : ''}`}>
+                <Image
+                  src={tab.icon}
+                  alt={tab.alt}
+                  width={14}
+                  height={14}
+                  className="rounded-sm"
+                />
+              </span>
+            )}
             <span className="truncate">{columns[tab.key]}</span>
           </button>
         ))}
@@ -82,10 +102,7 @@ export default function MobileComparisonTable({
         {rows.map((row) => (
           <div
             key={row.label}
-            className={[
-              "flex items-center justify-between rounded-lg px-4 py-3",
-              activeTab === "xlab" ? "bg-x-accent/[0.06]" : "bg-x-surface",
-            ].join(" ")}
+            className="flex items-center justify-between rounded-lg bg-x-surface/60 backdrop-blur-sm px-4 py-3"
           >
             <span className="text-sm font-medium text-x-text">{row.label}</span>
             {getValue(row)}

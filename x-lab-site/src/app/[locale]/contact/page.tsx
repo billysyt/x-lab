@@ -10,10 +10,8 @@ export default async function ContactPage({
 
   return (
     <div className="relative overflow-hidden">
+      {/* Page-specific decorations */}
       <div className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute inset-0 grid-overlay opacity-20" />
-        <div className="absolute -top-52 right-[-200px] h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle,rgba(122,168,255,0.35),transparent_60%)] blur-3xl" />
-        <div className="absolute -left-32 top-32 h-[440px] w-[440px] rounded-full bg-[radial-gradient(circle,rgba(116,240,218,0.28),transparent_60%)] blur-3xl" />
         <img
           src="/space-hero.svg"
           alt=""
@@ -24,8 +22,6 @@ export default async function ContactPage({
           alt=""
           className="absolute -left-24 -top-20 w-[380px] opacity-60 animate-[orbit_28s_linear_infinite]"
         />
-        <div className="absolute left-24 top-24 h-2 w-2 animate-[twinkle_4s_ease-in-out_infinite] rounded-full bg-white/70" />
-        <div className="absolute right-32 top-48 h-1.5 w-1.5 animate-[twinkle_6s_ease-in-out_infinite] rounded-full bg-white/70" />
         <div className="absolute left-1/2 top-32 h-24 w-[2px] bg-gradient-to-b from-transparent via-x-accent/60 to-transparent animate-[scan_7s_ease-in-out_infinite]" />
       </div>
 
@@ -89,24 +85,24 @@ export default async function ContactPage({
           </div>
 
           <div>
-            {/* Mobile: Email and WeChat in same row */}
-            <div className="grid grid-cols-2 gap-6 sm:grid-cols-1 sm:gap-0">
+            {/* Mobile & Tablet: Email and WeChat in same row, Desktop: stacked */}
+            <div className="grid grid-cols-2 gap-6 lg:grid-cols-1 lg:gap-0">
               <div>
                 <div className="text-xs uppercase tracking-[0.3em] text-x-soft">{t("emailLabel")}</div>
                 <a
-                  className="mt-3 block text-base font-semibold text-x-text transition hover:text-x-accent sm:text-lg"
+                  className="mt-3 block text-base font-semibold text-x-text transition hover:text-x-accent lg:text-lg"
                   href="mailto:hello@x-lab.hk"
                 >
                   {t("emailTitle")}
                 </a>
               </div>
-              <div className="sm:mt-8 sm:border-t sm:border-x-line/60 sm:pt-6">
+              <div className="lg:mt-8 lg:border-t lg:border-x-line/60 lg:pt-6">
                 <div className="text-xs uppercase tracking-[0.3em] text-x-soft">{t("wechatLabel")}</div>
-                <div className="mt-3 sm:mt-4">
+                <div className="mt-3 lg:mt-4">
                   <img
                     src="/wechat-group-qr.svg"
                     alt={t("wechatAlt")}
-                    className="h-28 w-28 border border-x-line/60 bg-x-surface/40 p-2 shadow-glow-sm sm:h-40 sm:w-40 sm:p-3"
+                    className="h-28 w-28 border border-x-line/60 bg-x-surface/40 p-2 shadow-glow-sm lg:h-40 lg:w-40 lg:p-3"
                   />
                 </div>
               </div>

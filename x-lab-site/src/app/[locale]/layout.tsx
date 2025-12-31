@@ -2,6 +2,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { getMessages } from "next-intl/server";
 import SiteFooter from "../_components/SiteFooter";
 import SiteHeader from "../_components/SiteHeader";
+import PageBackground from "../_components/PageBackground";
 
 export default async function LocaleLayout({
   children,
@@ -16,8 +17,9 @@ export default async function LocaleLayout({
   return (
     <NextIntlClientProvider messages={messages} locale={locale}>
       <div className="min-h-screen">
+        <PageBackground />
         <SiteHeader />
-        <main className="pb-24">{children}</main>
+        <main className="pb-6 md:pb-24">{children}</main>
         <SiteFooter />
       </div>
     </NextIntlClientProvider>

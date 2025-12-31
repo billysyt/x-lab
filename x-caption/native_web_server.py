@@ -117,6 +117,10 @@ active_model_download_id: Optional[str] = None
 youtube_downloads: Dict[str, Dict[str, Any]] = {}
 youtube_download_lock = threading.Lock()
 
+# Internet import download tracking
+internet_downloads: Dict[str, Dict[str, Any]] = {}
+internet_download_lock = threading.Lock()
+
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 update_cache_lock = threading.Lock()
@@ -587,6 +591,262 @@ def _start_youtube_download(url: str) -> Dict[str, Any]:
                 state["updated_at"] = time.time()
 
     thread = threading.Thread(target=_run_download, name=f"YouTubeDownload-{download_id}", daemon=True)
+    thread.start()
+    return state
+
+
+def _sanitize_download_error(error: Exception) -> str:
+    """Convert technical download errors to user-friendly messages."""
+    msg = str(error).lower()
+    if "cloudflare" in msg or "403" in msg:
+        return "This site is protected and cannot be accessed. Try a different source."
+    if "404" in msg or "not found" in msg:
+        return "Video not found. Please check the URL and try again."
+    if "private" in msg or "unavailable" in msg:
+        return "This video is private or unavailable."
+    if "geo" in msg or "country" in msg:
+        return "This video is not available in your region."
+    if "age" in msg or "sign in" in msg:
+        return "This video requires sign-in and cannot be downloaded."
+    if "no video" in msg or "unsupported" in msg:
+        return "This site or video format is not supported."
+    if "network" in msg or "connection" in msg or "timeout" in msg:
+        return "Network error. Please check your connection and try again."
+    # Generic fallback
+    return "Unable to import from this URL. The site may not be supported."
+
+
+def _download_internet_audio(
+    url: str,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    download_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """Download audio from any supported site using yt-dlp."""
+    try:
+        from yt_dlp import YoutubeDL  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("Internet import requires yt-dlp. Please install the dependency.") from exc
+
+    downloads_dir = get_uploads_dir() / "internet"
+    downloads_dir.mkdir(parents=True, exist_ok=True)
+    download_id = download_id or uuid.uuid4().hex
+    outtmpl = str(downloads_dir / f"{download_id}.%(ext)s")
+
+    def progress_hook(update: Dict[str, Any]) -> None:
+        if progress_callback:
+            progress_callback(update)
+
+    ydl_opts = {
+        "format": "worstaudio/worst",
+        "outtmpl": outtmpl,
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "retries": 2,
+        "postprocessors": [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "64",
+            }
+        ],
+        "progress_hooks": [progress_hook],
+        # Use impersonation to bypass Cloudflare and other anti-bot protections
+        "extractor_args": {"generic": {"impersonate": ["chrome"]}},
+    }
+
+    # Try to use impersonation if curl_cffi is available
+    try:
+        import curl_cffi  # noqa: F401
+        ydl_opts["impersonate"] = "chrome"
+    except ImportError:
+        pass
+
+    with YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+
+    if not info:
+        raise RuntimeError("Failed to fetch media metadata.")
+    if "entries" in info:
+        info = next((entry for entry in info.get("entries") or [] if entry), None)
+        if not info:
+            raise RuntimeError("No playable entries found.")
+
+    title = (info.get("title") or "internet_audio").strip()
+    video_id = info.get("id")
+    duration = info.get("duration")
+    thumbnail_url = _pick_youtube_thumbnail(info)  # Works for any yt-dlp source
+    safe_title = secure_filename(title) or "internet_audio"
+    safe_title = safe_title[:80].strip("-_") or "internet_audio"
+    base_name = f"{safe_title}-{download_id[:8]}"
+
+    # Find the downloaded file
+    candidates = [path for path in downloads_dir.glob(f"{download_id}.*") if path.is_file()]
+    if not candidates:
+        raise RuntimeError("Download completed but no audio file was created.")
+    allowed = [path for path in candidates if path.suffix.lstrip(".").lower() in ALLOWED_EXTENSIONS]
+    if allowed:
+        candidates = allowed
+    downloaded_path = max(candidates, key=lambda path: path.stat().st_mtime)
+
+    final_name = f"{base_name}{downloaded_path.suffix}"
+    final_path = downloads_dir / final_name
+    try:
+        if downloaded_path.resolve() != final_path.resolve():
+            downloaded_path.replace(final_path)
+    except Exception:
+        final_path = downloaded_path
+
+    mime_type, _ = mimetypes.guess_type(str(final_path))
+    size = None
+    with contextlib.suppress(OSError):
+        size = final_path.stat().st_size
+
+    thumbnail_path = _download_youtube_thumbnail(
+        thumbnail_url,
+        downloads_dir=downloads_dir,
+        base_name=base_name,
+    )
+    local_thumbnail_url = _local_media_url(thumbnail_path) if thumbnail_path else None
+
+    # Try to get a stream URL for video preview playback
+    stream_url = None
+    try:
+        stream_opts = {
+            # More flexible format selector that works with various sites
+            "format": "best[vcodec!=none]/bestvideo+bestaudio/best",
+            "noplaylist": True,
+            "quiet": True,
+            "no_warnings": True,
+            "extractor_args": {"generic": {"impersonate": ["chrome"]}},
+        }
+        # Try to use impersonation if curl_cffi is available
+        try:
+            import curl_cffi  # noqa: F401
+            stream_opts["impersonate"] = "chrome"
+        except ImportError:
+            pass
+        with YoutubeDL(stream_opts) as stream_ydl:
+            stream_info = stream_ydl.extract_info(url, download=False)
+        if stream_info and "entries" in stream_info:
+            stream_info = next((entry for entry in stream_info.get("entries") or [] if entry), None)
+        if stream_info:
+            # Try to get the direct URL first
+            stream_url = stream_info.get("url")
+            # For sites like Bilibili that use separate video/audio streams,
+            # try to get the webpage_url as fallback for embedding
+            if not stream_url:
+                stream_url = stream_info.get("webpage_url")
+            if not duration:
+                duration = stream_info.get("duration")
+    except Exception as exc:
+        logger.warning("Failed to resolve stream URL: %s", exc)
+
+    return {
+        "file": {
+            "path": str(final_path),
+            "name": final_path.name,
+            "size": size,
+            "mime": mime_type or "application/octet-stream",
+        },
+        "thumbnail_url": local_thumbnail_url,
+        "source": {
+            "url": url,
+            "title": title,
+            "id": video_id,
+        },
+        "stream_url": stream_url,
+        "duration_sec": duration if isinstance(duration, (int, float)) else None,
+    }
+
+
+def _serialize_internet_download(state: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "download_id": state.get("id"),
+        "status": state.get("status"),
+        "progress": state.get("progress"),
+        "message": state.get("message"),
+        "error": state.get("error"),
+        "file": state.get("file"),
+        "thumbnail_url": state.get("thumbnail_url"),
+        "source": state.get("source"),
+        "stream_url": state.get("stream_url"),
+        "duration_sec": state.get("duration_sec"),
+        "started_at": state.get("started_at"),
+        "updated_at": state.get("updated_at"),
+    }
+
+
+def _get_internet_download_state(download_id: str) -> Optional[Dict[str, Any]]:
+    with internet_download_lock:
+        return internet_downloads.get(download_id)
+
+
+def _start_internet_download(url: str) -> Dict[str, Any]:
+    download_id = uuid.uuid4().hex
+    state = {
+        "id": download_id,
+        "status": "queued",
+        "progress": 0,
+        "message": "Starting download...",
+        "error": None,
+        "file": None,
+        "thumbnail_url": None,
+        "source": {"url": url},
+        "stream_url": None,
+        "duration_sec": None,
+        "started_at": time.time(),
+        "updated_at": time.time(),
+    }
+    with internet_download_lock:
+        internet_downloads[download_id] = state
+
+    def progress_hook(update: Dict[str, Any]) -> None:
+        status = update.get("status")
+        info = update.get("info_dict") or {}
+        title = info.get("title") if isinstance(info, dict) else None
+        with internet_download_lock:
+            if title:
+                source = state.get("source") or {}
+                source["title"] = title
+                state["source"] = source
+            if status == "downloading":
+                total = update.get("total_bytes")
+                if not total:
+                    info_total = info.get("filesize") if isinstance(info, dict) else None
+                    if isinstance(info_total, int) and info_total > 0:
+                        total = info_total
+                downloaded = update.get("downloaded_bytes") or 0
+                if total and total > 0:
+                    state["progress"] = int(min(100, (downloaded / total) * 100))
+                state["status"] = "downloading"
+                state["message"] = "Downloading media..."
+            elif status in {"postprocessing", "finished"}:
+                state["status"] = "processing"
+                state["message"] = "Processing audio..."
+            state["updated_at"] = time.time()
+
+    def _run_download() -> None:
+        nonlocal state
+        try:
+            result = _download_internet_audio(url, progress_callback=progress_hook, download_id=download_id)
+            with internet_download_lock:
+                state["status"] = "completed"
+                state["progress"] = 100
+                state["message"] = "Media ready."
+                state["file"] = result.get("file")
+                state["source"] = result.get("source")
+                state["stream_url"] = result.get("stream_url")
+                state["thumbnail_url"] = result.get("thumbnail_url")
+                state["duration_sec"] = result.get("duration_sec")
+                state["updated_at"] = time.time()
+        except Exception as exc:
+            with internet_download_lock:
+                state["status"] = "failed"
+                state["error"] = _sanitize_download_error(exc)
+                state["updated_at"] = time.time()
+
+    thread = threading.Thread(target=_run_download, name=f"InternetDownload-{download_id}", daemon=True)
     thread.start()
     return state
 
@@ -1963,6 +2223,35 @@ def create_app():
         if not state:
             return jsonify({"error": "YouTube import not found."}), 404
         return jsonify(_serialize_youtube_download(state)), 200
+
+    @app.route('/import/internet/start', methods=['POST'])
+    def import_internet_start():
+        try:
+            payload = request.get_json(silent=True) or {}
+            url = str(payload.get("url") or "").strip()
+            if not url:
+                return jsonify({"error": "URL is required."}), 400
+
+            # Validate URL format
+            try:
+                parsed = urlparse(url)
+                if not parsed.scheme or not parsed.netloc:
+                    return jsonify({"error": "Invalid URL format."}), 400
+            except Exception:
+                return jsonify({"error": "Invalid URL format."}), 400
+
+            state = _start_internet_download(url)
+            return jsonify(_serialize_internet_download(state)), 200
+        except Exception as exc:
+            logger.error("Internet import start failed: %s", exc, exc_info=True)
+            return jsonify({"error": _sanitize_download_error(exc)}), 500
+
+    @app.route('/import/internet/<download_id>', methods=['GET'])
+    def import_internet_status(download_id: str):
+        state = _get_internet_download_state(download_id)
+        if not state:
+            return jsonify({"error": "Import not found."}), 404
+        return jsonify(_serialize_internet_download(state)), 200
 
     @app.route('/preprocess_audio', methods=['POST'])
     def preprocess_audio():
