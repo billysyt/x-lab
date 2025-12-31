@@ -197,7 +197,7 @@ export default async function Home({
               </div>
               <div className="px-3 py-3 pl-6">
                 <div className="flex items-center gap-2">
-                  <Image src="/brands/cantosub.png" alt="CantoSub AI" width={18} height={18} />
+                  <Image src="/brands/cantosub.png" alt="CantoSub" width={18} height={18} />
                   <span>{comparisonColumns.cantosub}</span>
                 </div>
               </div>
@@ -240,7 +240,7 @@ export default async function Home({
           </div>
       </section>
 
-      <section id="cta" className="mx-auto mt-12 w-[min(1120px,92vw)] pb-8 md:mt-20 md:pb-0">
+      <section id="cta" className="mx-auto mt-6 w-[min(1120px,92vw)] pb-4 md:mt-20 md:pb-0">
         <div className="relative overflow-hidden rounded-2xl border border-x-line bg-x-surface p-5 sm:rounded-[28px] sm:p-6 md:rounded-[32px] md:p-8">
           <NeuralNet />
           <div className="relative z-10 flex flex-col items-start justify-between gap-5 sm:gap-6 md:flex-row md:items-center">

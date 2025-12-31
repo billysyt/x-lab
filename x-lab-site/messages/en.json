@@ -27,44 +27,60 @@
   },
   "pricing": {
     "label": "Get Premium",
-    "freeTag": "Limited",
+    "freeTag": "Personal",
     "freeTitle": "Free",
-    "freeDesc": "Limited access to X-Caption and X-Minutes.",
+    "freeDesc": "Unlimited access to X-Caption and X-Minutes",
     "freeFeatures": [
-      "+ Limited exports",
-      "+ Cantonese accuracy + Traditional Chinese captions",
-      "+ Speaker or writing format outputs"
+      "Unlimited usage hours",
+      "No file size limit",
+      "Unlimited storage",
+      "Fast processing",
+      "High accuracy",
+      "Offline privacy & security",
+      "Videos & data never uploaded",
+      "Cantonese → written Chinese",
+      "Audio or video files",
+      "Subtitle download",
+      "Auto language detection",
+      "Speaker segmentation",
+      "Noise suppression",
+      "Traditional + Simplified Chinese",
+      "Multi-language translation"
     ],
-    "premiumTag": "Premium",
-    "premiumPrice": "HKD 99",
-    "premiumDesc": "All-in-one plan. Buy me a dinner.",
+    "freeCta": "Selected",
+    "premiumTag": "Upgrade",
+    "premiumPrice": "$19",
+    "premiumPriceUnit": "USD",
+    "premiumDesc": "Priority access to our products",
     "premiumFeatures": [
-      "+ X-Caption + X-Minutes + X-Code",
-      "+ Claude Code + Codex options",
-      "+ Team controls and usage budgets",
-      "+ Early whitelist promotion included"
+      "All Free plan features included",
+      "No limitations",
+      "WhiteList access",
+      "7x24 Support"
     ],
+    "premiumCta": "Upgrade Now",
     "enterpriseTag": "Enterprise",
     "enterpriseTitle": "Let's talk",
-    "enterpriseDesc": "Custom security reviews and dedicated deployment support.",
+    "enterpriseDesc": "Custom security reviews and dedicated deployment support",
     "enterpriseFeatures": [
-      "+ SSO, RBAC, audit logs",
-      "+ On-prem architecture review",
-      "+ Dedicated onboarding"
+      "All Premium features included",
+      "SSO, RBAC, audit logs",
+      "On-prem architecture review",
+      "Dedicated onboarding"
     ],
     "enterpriseCta": "Contact sales"
   },
   "pricingPage": {
-    "title": "Upgrade to X-Lab Premium.",
-    "desc": "Simple plans for on-prem teams that need captions, meeting minutes, and secure AI access."
+    "title": "X-Lab Premium",
+    "descKey": "footer.description"
   },
   "comparison": {
     "label": "Comparison",
     "title": "How X-Lab compares",
-    "desc": "Quick comparison of X-Lab AI with other popular platforms.",
+    "desc": "Quick comparison of X-Lab AI with other popular platforms",
     "columns": {
       "xlab": "X-Lab",
-      "cantosub": "CantoSub AI",
+      "cantosub": "CantoSub",
       "subanana": "Subanana"
     },
     "rows": [
@@ -213,7 +229,7 @@
     "terms": "Terms of Service",
     "privacyPolicy": "Privacy Policy",
     "copyright": "Copyright 2025 X-Lab. All rights reserved.",
-    "offlinePrivacy": "Offline processing, privacy first."
+    "offlinePrivacy": "Offline processing, privacy first"
   },
   "contactPage": {
     "title": "Get in touch with X-Lab",
@@ -223,7 +239,7 @@
     "fieldEmail": "Work email",
     "fieldEmailPlaceholder": "name@company.com",
     "fieldMessage": "Message",
-    "fieldMessagePlaceholder": "Use case, deployment needs, timeline.",
+    "fieldMessagePlaceholder": "Your requirements or feedback",
     "submit": "Submit",
     "emailLabel": "Email contact",
     "emailTitle": "hello@x-lab.hk",

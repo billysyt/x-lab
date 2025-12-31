@@ -21,7 +21,7 @@ type TabKey = "xlab" | "cantosub" | "subanana";
 
 const tabs: { key: TabKey; icon?: string; alt: string }[] = [
   { key: "xlab", alt: "X-Lab" },
-  { key: "cantosub", icon: "/brands/cantosub.png", alt: "CantoSub AI" },
+  { key: "cantosub", icon: "/brands/cantosub.png", alt: "CantoSub" },
   { key: "subanana", icon: "/brands/subanana.png", alt: "Subanana" },
 ];
 

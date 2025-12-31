@@ -27,44 +27,60 @@
   },
   "pricing": {
     "label": "升級方案",
-    "freeTag": "限量",
+    "freeTag": "個人",
     "freeTitle": "免費",
-    "freeDesc": "X-Caption 與 X-Minutes 限量使用。",
+    "freeDesc": "X-Caption 與 X-Minutes 無限使用",
     "freeFeatures": [
-      "+ 匯出次數限制",
-      "+ 廣東話準確度 + 繁體字幕",
-      "+ 講者 / 書寫格式輸出"
+      "無限使用時數",
+      "不限單檔案大小上限",
+      "不限總儲存量",
+      "快速處理轉換",
+      "高準確度",
+      "離線私隱安全",
+      "影片及數據不會上傳",
+      "廣東話 → 書面語",
+      "支援音訊 / 影片檔案",
+      "字幕下載",
+      "多語言自動檢測",
+      "自動分段標記講者",
+      "降噪處理",
+      "繁簡中文支援",
+      "多語言翻譯"
     ],
-    "premiumTag": "Premium",
-    "premiumPrice": "HKD 99",
-    "premiumDesc": "全功能方案，請我食餐飯。",
+    "freeCta": "已選擇",
+    "premiumTag": "升級",
+    "premiumPrice": "$19",
+    "premiumPriceUnit": "USD",
+    "premiumDesc": "優先體驗我們產品",
     "premiumFeatures": [
-      "+ X-Caption + X-Minutes + X-Code",
-      "+ Claude Code + Codex 選項",
-      "+ 團隊控制與用量預算",
-      "+ 優先白名單推廣"
+      "包含所有免費版功能",
+      "沒有任何限制",
+      "加入 WhiteList 資格",
+      "7x24 支援"
     ],
+    "premiumCta": "立即升級",
     "enterpriseTag": "企業",
     "enterpriseTitle": "聯絡我們",
-    "enterpriseDesc": "安全審核與專屬部署支援。",
+    "enterpriseDesc": "安全審核與專屬部署支援",
     "enterpriseFeatures": [
-      "+ SSO、RBAC、稽核紀錄",
-      "+ 本地部署架構評估",
-      "+ 專屬導入支援"
+      "包含所有 Premium 功能",
+      "SSO、RBAC、稽核紀錄",
+      "本地部署架構評估",
+      "專屬導入支援"
     ],
     "enterpriseCta": "聯絡銷售"
   },
   "pricingPage": {
-    "title": "升級至 X-Lab Premium。",
-    "desc": "為本地部署團隊提供清晰方案，涵蓋字幕、會議紀錄與安全 AI 入口。"
+    "title": "X-Lab Premium",
+    "descKey": "footer.description"
   },
   "comparison": {
     "label": "對比",
     "title": "X-Lab 對比其他方案",
-    "desc": "快速比較 X-Lab AI 與其他主流平台。",
+    "desc": "快速比較 X-Lab AI 與其他主流平台",
     "columns": {
       "xlab": "X-Lab",
-      "cantosub": "CantoSub AI",
+      "cantosub": "CantoSub",
       "subanana": "Subanana"
     },
     "rows": [
@@ -213,7 +229,7 @@
     "terms": "服務條款",
     "privacyPolicy": "隱私政策",
     "copyright": "Copyright 2025 X-Lab. All rights reserved.",
-    "offlinePrivacy": "離線處理、私隱優先。"
+    "offlinePrivacy": "離線處理、私隱優先"
   },
   "contactPage": {
     "title": "與 X-Lab 取得聯繫",
@@ -223,7 +239,7 @@
     "fieldEmail": "工作電郵",
     "fieldEmailPlaceholder": "name@company.com",
     "fieldMessage": "內容",
-    "fieldMessagePlaceholder": "使用場景、部署需求、時間表。",
+    "fieldMessagePlaceholder": "你的需求或意見",
     "submit": "提交",
     "emailLabel": "電郵聯絡",
     "emailTitle": "hello@x-lab.hk",

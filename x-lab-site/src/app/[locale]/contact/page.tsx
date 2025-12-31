@@ -73,9 +73,10 @@ export default async function ContactPage({
                   {t("fieldMessage")}
                 </label>
                 <textarea
-                  className="min-h-[140px] w-full resize-none border-b border-x-line/60 bg-transparent pb-3 text-base text-x-text transition focus:border-x-accent focus:outline-none"
+                  className="min-h-[80px] w-full resize-none border-b border-x-line/60 bg-transparent pb-3 text-base text-x-text transition focus:border-x-accent focus:outline-none"
                   name="message"
                   placeholder={t("fieldMessagePlaceholder")}
+                  rows={2}
                   required
                 />
               </div>
@@ -88,23 +89,26 @@ export default async function ContactPage({
           </div>
 
           <div>
-            <div>
-              <div className="text-xs uppercase tracking-[0.3em] text-x-soft">{t("emailLabel")}</div>
-              <a
-                className="mt-3 block text-lg font-semibold text-x-text transition hover:text-x-accent"
-                href="mailto:hello@x-lab.hk"
-              >
-                {t("emailTitle")}
-              </a>
-            </div>
-            <div className="mt-8 border-t border-x-line/60 pt-6">
-              <div className="text-xs uppercase tracking-[0.3em] text-x-soft">{t("wechatLabel")}</div>
-              <div className="mt-4">
-                <img
-                  src="/wechat-group-qr.svg"
-                  alt={t("wechatAlt")}
-                  className="h-40 w-40 border border-x-line/60 bg-x-surface/40 p-3 shadow-glow-sm"
-                />
+            {/* Mobile: Email and WeChat in same row */}
+            <div className="grid grid-cols-2 gap-6 sm:grid-cols-1 sm:gap-0">
+              <div>
+                <div className="text-xs uppercase tracking-[0.3em] text-x-soft">{t("emailLabel")}</div>
+                <a
+                  className="mt-3 block text-base font-semibold text-x-text transition hover:text-x-accent sm:text-lg"
+                  href="mailto:hello@x-lab.hk"
+                >
+                  {t("emailTitle")}
+                </a>
+              </div>
+              <div className="sm:mt-8 sm:border-t sm:border-x-line/60 sm:pt-6">
+                <div className="text-xs uppercase tracking-[0.3em] text-x-soft">{t("wechatLabel")}</div>
+                <div className="mt-3 sm:mt-4">
+                  <img
+                    src="/wechat-group-qr.svg"
+                    alt={t("wechatAlt")}
+                    className="h-28 w-28 border border-x-line/60 bg-x-surface/40 p-2 shadow-glow-sm sm:h-40 sm:w-40 sm:p-3"
+                  />
+                </div>
               </div>
             </div>
           </div>
