@@ -148,7 +148,7 @@ export function PlayerPanel({
             ref={previewContainerRef}
           >
             <div
-              className="relative h-full w-full overflow-hidden rounded-xl bg-black"
+              className="stt-video-frame relative h-full w-full overflow-hidden rounded-xl bg-black"
               onClick={handlePreviewClick}
             >
               {activeMedia ? (
@@ -227,7 +227,7 @@ export function PlayerPanel({
                       }
                     }}
                     className={cn(
-                      "absolute inset-0 h-full w-full object-contain transition-opacity",
+                      "pointer-events-none absolute inset-0 h-full w-full object-contain transition-opacity",
                       activeVideoSlot === 0 ? "opacity-100" : "opacity-0"
                     )}
                   />
@@ -244,7 +244,7 @@ export function PlayerPanel({
                       }
                     }}
                     className={cn(
-                      "absolute inset-0 h-full w-full object-contain transition-opacity",
+                      "pointer-events-none absolute inset-0 h-full w-full object-contain transition-opacity",
                       activeVideoSlot === 1 ? "opacity-100" : "opacity-0"
                     )}
                   />

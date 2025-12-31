@@ -1,7 +1,7 @@
 {
   "nav": {
     "products": "產品",
-    "pricing": "價格",
+    "pricing": "升級方案",
     "contact": "聯絡我們",
     "download": "下載",
     "suite": "本地部署 AI 套件",
@@ -23,7 +23,7 @@
     "codeDesc": "低成本 Claude Code 或 Codex 入口，團隊控制與用量審計。"
   },
   "pricing": {
-    "label": "價格",
+    "label": "升級方案",
     "freeTag": "限量",
     "freeTitle": "免費",
     "freeDesc": "X-Caption 與 X-Minutes 限量使用。",
@@ -51,6 +51,141 @@
     ],
     "enterpriseCta": "聯絡銷售"
   },
+  "pricingPage": {
+    "title": "升級至 X-Lab Premium。",
+    "desc": "為本地部署團隊提供清晰方案，涵蓋字幕、會議紀錄與安全 AI 入口。"
+  },
+  "comparison": {
+    "label": "對比",
+    "title": "X-Lab 對比其他方案",
+    "desc": "快速比較 X-Lab 本地部署套件與主流字幕工具。",
+    "columns": {
+      "xlab": "X-Lab AI",
+      "cantosub": "CantoSub AI",
+      "subanana": "Subanana"
+    },
+    "rows": [
+      {
+        "label": "月費",
+        "type": "text",
+        "xlab": "免費",
+        "cantosub": "HKD 300",
+        "subanana": "HKD 480"
+      },
+      {
+        "label": "年費",
+        "type": "text",
+        "xlab": "免費",
+        "cantosub": "HKD 2,700",
+        "subanana": "HKD 4,800"
+      },
+      {
+        "label": "每月使用時數",
+        "type": "text",
+        "xlab": "不限",
+        "cantosub": "10 小時",
+        "subanana": "8 小時"
+      },
+      {
+        "label": "單檔案大小上限",
+        "type": "text",
+        "xlab": "不限",
+        "cantosub": "5 GB",
+        "subanana": "15 GB"
+      },
+      {
+        "label": "總儲存量",
+        "type": "text",
+        "xlab": "不限",
+        "cantosub": "100 GB",
+        "subanana": "受時數限制"
+      },
+      {
+        "label": "處理時間（1 小時影片）",
+        "type": "text",
+        "xlab": "~10 分鐘",
+        "cantosub": "~14 分鐘",
+        "subanana": "~110 分鐘"
+      },
+      {
+        "label": "準確度",
+        "type": "text",
+        "xlab": "良好",
+        "cantosub": "良好",
+        "subanana": "良好"
+      },
+      {
+        "label": "本地部署（資料留在內部）",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": false,
+        "subanana": false
+      },
+      {
+        "label": "廣東話 → 書面語",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": true,
+        "subanana": true
+      },
+      {
+        "label": "支援音訊 / 影片檔案",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": true,
+        "subanana": true
+      },
+      {
+        "label": "字幕下載",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": true,
+        "subanana": true
+      },
+      {
+        "label": "多語言自動檢測",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": true,
+        "subanana": true
+      },
+      {
+        "label": "自動分段標記講者",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": false,
+        "subanana": true
+      },
+      {
+        "label": "降噪處理",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": true,
+        "subanana": true
+      },
+      {
+        "label": "定期中文調校",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": true,
+        "subanana": true
+      },
+      {
+        "label": "繁簡中文支援",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": true,
+        "subanana": true
+      },
+      {
+        "label": "多語言翻譯",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": true,
+        "subanana": true
+      }
+    ]
+  },
   "contact": {
     "label": "聯絡",
     "title": "與 X-Lab 洽談本地化 AI。",
@@ -62,7 +197,7 @@
     "company": "公司",
     "deployment": "部署",
     "why": "為何 X-Lab",
-    "pricing": "價格",
+    "pricing": "升級方案",
     "contact": "聯絡",
     "onPrem": "本地部署",
     "enterprise": "企業",

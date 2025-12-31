@@ -51,7 +51,7 @@ export function MediaSidebar({
       </div>
       <div
         className={cn(
-          "min-h-0 flex-1 overflow-y-auto px-4 py-3 stt-scrollbar",
+          "relative z-20 min-h-0 flex-1 overflow-y-auto px-4 py-3 stt-scrollbar pywebview-no-drag pointer-events-auto",
           !isCompact && "h-[calc(100vh-340px)] max-h-[calc(100vh-340px)]"
         )}
       >

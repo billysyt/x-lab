@@ -1,7 +1,7 @@
 {
   "nav": {
     "products": "Products",
-    "pricing": "Pricing",
+    "pricing": "Get Premium",
     "contact": "Contact Us",
     "download": "Download",
     "suite": "On-prem AI suite",
@@ -23,7 +23,7 @@
     "codeDesc": "Low-cost Claude Code or Codex access with team controls and audit-ready usage."
   },
   "pricing": {
-    "label": "Pricing",
+    "label": "Get Premium",
     "freeTag": "Limited",
     "freeTitle": "Free",
     "freeDesc": "Limited access to X-Caption and X-Minutes.",
@@ -51,6 +51,141 @@
     ],
     "enterpriseCta": "Contact sales"
   },
+  "pricingPage": {
+    "title": "Upgrade to X-Lab Premium.",
+    "desc": "Simple plans for on-prem teams that need captions, meeting minutes, and secure AI access."
+  },
+  "comparison": {
+    "label": "Comparison",
+    "title": "How X-Lab compares",
+    "desc": "A quick snapshot of pricing, limits, and feature coverage.",
+    "columns": {
+      "xlab": "X-Lab Suite",
+      "cantosub": "CantoSub AI",
+      "subanana": "Subanana"
+    },
+    "rows": [
+      {
+        "label": "Pricing (monthly)",
+        "type": "text",
+        "xlab": "HKD 99",
+        "cantosub": "HKD 300",
+        "subanana": "HKD 480"
+      },
+      {
+        "label": "Pricing (annual)",
+        "type": "text",
+        "xlab": "Contact us",
+        "cantosub": "HKD 2,700",
+        "subanana": "HKD 4,800"
+      },
+      {
+        "label": "Usage limit (hours/month)",
+        "type": "text",
+        "xlab": "Unlimited",
+        "cantosub": "10 hours",
+        "subanana": "8 hours"
+      },
+      {
+        "label": "Per-file size limit",
+        "type": "text",
+        "xlab": "Unlimited",
+        "cantosub": "5 GB",
+        "subanana": "15 GB"
+      },
+      {
+        "label": "Total storage",
+        "type": "text",
+        "xlab": "Unlimited",
+        "cantosub": "100 GB",
+        "subanana": "Limited by hours"
+      },
+      {
+        "label": "Processing time (1h video)",
+        "type": "text",
+        "xlab": "~10 min",
+        "cantosub": "~14 min",
+        "subanana": "~110 min"
+      },
+      {
+        "label": "Accuracy",
+        "type": "text",
+        "xlab": "Good",
+        "cantosub": "Good",
+        "subanana": "Good"
+      },
+      {
+        "label": "On-prem (data stays local)",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": false,
+        "subanana": false
+      },
+      {
+        "label": "Cantonese → written Chinese",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": true,
+        "subanana": true
+      },
+      {
+        "label": "Audio or video files",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": true,
+        "subanana": true
+      },
+      {
+        "label": "Subtitle download",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": true,
+        "subanana": true
+      },
+      {
+        "label": "Auto language detection",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": true,
+        "subanana": true
+      },
+      {
+        "label": "Speaker segmentation",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": false,
+        "subanana": true
+      },
+      {
+        "label": "Noise suppression",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": true,
+        "subanana": true
+      },
+      {
+        "label": "Regular Chinese fine-tuning",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": true,
+        "subanana": true
+      },
+      {
+        "label": "Traditional + Simplified Chinese",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": true,
+        "subanana": true
+      },
+      {
+        "label": "Multi-language translation",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": true,
+        "subanana": true
+      }
+    ]
+  },
   "contact": {
     "label": "Contact",
     "title": "Talk to X-Lab about on-prem AI.",
@@ -62,7 +197,7 @@
     "company": "Company",
     "deployment": "Deployment",
     "why": "Why X-Lab",
-    "pricing": "Pricing",
+    "pricing": "Get Premium",
     "contact": "Contact",
     "onPrem": "On-prem",
     "enterprise": "Enterprise",

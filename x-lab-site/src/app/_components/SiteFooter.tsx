@@ -29,13 +29,13 @@ export default function SiteFooter() {
         <div className="flex flex-col gap-2 text-sm text-x-muted">
           <span className="text-sm font-semibold text-x-text">{t("footer.company")}</span>
           <Link href={withLocale("/#products")}>{t("footer.why")}</Link>
-          <Link href={withLocale("/#pricing")}>{t("footer.pricing")}</Link>
+          <Link href={withLocale("/pricing")}>{t("footer.pricing")}</Link>
           <Link href={withLocale("/contact")}>{t("footer.contact")}</Link>
         </div>
         <div className="flex flex-col gap-2 text-sm text-x-muted">
           <span className="text-sm font-semibold text-x-text">{t("footer.deployment")}</span>
           <Link href={withLocale("/#products")}>{t("footer.onPrem")}</Link>
-          <Link href={withLocale("/#pricing")}>{t("footer.enterprise")}</Link>
+          <Link href={withLocale("/pricing")}>{t("footer.enterprise")}</Link>
           <Link href={withLocale("/contact")}>{t("footer.security")}</Link>
         </div>
       </div>

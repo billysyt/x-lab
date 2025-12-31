@@ -132,6 +132,15 @@
     background: var(--primary-color);
   }
 
+  /* Force WKWebView/Safari to clip video layers to the player frame. */
+  .stt-video-frame {
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+    -webkit-mask-image: -webkit-radial-gradient(white, black);
+    clip-path: inset(0);
+    contain: paint;
+  }
+
   .processing-spinner {
     display: flex;
     align-items: flex-end;

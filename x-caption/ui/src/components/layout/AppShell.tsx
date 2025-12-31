@@ -35,12 +35,12 @@ export function AppShell(props: AppState) {
         <HeaderBar {...headerBarProps} />
         <div className={cn(layoutClass, "flex-1")}>
           {!isCompact ? (
-            <aside className="row-start-1 row-end-2 flex min-h-0 flex-col bg-[#0b0b0b]">
+            <aside className="relative z-10 row-start-1 row-end-2 flex min-h-0 min-w-0 flex-col bg-[#0b0b0b]">
               {leftPanelContent}
             </aside>
           ) : null}
 
-          <section className="row-start-1 row-end-2 flex min-h-0 flex-col bg-[#0b0b0b]">
+          <section className="relative z-0 row-start-1 row-end-2 flex min-h-0 min-w-0 flex-col overflow-hidden bg-[#0b0b0b]">
             <div
               className={cn(
                 dragRegionClass,
@@ -125,7 +125,7 @@ export function AppShell(props: AppState) {
           </section>
 
           {!isCompact ? (
-            <aside className="row-start-1 row-end-2 flex min-h-0 flex-col overflow-hidden bg-[#0b0b0b]">
+            <aside className="relative z-10 row-start-1 row-end-2 flex min-h-0 flex-col overflow-hidden bg-[#0b0b0b]">
               <div
                 className={cn(
                   dragRegionClass,

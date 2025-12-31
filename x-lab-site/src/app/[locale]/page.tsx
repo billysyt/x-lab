@@ -47,9 +47,32 @@ export default async function Home({
   const { locale } = await params;
   const t = await getTranslations({ locale });
   const withLocale = (path: string) => `/${locale}${path}`;
-  const freeFeatures = t.raw("pricing.freeFeatures") as string[];
-  const premiumFeatures = t.raw("pricing.premiumFeatures") as string[];
-  const enterpriseFeatures = t.raw("pricing.enterpriseFeatures") as string[];
+  const comparisonColumns = t.raw("comparison.columns") as {
+    xlab: string;
+    cantosub: string;
+    subanana: string;
+  };
+  const comparisonRows = t.raw("comparison.rows") as Array<{
+    label: string;
+    type: "boolean" | "text";
+    xlab: boolean | string;
+    cantosub: boolean | string;
+    subanana: boolean | string;
+  }>;
+  const renderMark = (value: boolean) => (
+    <span
+      className={[
+        "text-base font-semibold",
+        value ? "text-emerald-300" : "text-rose-300",
+      ].join(" ")}
+      aria-label={value ? "Yes" : "No"}
+    >
+      {value ? "✓" : "X"}
+    </span>
+  );
+  const comparisonTemplate = "29.4118% 23.5294% 23.5294% 23.5294%";
+  const highlightColumn =
+    "bg-gradient-to-b from-x-accent/22 via-x-accent/12 to-x-accent/22 shadow-[0_0_30px_rgba(122,168,255,0.22)]";
 
   return (
     <div className="relative">
@@ -75,7 +98,7 @@ export default async function Home({
               <Link className="btn-primary" href={withLocale("/#products")}>
                 {t("hero.primary")}
               </Link>
-              <Link className="btn-ghost" href={withLocale("/#pricing")}>
+              <Link className="btn-ghost" href={withLocale("/pricing")}>
                 {t("hero.secondary")}
               </Link>
             </div>
@@ -131,52 +154,74 @@ export default async function Home({
         </div>
       </section>
 
-      <section id="pricing" className="mx-auto mt-20 w-[min(1120px,92vw)]">
-        <div className="space-y-4 border-t border-x-line pt-10">
-          <div className="section-label">{t("pricing.label")}</div>
-          <div className="grid gap-6 lg:grid-cols-3">
-            <div className="rounded-[26px] border border-x-line bg-x-surface p-7">
-              <div className="text-xs uppercase tracking-[0.3em] text-x-soft">
-                {t("pricing.freeTag")}
+      <section id="comparison" className="mx-auto mt-20 w-[min(1120px,92vw)]">
+        <div className="space-y-3 border-t border-x-line pt-10">
+          <div className="section-label">{t("comparison.label")}</div>
+          <h2 className="text-3xl font-semibold tracking-tight">{t("comparison.title")}</h2>
+          <p className="text-sm text-x-muted md:text-base">{t("comparison.desc")}</p>
+        </div>
+        <div className="mt-8 overflow-x-auto">
+          <div className="relative min-w-[900px]">
+            <div
+              className={`pointer-events-none absolute inset-y-0 rounded-2xl ${highlightColumn}`}
+              style={{
+                left: "29.4118%",
+                width: "23.5294%",
+              }}
+            />
+
+            <div
+              className="grid items-center px-2 text-xs uppercase tracking-[0.3em] text-x-soft"
+              style={{ gridTemplateColumns: comparisonTemplate }}
+            >
+              <div className="px-3 py-3" />
+              <div className="px-3 py-3 text-x-text">
+                <div className="flex items-center gap-2">
+                  <Image src="/x-lab-mark.svg" alt="X-Lab" width={18} height={18} />
+                  <span className="text-xs font-semibold">{comparisonColumns.xlab}</span>
+                </div>
               </div>
-              <h3 className="mt-3 text-2xl font-semibold">{t("pricing.freeTitle")}</h3>
-              <p className="mt-2 text-sm text-x-muted">{t("pricing.freeDesc")}</p>
-              <div className="mt-6 space-y-2 text-sm text-x-muted">
-                {freeFeatures.map((item) => (
-                  <p key={item}>{item}</p>
-                ))}
+              <div className="px-3 py-3">
+                <div className="flex items-center gap-2">
+                  <Image src="/brands/cantosub.png" alt="CantoSub AI" width={18} height={18} />
+                  <span>{comparisonColumns.cantosub}</span>
+                </div>
+              </div>
+              <div className="px-3 py-3">
+                <div className="flex items-center gap-2">
+                  <Image src="/brands/subanana.png" alt="Subanana" width={18} height={18} />
+                  <span>{comparisonColumns.subanana}</span>
+                </div>
               </div>
             </div>
 
-            <div className="relative rounded-[30px] border border-x-accent/40 bg-x-surface-2 p-8 shadow-deep lg:-translate-y-3">
-              <div className="absolute right-6 top-6 rounded-full border border-x-accent/40 px-3 py-1 text-[0.65rem] uppercase tracking-[0.25em] text-x-accent">
-                {t("pricing.premiumTag")}
-              </div>
-              <h3 className="text-3xl font-semibold">{t("pricing.premiumPrice")}</h3>
-              <p className="mt-2 text-sm text-x-muted">{t("pricing.premiumDesc")}</p>
-              <div className="mt-5 space-y-2 text-sm text-x-muted">
-                {premiumFeatures.map((item) => (
-                  <p key={item}>{item}</p>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-[26px] border border-x-line bg-x-surface p-7">
-              <div className="text-xs uppercase tracking-[0.3em] text-x-soft">
-                {t("pricing.enterpriseTag")}
-              </div>
-              <h3 className="mt-3 text-2xl font-semibold">{t("pricing.enterpriseTitle")}</h3>
-              <p className="mt-2 text-sm text-x-muted">{t("pricing.enterpriseDesc")}</p>
-              <div className="mt-6 space-y-2 text-sm text-x-muted">
-                {enterpriseFeatures.map((item) => (
-                  <p key={item}>{item}</p>
-                ))}
-              </div>
-              <div className="mt-6">
-                <Link className="btn-primary" href={withLocale("/#cta")}>
-                  {t("pricing.enterpriseCta")}
-                </Link>
-              </div>
+            <div className="space-y-1">
+              {comparisonRows.map((row) => (
+                <div
+                  key={row.label}
+                  className="grid items-center px-2 text-sm text-x-text"
+                  style={{ gridTemplateColumns: comparisonTemplate }}
+                >
+                  <div className="px-3 py-2 font-semibold">{row.label}</div>
+                  <div className="px-3 py-2 font-semibold">
+                    {row.type === "boolean" ? (
+                      renderMark(row.xlab as boolean)
+                    ) : (
+                      <span>{row.xlab as string}</span>
+                    )}
+                  </div>
+                  <div className="px-3 py-2">
+                    {row.type === "boolean"
+                      ? renderMark(row.cantosub as boolean)
+                      : (row.cantosub as string)}
+                  </div>
+                  <div className="px-3 py-2">
+                    {row.type === "boolean"
+                      ? renderMark(row.subanana as boolean)
+                      : (row.subanana as string)}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>

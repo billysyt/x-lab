@@ -82,7 +82,7 @@ export default function SiteHeader() {
               </div>
             </div>
           </div>
-          <Link className="transition hover:text-x-text" href={withLocale("/#pricing")}>
+          <Link className="transition hover:text-x-text" href={withLocale("/pricing")}>
             {t("nav.pricing")}
           </Link>
           <Link className="transition hover:text-x-text" href={withLocale("/contact")}>
