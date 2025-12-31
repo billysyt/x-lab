@@ -19,8 +19,8 @@ const ProductRow = ({
 }) => (
   <div className="flex flex-col gap-4 border-t border-x-line py-6 sm:gap-6 sm:py-8 md:flex-row md:items-center md:justify-between md:py-10">
     <div className="flex items-start gap-4 sm:gap-5">
-      <div className="relative h-10 w-10 shrink-0 sm:h-12 sm:w-12">
-        <Image src={icon} alt={title} fill className="object-contain" />
+      <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-x-line bg-x-surface p-1.5 shadow-md sm:h-14 sm:w-14 sm:rounded-2xl sm:p-2">
+        <Image src={icon} alt={title} fill className="rounded-lg object-contain" />
       </div>
       <div>
         <h3 className="text-lg font-semibold sm:text-xl">{title}</h3>
@@ -119,18 +119,25 @@ export default async function Home({
         </div>
         <div className="mt-6">
           <ProductRow
-            icon="/x-caption-icon.svg"
+            icon="/x-caption-logo.png"
             title="X-Caption"
             desc={t("products.captionDesc")}
           >
             <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               <Image src="/badge-macos.svg" alt="Download on macOS" width={130} height={40} className="h-10 w-auto sm:h-[46px]" />
-              <Image src="/badge-windows.svg" alt="Download on Windows" width={130} height={40} className="h-10 w-auto sm:h-[46px]" />
+              <div className="relative">
+                <span className="absolute -right-1 -top-2 z-10 rounded-full bg-x-accent px-1.5 py-0.5 text-[10px] font-semibold text-x-bg">
+                  {t("products.comingSoon")}
+                </span>
+                <div className="pointer-events-none opacity-40 grayscale">
+                  <Image src="/badge-windows.svg" alt="Download on Windows" width={130} height={40} className="h-10 w-auto sm:h-[46px]" />
+                </div>
+              </div>
             </div>
           </ProductRow>
 
           <ProductRow
-            icon="/x-minutes-icon.svg"
+            icon="/x-minutes-icon.png"
             title="X-Minutes"
             desc={t("products.minutesDesc")}
           >
@@ -186,10 +193,7 @@ export default async function Home({
             >
               <div className="px-3 py-3" />
               <div className="px-3 py-3 text-x-text">
-                <div className="flex items-center gap-2">
-                  <Image src="/x-lab-mark.svg" alt="X-Lab" width={18} height={18} />
-                  <span className="text-xs font-semibold">{comparisonColumns.xlab}</span>
-                </div>
+                <span className="text-xs font-semibold">{comparisonColumns.xlab}</span>
               </div>
               <div className="px-3 py-3 pl-6">
                 <div className="flex items-center gap-2">

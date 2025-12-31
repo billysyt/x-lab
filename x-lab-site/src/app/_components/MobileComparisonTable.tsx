@@ -19,8 +19,8 @@ type ComparisonColumns = {
 
 type TabKey = "xlab" | "cantosub" | "subanana";
 
-const tabs: { key: TabKey; icon: string; alt: string }[] = [
-  { key: "xlab", icon: "/x-lab-mark.svg", alt: "X-Lab" },
+const tabs: { key: TabKey; icon?: string; alt: string }[] = [
+  { key: "xlab", alt: "X-Lab" },
   { key: "cantosub", icon: "/brands/cantosub.png", alt: "CantoSub AI" },
   { key: "subanana", icon: "/brands/subanana.png", alt: "Subanana" },
 ];
@@ -71,7 +71,7 @@ export default function MobileComparisonTable({
                 : "text-x-soft hover:text-x-muted",
             ].join(" ")}
           >
-            <Image src={tab.icon} alt={tab.alt} width={16} height={16} />
+            {tab.icon && <Image src={tab.icon} alt={tab.alt} width={16} height={16} />}
             <span className="truncate">{columns[tab.key]}</span>
           </button>
         ))}

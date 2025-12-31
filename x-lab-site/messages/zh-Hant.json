@@ -8,10 +8,10 @@
     "localeZh": "繁體中文",
     "localeEn": "English"
   },
-  "signal": "AI 訊號",
+  "signal": "本地 TOP 1",
   "hero": {
-    "title": "太空級私隱的 AI 工作流程。",
-    "subtitle": "字幕、會議紀錄、程式碼入口，全部本地化部署。",
+    "title": "離線高準確AI一鍵上字幕",
+    "subtitle": "字幕、會議紀錄、講者分段等，全部本地化處理。",
     "primary": "免費下載",
     "secondary": "查看價格",
     "compare": "對比方案"
@@ -62,7 +62,7 @@
     "title": "X-Lab 對比其他方案",
     "desc": "快速比較 X-Lab 本地部署套件與主流字幕工具。",
     "columns": {
-      "xlab": "X-Lab AI",
+      "xlab": "X-Lab",
       "cantosub": "CantoSub AI",
       "subanana": "Subanana"
     },
@@ -117,7 +117,14 @@
         "subanana": "良好"
       },
       {
-        "label": "本地部署（資料留在內部）",
+        "label": "離線私隱安全",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": false,
+        "subanana": false
+      },
+      {
+        "label": "影片及數據不會上傳到伺服器",
         "type": "boolean",
         "xlab": true,
         "cantosub": false,
@@ -190,8 +197,8 @@
   },
   "contact": {
     "label": "聯絡",
-    "title": "與 X-Lab 洽談本地化 AI。",
-    "desc": "安全審核、部署規劃與高階方案。",
+    "title": "與 X-Lab 取得聯繫",
+    "desc": "我們重視私隱安全，優先考慮客戶需要。",
     "cta": "聯絡我們"
   },
   "footer": {

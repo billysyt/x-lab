@@ -8,10 +8,10 @@
     "localeZh": "Traditional Chinese",
     "localeEn": "English"
   },
-  "signal": "AI Signal",
+  "signal": "Local TOP 1",
   "hero": {
-    "title": "Space-grade privacy for AI workflows.",
-    "subtitle": "Captions. Meeting minutes. Code access. All on-prem.",
+    "title": "Offline high-accuracy AI subtitles in one click",
+    "subtitle": "Captions. Meeting minutes. Speaker segments. All processed locally.",
     "primary": "Download free",
     "secondary": "View pricing",
     "compare": "Compare plans"
@@ -62,7 +62,7 @@
     "title": "How X-Lab compares",
     "desc": "A quick snapshot of pricing, limits, and feature coverage.",
     "columns": {
-      "xlab": "X-Lab Suite",
+      "xlab": "X-Lab",
       "cantosub": "CantoSub AI",
       "subanana": "Subanana"
     },
@@ -117,7 +117,14 @@
         "subanana": "Good"
       },
       {
-        "label": "On-prem (data stays local)",
+        "label": "Offline privacy & security",
+        "type": "boolean",
+        "xlab": true,
+        "cantosub": false,
+        "subanana": false
+      },
+      {
+        "label": "Videos & data never uploaded",
         "type": "boolean",
         "xlab": true,
         "cantosub": false,
@@ -190,8 +197,8 @@
   },
   "contact": {
     "label": "Contact",
-    "title": "Talk to X-Lab about on-prem AI.",
-    "desc": "Security review, deployment planning, and premium access.",
+    "title": "Get in touch with X-Lab",
+    "desc": "We prioritize privacy and put customers first.",
     "cta": "Contact us"
   },
   "footer": {
