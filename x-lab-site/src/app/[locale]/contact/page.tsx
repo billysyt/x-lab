@@ -31,7 +31,6 @@ export default async function ContactPage({
 
       <div className="mx-auto flex w-[min(1120px,92vw)] flex-col gap-12 py-14">
         <section className="space-y-4">
-          <div className="section-label">{t("label")}</div>
           <h1 className="text-4xl font-semibold tracking-tight md:text-5xl">
             {t("title")}
           </h1>
@@ -40,12 +39,9 @@ export default async function ContactPage({
 
         <section className="grid gap-12 lg:grid-cols-[1.05fr_0.95fr]">
           <div>
-            <div className="section-label">{t("formLabel")}</div>
-            <h2 className="mt-3 text-2xl font-semibold">{t("formTitle")}</h2>
-            <p className="mt-2 text-sm text-x-muted">{t("formDesc")}</p>
             <form
-              className="mt-6 space-y-6 border-t border-x-line/60 pt-6"
-              action="mailto:hello@x-lab.ai"
+              className="space-y-6"
+              action="mailto:hello@x-lab.hk"
               method="post"
               encType="text/plain"
             >
@@ -83,47 +79,33 @@ export default async function ContactPage({
                   required
                 />
               </div>
-              <div className="flex flex-wrap items-center gap-4 pt-2">
+              <div className="pt-2">
                 <button className="btn-primary" type="submit">
                   {t("submit")}
                 </button>
-                <span className="text-xs text-x-soft">{t("formNote")}</span>
               </div>
             </form>
           </div>
 
           <div>
-            <div className="section-label">{t("contactLabel")}</div>
-            <h2 className="mt-3 text-2xl font-semibold">{t("contactTitle")}</h2>
-            <p className="mt-2 text-sm text-x-muted">{t("contactDesc")}</p>
-            <div className="mt-6 border-t border-x-line/60 pt-6">
+            <div>
               <div className="text-xs uppercase tracking-[0.3em] text-x-soft">{t("emailLabel")}</div>
               <a
                 className="mt-3 block text-lg font-semibold text-x-text transition hover:text-x-accent"
-                href="mailto:hello@x-lab.ai"
+                href="mailto:hello@x-lab.hk"
               >
                 {t("emailTitle")}
               </a>
-              <p className="mt-2 text-sm text-x-muted">{t("emailDesc")}</p>
             </div>
             <div className="mt-8 border-t border-x-line/60 pt-6">
               <div className="text-xs uppercase tracking-[0.3em] text-x-soft">{t("wechatLabel")}</div>
-              <div className="mt-4 flex flex-col items-start gap-4 sm:flex-row sm:items-center">
+              <div className="mt-4">
                 <img
                   src="/wechat-group-qr.svg"
                   alt={t("wechatAlt")}
                   className="h-40 w-40 border border-x-line/60 bg-x-surface/40 p-3 shadow-glow-sm"
                 />
-                <div>
-                  <div className="text-base font-semibold">{t("wechatTitle")}</div>
-                  <p className="mt-2 text-sm text-x-muted">{t("wechatDesc")}</p>
-                </div>
               </div>
-            </div>
-            <div className="mt-8 border-t border-x-line/60 pt-6">
-              <div className="text-xs uppercase tracking-[0.3em] text-x-soft">{t("languageLabel")}</div>
-              <div className="mt-3 text-lg font-semibold text-x-text">{t("languageTitle")}</div>
-              <p className="mt-2 text-sm text-x-muted">{t("languageDesc")}</p>
             </div>
           </div>
         </section>

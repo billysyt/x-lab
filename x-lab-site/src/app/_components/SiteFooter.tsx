@@ -18,7 +18,7 @@ export default function SiteFooter() {
             </span>
             <span className="text-x-soft">.HK</span>
           </Link>
-          <p className="mt-4 text-sm text-x-muted">{t("nav.suite")}</p>
+          <p className="mt-4 text-sm text-x-muted">{t("footer.description")}</p>
         </div>
         <div className="flex flex-col gap-2 text-sm text-x-muted">
           <span className="text-sm font-semibold text-x-text">{t("footer.products")}</span>
@@ -27,7 +27,7 @@ export default function SiteFooter() {
         </div>
         <div className="flex flex-col gap-2 text-sm text-x-muted">
           <span className="text-sm font-semibold text-x-text">{t("footer.quickLinks")}</span>
-          <Link href={withLocale("/#products")} className="transition hover:text-x-text">{t("footer.why")}</Link>
+          <Link href={withLocale("/#comparison")} className="transition hover:text-x-text">{t("footer.why")}</Link>
           <Link href={withLocale("/pricing")} className="transition hover:text-x-text">{t("footer.pricing")}</Link>
           <Link href={withLocale("/contact")} className="transition hover:text-x-text">{t("footer.contact")}</Link>
         </div>

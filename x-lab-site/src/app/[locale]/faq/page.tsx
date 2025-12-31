@@ -16,7 +16,7 @@ function FAQAccordion({ items }: { items: FAQItem[] }) {
       {items.map((item, index) => (
         <div
           key={index}
-          className="overflow-hidden rounded-2xl border border-x-line bg-x-surface transition-all duration-300"
+          className="overflow-hidden rounded-2xl border border-x-line bg-x-surface/60 backdrop-blur-sm transition-all duration-300"
         >
           <button
             onClick={() => setOpenIndex(openIndex === index ? null : index)}
@@ -26,12 +26,12 @@ function FAQAccordion({ items }: { items: FAQItem[] }) {
               {item.q}
             </span>
             <span
-              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-x-line text-x-soft transition-all duration-300 ${
-                openIndex === index ? "rotate-180 bg-x-accent/10 border-x-accent/30 text-x-accent" : ""
+              className={`shrink-0 text-x-soft transition-all duration-300 ${
+                openIndex === index ? "rotate-180 text-x-accent" : ""
               }`}
             >
               <svg
-                className="h-4 w-4"
+                className="h-5 w-5"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -80,8 +80,7 @@ export default function FAQPage() {
       <section className="mx-auto w-[min(800px,92vw)] pt-8 md:pt-16">
         {/* Header */}
         <div className="text-center">
-          <div className="section-label">{t("faq.label")}</div>
-          <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl">
+          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl">
             {t("faq.title")}
           </h1>
           <p className="mt-4 text-sm text-x-muted sm:text-base md:text-lg">
@@ -92,22 +91,6 @@ export default function FAQPage() {
         {/* FAQ Accordion */}
         <div className="mt-10 md:mt-14">
           <FAQAccordion items={questions} />
-        </div>
-
-        {/* Contact CTA */}
-        <div className="mt-12 rounded-2xl border border-x-line bg-x-surface p-6 text-center md:mt-16 md:p-8">
-          <h2 className="text-lg font-semibold text-x-text sm:text-xl">
-            {t("contact.title")}
-          </h2>
-          <p className="mt-2 text-sm text-x-muted">
-            {t("contact.desc")}
-          </p>
-          <a
-            href={`/${t("nav.localeZh") === "繁體中文" ? "zh-Hant" : "en"}/contact`}
-            className="btn-primary mt-5 inline-flex"
-          >
-            {t("contact.cta")}
-          </a>
         </div>
       </section>
     </div>
