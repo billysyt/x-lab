@@ -555,7 +555,7 @@ export function useUploadTab(props: UploadTabProps) {
     });
   }
 
-  function addLocalPathItem(args: {
+  async function addLocalPathItem(args: {
     path: string;
     name: string;
     size?: number | null;
@@ -575,55 +575,58 @@ export function useUploadTab(props: UploadTabProps) {
       const displayName = item.displayName ?? (stripFileExtension(args.name) || args.name);
 
       // Resolve YouTube stream URL BEFORE saving to database
-      void (async () => {
-        try {
-          // Resolve the stream URL first
-          const resolvedItem = await resolveYoutubeStream(item);
-          if (!resolvedItem) {
-            // Failed to resolve - add as local item with error
-            setLocalMedia((prev) => [item, ...prev]);
-            setSelectedId(item.id);
-            props.onAddToTimeline?.([item]);
-            clearSelectedFile();
-            return;
-          }
-
-          // Now save to DB with the resolved streamUrl
-          const uiState = {
-            mediaSource: {
-              type: "youtube",
-              url: resolvedItem.externalSource?.url ?? args.externalSource.url ?? null,
-              streamUrl: resolvedItem.streamUrl ?? null, // Save resolved stream URL
-              title: resolvedItem.externalSource?.title ?? args.externalSource.title ?? null,
-              id: resolvedItem.externalSource?.id ?? args.externalSource.id ?? null,
-              thumbnailUrl: resolvedItem.externalSource?.thumbnailUrl ?? args.externalSource.thumbnailUrl ?? null
-            }
-          };
-
-          await apiUpsertJobRecord({
-            job_id: item.jobId!,
-            filename: args.name,
-            display_name: displayName,
-            media_path: item.localPath!,
-            media_kind: item.kind, // Use the determined kind (will be "video" for YouTube)
-            status: "imported",
-            ui_state: uiState
-          });
-
-          // Reload jobs from DB (same as app restart)
-          await dispatch(bootstrapJobs()).unwrap();
-
-          // Set state to trigger activation via effect (avoids stale closure issue)
-          // The effect will use fresh callback references after the re-render from bootstrapJobs
-          console.log("[YouTube Import] Setting pendingYoutubeActivation:", item.jobId);
-          setPendingYoutubeActivation(item.jobId!);
-        } catch (e) {
-          // Fallback: add as local item if DB save/resolve fails
+      try {
+        // Resolve the stream URL first
+        const resolvedItem = await resolveYoutubeStream(item);
+        if (!resolvedItem) {
+          // Failed to resolve - add as local item with error
           setLocalMedia((prev) => [item, ...prev]);
           setSelectedId(item.id);
           props.onAddToTimeline?.([item]);
+          clearSelectedFile();
+          return;
         }
-      })();
+
+        // Now save to DB with the resolved streamUrl
+        const uiState = {
+          mediaSource: {
+            type: "youtube",
+            url: resolvedItem.externalSource?.url ?? args.externalSource.url ?? null,
+            streamUrl: resolvedItem.streamUrl ?? null, // Save resolved stream URL
+            title: resolvedItem.externalSource?.title ?? args.externalSource.title ?? null,
+            id: resolvedItem.externalSource?.id ?? args.externalSource.id ?? null,
+            thumbnailUrl: resolvedItem.externalSource?.thumbnailUrl ?? args.externalSource.thumbnailUrl ?? null
+          }
+        };
+
+        await apiUpsertJobRecord({
+          job_id: item.jobId!,
+          filename: args.name,
+          display_name: displayName,
+          media_path: item.localPath!,
+          media_kind: item.kind, // Use the determined kind (will be "video" for YouTube)
+          status: "imported",
+          ui_state: uiState
+        });
+
+        // Reload jobs from DB (same as app restart)
+        await dispatch(bootstrapJobs()).unwrap();
+
+        // Wait for React to update with new jobs before activating
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Build and activate the job item directly (synchronous activation)
+        const jobItem = buildJobItem(item.jobId!);
+        if (jobItem) {
+          setSelectedId(jobItem.id);
+          handleMediaItemActivate(jobItem);
+        }
+      } catch (e) {
+        // Fallback: add as local item if DB save/resolve fails
+        setLocalMedia((prev) => [item, ...prev]);
+        setSelectedId(item.id);
+        props.onAddToTimeline?.([item]);
+      }
 
       clearSelectedFile();
       return;

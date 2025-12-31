@@ -170,7 +170,7 @@ export function useMediaImport(params: {
         const displayName = startPayload?.source?.title?.trim() || undefined;
         // Don't use backend's stream_url - it may be rate-limited/stale.
         // Let frontend auto-resolve to get a fresh working URL.
-        addLocalPathItem({
+        await addLocalPathItem({
           path: file.path,
           name: file.name,
           size: typeof file.size === "number" ? file.size : null,
@@ -268,7 +268,7 @@ export function useMediaImport(params: {
           onOpenLeftDrawer();
         }
         const displayName = startPayload?.source?.title?.trim() || undefined;
-        addLocalPathItem({
+        await addLocalPathItem({
           path: file.path,
           name: file.name,
           size: typeof file.size === "number" ? file.size : null,
@@ -367,7 +367,7 @@ export function useMediaImport(params: {
           const displayName = status?.source?.title?.trim() || undefined;
           // Don't use backend's stream_url - it may be rate-limited/stale.
           // Let frontend auto-resolve to get a fresh working URL.
-          addLocalPathItem({
+          await addLocalPathItem({
             path: file.path,
             name: file.name,
             size: typeof file.size === "number" ? file.size : null,
@@ -477,7 +477,7 @@ export function useMediaImport(params: {
             onOpenLeftDrawer();
           }
           const displayName = status?.source?.title?.trim() || undefined;
-          addLocalPathItem({
+          await addLocalPathItem({
             path: file.path,
             name: file.name,
             size: typeof file.size === "number" ? file.size : null,

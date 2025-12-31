@@ -47,7 +47,7 @@ export type UploadTabHandle = {
     streamUrl?: string | null;
     externalSource?: MediaSourceInfo | null;
     transcriptionKind?: "audio" | "video";
-  }) => void;
+  }) => Promise<void>;
 };
 
 export type UploadTabProps = {
