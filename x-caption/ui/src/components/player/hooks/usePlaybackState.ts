@@ -595,6 +595,12 @@ export function usePlaybackState(params: PlaybackStateParams) {
       setActivePreviewUrl(null);
       return;
     }
+    // For YouTube items that are resolving, don't set local audio as preview
+    // Wait for the stream URL to be resolved
+    if (activeMedia.externalSource?.type === "youtube" && activeMedia.isResolvingStream) {
+      setActivePreviewUrl(null);
+      return;
+    }
     if (activeMedia.externalSource?.type === "youtube") {
       if (activeMedia.localPath) {
         setActivePreviewUrl(toFileUrl(activeMedia.localPath));
@@ -644,8 +650,11 @@ export function usePlaybackState(params: PlaybackStateParams) {
     if (activeMedia.externalSource?.type !== "youtube") return;
     if (!isOnline) return;
     if (activeMedia.isResolvingStream) return;
+    // Don't auto-resolve if there's already an error - video load failures (CORS, format)
+    // will just keep failing. Let user trigger manual retry if needed.
+    if (activeMedia.streamError) return;
     const existingStream = activeMedia.streamUrl ?? activeMedia.externalSource?.streamUrl ?? null;
-    if (existingStream && !activeMedia.streamError) return;
+    if (existingStream) return;
     void resolveYoutubeStreamForMedia(activeMedia);
   }, [
     activeMedia,
@@ -722,8 +731,16 @@ export function usePlaybackState(params: PlaybackStateParams) {
   const activeVideoSrc = resolvedPreviewUrl && activePreviewKind === "video" ? resolvedPreviewUrl : null;
   const audioPreviewSrc = activePreviewKind === "audio" ? resolvedPreviewUrl : null;
   const showPreviewSpinner = previewLoading || Boolean(activeMedia?.isResolvingStream);
+
+  // Check if audio fallback is available for YouTube media
+  const hasAudioFallback =
+    activeMedia?.externalSource?.type === "youtube" &&
+    (activeMedia.localPath || (activeMedia.source === "job" && activeMedia.jobId));
+
+  // Only show "YouTube preview unavailable" if there's NO audio fallback
+  // When audio fallback exists, we gracefully show audio preview instead
   const youtubeUnavailableReason =
-    activeMedia?.externalSource?.type === "youtube" && !activeMedia?.isResolvingStream
+    activeMedia?.externalSource?.type === "youtube" && !activeMedia?.isResolvingStream && !hasAudioFallback
       ? !isOnline
         ? "You're offline. Connect to the internet to load the YouTube preview."
         : activeMedia.streamError || null
@@ -1092,12 +1109,25 @@ export function usePlaybackState(params: PlaybackStateParams) {
     if (!clipTimeline.length && !activeMedia) {
       return;
     }
-    if (activeMedia?.externalSource?.type === "youtube" && (activeMedia.streamError || !resolvedPreviewUrl)) {
+    // For YouTube: only resolve if there's no stream URL AND no error.
+    // If there's an error (video failed to load), just play audio fallback instead of re-resolving.
+    const hasYoutubeAudioFallback =
+      activeMedia?.externalSource?.type === "youtube" &&
+      (activeMedia.localPath || (activeMedia.source === "job" && activeMedia.jobId));
+    const shouldResolveYoutube =
+      activeMedia?.externalSource?.type === "youtube" &&
+      !resolvedPreviewUrl &&
+      !activeMedia.streamError;
+    if (shouldResolveYoutube) {
       pendingPlayRef.current = true;
       pendingPlayTargetRef.current = activeMedia?.id ?? null;
       setPlayback((prev) => ({ ...prev, isPlaying: true }));
       void resolveYoutubeStreamForMedia(activeMedia);
       return;
+    }
+    // If YouTube video failed but has audio fallback, just play the audio
+    if (activeMedia?.externalSource?.type === "youtube" && activeMedia.streamError && hasYoutubeAudioFallback) {
+      // Fall through to normal playback - will use audio
     }
     if (clipTimeline.length) {
       const range = timelineRanges.find(

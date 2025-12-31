@@ -29,6 +29,11 @@ export function useMediaState(params: MediaStateParams) {
   const getPreviewKind = useCallback(
     (media?: MediaItem | null) => {
       if (!media) return null;
+      // During YouTube stream resolution, return "video" so video element is rendered
+      // and ready to load when resolution completes
+      if (media.externalSource?.type === "youtube" && media.isResolvingStream) {
+        return "video";
+      }
       if (media.externalSource?.type === "youtube" && (media.streamError || !isOnline)) {
         return media.kind;
       }

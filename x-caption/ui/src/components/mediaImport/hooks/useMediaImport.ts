@@ -168,6 +168,8 @@ export function useMediaImport(params: {
           onOpenLeftDrawer();
         }
         const displayName = startPayload?.source?.title?.trim() || undefined;
+        // Don't use backend's stream_url - it may be rate-limited/stale.
+        // Let frontend auto-resolve to get a fresh working URL.
         addLocalPathItem({
           path: file.path,
           name: file.name,
@@ -175,12 +177,12 @@ export function useMediaImport(params: {
           mime: file.mime ?? null,
           displayName,
           durationSec: typeof startPayload?.duration_sec === "number" ? startPayload.duration_sec : null,
-          previewUrl: startPayload?.stream_url ?? null,
-          streamUrl: startPayload?.stream_url ?? null,
+          previewUrl: null,
+          streamUrl: null,
           externalSource: {
             type: "youtube",
             url: startPayload?.source?.url ?? url,
-            streamUrl: startPayload?.stream_url ?? null,
+            streamUrl: null,
             title: startPayload?.source?.title ?? null,
             id: startPayload?.source?.id ?? null,
             thumbnailUrl: startPayload?.thumbnail_url ?? null
@@ -363,6 +365,8 @@ export function useMediaImport(params: {
             onOpenLeftDrawer();
           }
           const displayName = status?.source?.title?.trim() || undefined;
+          // Don't use backend's stream_url - it may be rate-limited/stale.
+          // Let frontend auto-resolve to get a fresh working URL.
           addLocalPathItem({
             path: file.path,
             name: file.name,
@@ -370,12 +374,12 @@ export function useMediaImport(params: {
             mime: file.mime ?? null,
             displayName,
             durationSec: typeof status?.duration_sec === "number" ? status.duration_sec : null,
-            previewUrl: status?.stream_url ?? null,
-            streamUrl: status?.stream_url ?? null,
+            previewUrl: null,
+            streamUrl: null,
             externalSource: {
               type: "youtube",
               url: status?.source?.url ?? youtube.url.trim(),
-              streamUrl: status?.stream_url ?? null,
+              streamUrl: null,
               title: status?.source?.title ?? null,
               id: status?.source?.id ?? null,
               thumbnailUrl: status?.thumbnail_url ?? null
