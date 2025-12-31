@@ -13,14 +13,16 @@
     "title": "太空級私隱的 AI 工作流程。",
     "subtitle": "字幕、會議紀錄、程式碼入口，全部本地化部署。",
     "primary": "免費下載",
-    "secondary": "查看價格"
+    "secondary": "查看價格",
+    "compare": "對比方案"
   },
   "products": {
     "label": "產品",
     "title": "為本地 AI 團隊打造。",
     "captionDesc": "廣東話字幕、繁體輸出、講者識別，支援 SRT 匯出。",
     "minutesDesc": "會議紀錄、講者識別、清晰逐字稿與 AI 摘要。",
-    "codeDesc": "低成本 Claude Code 或 Codex 入口，團隊控制與用量審計。"
+    "codeDesc": "低成本 Claude Code 或 Codex 入口，團隊控制與用量審計。",
+    "comingSoon": "即將推出"
   },
   "pricing": {
     "label": "升級方案",

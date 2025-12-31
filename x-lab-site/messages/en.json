@@ -13,14 +13,16 @@
     "title": "Space-grade privacy for AI workflows.",
     "subtitle": "Captions. Meeting minutes. Code access. All on-prem.",
     "primary": "Download free",
-    "secondary": "View pricing"
+    "secondary": "View pricing",
+    "compare": "Compare plans"
   },
   "products": {
     "label": "Products",
     "title": "Designed for local AI teams.",
     "captionDesc": "Cantonese captions with Traditional Chinese output, speaker-aware transcripts, and SRT export.",
     "minutesDesc": "Meeting minutes with speaker ID, clean transcripts, and AI summaries.",
-    "codeDesc": "Low-cost Claude Code or Codex access with team controls and audit-ready usage."
+    "codeDesc": "Low-cost Claude Code or Codex access with team controls and audit-ready usage.",
+    "comingSoon": "Coming Soon"
   },
   "pricing": {
     "label": "Get Premium",
