@@ -10,8 +10,9 @@ export function useExportHandlers(params: {
   notify: (message: string, type?: "info" | "success" | "error") => void;
   filename: string | null | undefined;
   onExportComplete?: () => void;
+  displayName?: string | null;
 }) {
-  const { exportLanguage, exportSegments, notify, filename, onExportComplete } = params;
+  const { exportLanguage, exportSegments, notify, filename, onExportComplete, displayName } = params;
   const [isExporting, setIsExporting] = useState(false);
 
   const saveTextFile = useCallback(async (fileName: string, content: string) => {
@@ -68,14 +69,14 @@ export function useExportHandlers(params: {
         return;
       }
 
-      const suffix = payload.suffix || "_original";
       const content = payload.content || "";
       if (!content.trim()) {
         notify("Please select a job with caption to continue.", "info");
         return;
       }
 
-      const fileName = `${baseFilename(filename)}_transcript${suffix}.txt`;
+      const baseName = baseFilename(displayName || filename || "transcript");
+      const fileName = `${baseName}.txt`;
       const response = await saveTextFile(fileName, content);
       if (response && response.success) {
         onExportComplete?.();
@@ -90,7 +91,7 @@ export function useExportHandlers(params: {
     } finally {
       setIsExporting(false);
     }
-  }, [buildPayload, exportLanguage, exportSegments.length, filename, notify, onExportComplete, saveTextFile]);
+  }, [buildPayload, exportLanguage, exportSegments.length, displayName, filename, notify, onExportComplete, saveTextFile]);
 
   const handleExportSrt = useCallback(async () => {
     if (!exportSegments.length) {
@@ -115,7 +116,8 @@ export function useExportHandlers(params: {
         return;
       }
 
-      const fileName = `${baseFilename(filename)}_captions.srt`;
+      const baseName = baseFilename(displayName || filename || "captions");
+      const fileName = `${baseName}.srt`;
       const response = await saveTextFile(fileName, content);
       if (response && response.success) {
         onExportComplete?.();
@@ -130,7 +132,7 @@ export function useExportHandlers(params: {
     } finally {
       setIsExporting(false);
     }
-  }, [buildPayload, exportLanguage, exportSegments.length, filename, notify, onExportComplete, saveTextFile]);
+  }, [buildPayload, exportLanguage, exportSegments.length, displayName, filename, notify, onExportComplete, saveTextFile]);
 
   return {
     isExporting,

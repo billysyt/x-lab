@@ -80,7 +80,8 @@ export function useEditorModel() {
     exportSegments: segmentsState.exportSegments,
     notify: uiActions.notify,
     filename: selectedJob?.filename,
-    onExportComplete: () => uiActions.setShowExportModal(false)
+    onExportComplete: () => uiActions.setShowExportModal(false),
+    displayName: selectedJob?.displayName ?? null
   });
 
   const { playbackState, timelineViewState } = useEditorPlaybackPipeline({

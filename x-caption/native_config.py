@@ -228,7 +228,6 @@ def get_logs_dir() -> Path:
     """Get the logs directory used for runtime diagnostics"""
     data_dir = get_data_dir()
     logs_dir = data_dir / 'logs'
-    logs_dir.mkdir(parents=True, exist_ok=True)
     return logs_dir
 
 
@@ -266,13 +265,11 @@ def setup_environment():
     os.environ['XCAPTION_MODELS_DIR'] = str(get_models_dir())
     os.environ['XCAPTION_TRANSCRIPTIONS_DIR'] = str(get_transcriptions_dir())
     os.environ['XCAPTION_UPLOADS_DIR'] = str(get_uploads_dir())
-    os.environ['XCAPTION_LOGS_DIR'] = str(get_logs_dir())
     os.environ['XSUB_BUNDLE_DIR'] = os.environ['XCAPTION_BUNDLE_DIR']
     os.environ['XSUB_DATA_DIR'] = os.environ['XCAPTION_DATA_DIR']
     os.environ['XSUB_MODELS_DIR'] = os.environ['XCAPTION_MODELS_DIR']
     os.environ['XSUB_TRANSCRIPTIONS_DIR'] = os.environ['XCAPTION_TRANSCRIPTIONS_DIR']
     os.environ['XSUB_UPLOADS_DIR'] = os.environ['XCAPTION_UPLOADS_DIR']
-    os.environ['XSUB_LOGS_DIR'] = os.environ['XCAPTION_LOGS_DIR']
 
     # Set Python environment variables
     os.environ['PYTHONUNBUFFERED'] = '1'

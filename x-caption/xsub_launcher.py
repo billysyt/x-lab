@@ -10,7 +10,6 @@ import os
 import sys
 import hashlib
 import logging
-import logging.handlers
 import threading
 import time
 import urllib.error
@@ -203,11 +202,7 @@ def _ensure_single_instance():
         _SINGLE_INSTANCE_FILE = file_handle
 # Set up logging
 def _configure_logging():
-    """Configure logging to console and persistent file."""
-    from native_config import get_logs_dir
-
-    log_dir = get_logs_dir()
-    log_file = log_dir / "x-caption.log"
+    """Configure logging to console only."""
 
     formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -228,17 +223,7 @@ def _configure_logging():
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
 
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_file,
-        maxBytes=5 * 1024 * 1024,
-        backupCount=3,
-        encoding="utf-8",
-    )
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(formatter)
-
     root_logger.addHandler(console_handler)
-    root_logger.addHandler(file_handler)
     root_logger._xcaption_configured = True
 
 _configure_logging()
@@ -1162,8 +1147,6 @@ def show_running_info(port: int = 11440):
 
 def main():
     """Main application entry point."""
-    from native_config import get_logs_dir
-
     try:
         _ensure_single_instance()
     except RuntimeError as instance_error:
@@ -1176,11 +1159,6 @@ def main():
         else:
             print(str(instance_error))
         return
-
-    logs_dir = get_logs_dir()
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    log_file_path = logs_dir / "crash_report.json"
-    error_log_path = logs_dir / "error.log"
 
     try:
         print_banner()
@@ -1218,35 +1196,6 @@ def main():
 
     except Exception as exc:
         import traceback
-        import json
-        from datetime import datetime
-
-        # Create crash report
-        crash_report = {
-            'timestamp': datetime.now().isoformat(),
-            'error_type': type(exc).__name__,
-            'error_message': str(exc),
-            'traceback': traceback.format_exc(),
-            'python_version': sys.version,
-            'platform': sys.platform,
-            'frozen': getattr(sys, 'frozen', False),
-            'cwd': os.getcwd()
-        }
-
-        try:
-            with open(log_file_path, 'w', encoding="utf-8") as f:
-                json.dump(crash_report, f, indent=2)
-            logger.error(f"Crash report saved: {log_file_path}")
-        except Exception as e:
-            logger.error(f"Failed to write crash report: {e}")
-
-        try:
-            with open(error_log_path, 'a', encoding="utf-8") as f:
-                f.write(f"{datetime.now().isoformat()} - {type(exc).__name__}: {exc}\n")
-                f.write(traceback.format_exc())
-                f.write("\n")
-        except Exception as e:
-            logger.error(f"Failed to append error log: {e}")
 
         logger.error("Application error: %s", exc, exc_info=True)
         print()
@@ -1256,7 +1205,7 @@ def main():
         print(f"Error: {exc}")
         print(f"Error Type: {type(exc).__name__}")
         print()
-        print(f"Crash report saved to: {log_file_path}")
+        print(traceback.format_exc())
         print()
 
         # Provide helpful suggestions based on common errors
