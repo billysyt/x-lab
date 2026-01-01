@@ -355,7 +355,7 @@ const premiumHtml = `<!doctype html>
         color: var(--muted);
         line-height: 1.6;
       }
-      @media (max-width: 800px) {
+      @media (max-width: 500px) {
         .split {
           grid-template-columns: 1fr;
         }

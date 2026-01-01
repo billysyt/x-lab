@@ -9,7 +9,7 @@ export default function MobilePricingCard({
   freeFeatures,
   premiumFeatures,
   translations,
-  contactPath,
+  premiumPath,
 }: {
   freeFeatures: string[];
   premiumFeatures: string[];
@@ -19,17 +19,25 @@ export default function MobilePricingCard({
     freeDesc: string;
     freeCta: string;
     premiumTag: string;
+    premiumBadge: string;
     premiumPrice: string;
     premiumPriceUnit: string;
     premiumDesc: string;
     premiumCta: string;
   };
-  contactPath: string;
+  premiumPath: string;
 }) {
   const [activePlan, setActivePlan] = useState<PlanType>("premium");
 
   return (
     <div className="relative rounded-[30px] border border-x-accent/40 bg-x-surface-2 p-6 shadow-deep">
+      {/* Badge */}
+      {activePlan === "premium" && (
+        <div className="absolute right-5 top-5 rounded-full border border-x-accent/40 px-3 py-1 text-[0.6rem] uppercase tracking-[0.2em] text-x-accent">
+          {translations.premiumBadge}
+        </div>
+      )}
+
       {/* Segmented Toggle Switch */}
       <div className="mb-5 flex justify-center">
         <div className="relative flex rounded-full border border-x-line bg-x-surface p-1">
@@ -62,8 +70,13 @@ export default function MobilePricingCard({
         </div>
       </div>
 
+      {/* Plan Label */}
+      <div className="text-xs uppercase tracking-[0.3em] text-x-soft">
+        {activePlan === "premium" ? translations.premiumTag : translations.freeTag}
+      </div>
+
       {/* Plan Title/Price */}
-      <div className="transition-all duration-300">
+      <div className="mt-3 transition-all duration-300">
         {activePlan === "premium" ? (
           <div className="flex items-baseline gap-1">
             <h3 className="text-3xl font-semibold">{translations.premiumPrice}</h3>
@@ -93,7 +106,7 @@ export default function MobilePricingCard({
       <div className="mt-6">
         {activePlan === "premium" ? (
           <Link
-            href={contactPath}
+            href={premiumPath}
             className="btn-primary block w-full text-center"
           >
             {translations.premiumCta}

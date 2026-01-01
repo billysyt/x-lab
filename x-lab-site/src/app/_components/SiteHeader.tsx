@@ -303,8 +303,11 @@ export default function SiteHeader() {
                   />
                   <button
                     onClick={() => {
-                      router.push(switchLocale("zh-Hant"));
-                      closeMobileMenu();
+                      // Wait for slider animation to complete before navigating
+                      setTimeout(() => {
+                        router.push(switchLocale("zh-Hant"));
+                        closeMobileMenu();
+                      }, 300);
                     }}
                     className={`relative z-10 flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium transition-colors duration-200 ${
                       locale === "zh-Hant" ? "text-x-accent" : "text-x-muted"
@@ -315,8 +318,11 @@ export default function SiteHeader() {
                   </button>
                   <button
                     onClick={() => {
-                      router.push(switchLocale("en"));
-                      closeMobileMenu();
+                      // Wait for slider animation to complete before navigating
+                      setTimeout(() => {
+                        router.push(switchLocale("en"));
+                        closeMobileMenu();
+                      }, 300);
                     }}
                     className={`relative z-10 flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium transition-colors duration-200 ${
                       locale === "en" ? "text-x-accent" : "text-x-muted"

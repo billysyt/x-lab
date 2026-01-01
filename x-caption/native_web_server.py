@@ -2784,7 +2784,7 @@ def patch_job_handlers():
     native_job_handlers.update_job_progress = new_update_job_progress
 
 
-def start_server(app, port=11220, host='127.0.0.1'):
+def start_server(app, port=11440, host='127.0.0.1'):
     """Start the Flask server"""
     try:
         logger.info(f"Starting web server on {host}:{port}")
@@ -2808,7 +2808,7 @@ if __name__ == '__main__':
 
     # Create and start Flask app
     app = create_app()
-    port = int(os.environ.get('PORT', 11220))
+    port = int(os.environ.get('PORT', 11440))
 
     logger.info(f"Starting native web server on port {port}...")
     logger.info("Serving React UI and WebSocket emulation")

@@ -49,6 +49,7 @@
     ],
     "freeCta": "已選擇",
     "premiumTag": "升級",
+    "premiumBadge": "無需信用卡",
     "premiumPrice": "$19",
     "premiumPriceUnit": "USD",
     "premiumDesc": "優先體驗我們產品",
@@ -380,7 +381,7 @@
     "step1": {
       "title": "發送機器碼",
       "desc": "在應用程式中找到你的機器碼並發送給我們",
-      "instruction": "請在 X-Caption 或 X-Minutes 應用程式中找到「機器碼」，截圖後通過 WhatsApp 或 WeChat 發送給我們。",
+      "instruction": "請在 X-Caption 或 X-Minutes 應用程式中找到「機器碼」，複制後通過 WhatsApp 或 WeChat 發送給我們。",
       "imagePlaceholder": "機器碼位置截圖"
     },
     "step2": {
@@ -398,7 +399,7 @@
       "instruction": "我們確認付款後會發送授權碼給你。請在應用程式中輸入授權碼以啟動 Premium 功能。",
       "imagePlaceholder": "啟動位置截圖",
       "tipTitle": "啟動提示",
-      "tipDesc": "授權碼綁定單一設備，如需更換設備請聯絡我們協助處理。"
+      "tipDesc": "授權碼綁定單一設備，如需更換設備必需重新訂閱。"
     },
     "helpTitle": "需要幫助？",
     "helpDesc": "如有任何問題，歡迎隨時聯絡我們的客服團隊",

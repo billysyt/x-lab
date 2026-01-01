@@ -78,25 +78,6 @@ export function OpenMediaModal({
                 </div>
               </div>
             </button>
-            <button
-              className={cn(
-                "group w-full rounded-xl px-4 py-3 text-left transition",
-                isImporting ? "cursor-not-allowed opacity-50" : "hover:bg-[#151515]"
-              )}
-              onClick={onOpenInternetModal}
-              type="button"
-              disabled={isImporting}
-            >
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 items-center justify-center text-[#60a5fa]">
-                  <AppIcon name="globe" className="text-[18px]" />
-                </div>
-                <div className="flex-1">
-                  <div className="text-[12px] font-semibold text-slate-100">From Internet</div>
-                  <p className="mt-1 text-[11px] text-slate-400">Auto-detect and import from any video site.</p>
-                </div>
-              </div>
-            </button>
           </div>
           <div className="mt-5 flex items-center justify-end gap-2">
             <button

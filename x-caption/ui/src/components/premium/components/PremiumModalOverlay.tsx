@@ -64,7 +64,7 @@ export function PremiumModalOverlay({
                 ref={premiumWebviewRef}
                 title="Premium Webview"
                 src={`/premium/webview?url=${encodeURIComponent(
-                  (import.meta as any)?.env?.VITE_PREMIUM_PAGE_URL
+                  import.meta.env.VITE_PREMIUM_PAGE_URL
                 )}`}
                 className="h-full w-full border-0 bg-black"
                 onLoad={onPremiumWebviewLoad}

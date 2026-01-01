@@ -382,7 +382,7 @@ def start_worker_threads():
     return worker
 
 
-def start_web_server(port: int = 11220):
+def start_web_server(port: int = 11440):
     """Start the web server in a background thread."""
     from native_web_server import create_app, start_server
 
@@ -407,7 +407,7 @@ def start_web_server(port: int = 11220):
     server_thread.start()
 
     # Wait for server to start
-    time.sleep(2)
+    time.sleep(0.5)
 
     print("[OK] Web server started")
     print()
@@ -415,7 +415,7 @@ def start_web_server(port: int = 11220):
     return server_thread
 
 
-def open_browser(port: int = 11220, width: int = 1480, height: int = 900) -> str:
+def open_browser(port: int = 11440, width: int = 1480, height: int = 900) -> str:
     """Open native window with embedded Chromium, falling back to system browser."""
     from native_config import VERSION
 
@@ -464,24 +464,12 @@ def open_browser(port: int = 11220, width: int = 1480, height: int = 900) -> str
       border-top-color: #4dabf7;
       border-radius: 50%;
       animation: spin 0.9s linear infinite;
-      margin-bottom: 24px;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-    p {
-      margin: 6px 0;
-      line-height: 1.45;
-      max-width: 420px;
-    }
-    .hint {
-      font-size: 12px;
-      opacity: 0.7;
-    }
   </style>
 </head>
 <body>
   <div class="spinner"></div>
-  <p>Starting X-Caption services…</p>
-  <p class="hint">Large speech models are loading. This can take up to a minute on first launch.</p>
 </body>
 </html>
 """
@@ -1080,7 +1068,7 @@ def open_browser(port: int = 11220, width: int = 1480, height: int = 900) -> str
     return "fallback"
 
 
-def wait_for_server(port: int = 11220, timeout: float = 30.0) -> bool:
+def wait_for_server(port: int = 11440, timeout: float = 10.0) -> bool:
     """Wait for the HTTP server health endpoint to become available."""
     health_url = f"http://127.0.0.1:{port}/health"
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -1102,7 +1090,7 @@ def wait_for_server(port: int = 11220, timeout: float = 30.0) -> bool:
         if not printed and time.time() - start > 1.5:
             print("[WEB] Still starting up... heavy libraries are loading, please wait.")
             printed = True
-        time.sleep(0.5)
+        time.sleep(0.2)
 
     print("[WEB] Server is taking longer than expected but will continue starting in the background.")
     print(f"      You can periodically refresh {health_url} to check availability.")
@@ -1141,7 +1129,7 @@ def wait_for_url(url: str, timeout: float = 30.0) -> bool:
     return False
 
 
-def show_running_info(port: int = 11220):
+def show_running_info(port: int = 11440):
     """Show information about the running application."""
     dev_url = os.environ.get("XCAPTION_UI_DEV_URL") or os.environ.get("XSUB_UI_DEV_URL")
     lines = [
@@ -1201,7 +1189,7 @@ def main():
         warmup_thread.start()
         start_worker_threads()
 
-        port = int(os.environ.get("PORT", 11220))
+        port = int(os.environ.get("PORT", 11440))
         start_web_server(port)
         show_running_info(port)
 

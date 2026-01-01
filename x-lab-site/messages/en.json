@@ -49,6 +49,7 @@
     ],
     "freeCta": "Selected",
     "premiumTag": "Upgrade",
+    "premiumBadge": "No credit card required",
     "premiumPrice": "$19",
     "premiumPriceUnit": "USD",
     "premiumDesc": "Priority access to our products",
@@ -380,7 +381,7 @@
     "step1": {
       "title": "Send Machine Code",
       "desc": "Find your machine code in the app and send it to us",
-      "instruction": "Please find the \"Machine Code\" in X-Caption or X-Minutes app, take a screenshot and send it to us via WhatsApp or WeChat.",
+      "instruction": "Please find the \"Machine Code\" in X-Caption or X-Minutes app, copy it and send it to us via WhatsApp or WeChat.",
       "imagePlaceholder": "Machine code location screenshot"
     },
     "step2": {
@@ -398,7 +399,7 @@
       "instruction": "After we confirm your payment, we will send you a license key. Please enter the key in the app to activate Premium features.",
       "imagePlaceholder": "Activation location screenshot",
       "tipTitle": "Activation Tip",
-      "tipDesc": "The license key is bound to a single device. Please contact us if you need to switch devices."
+      "tipDesc": "The license key is bound to a single device. You will need to resubscribe if you change devices."
     },
     "helpTitle": "Need Help?",
     "helpDesc": "If you have any questions, feel free to contact our support team",

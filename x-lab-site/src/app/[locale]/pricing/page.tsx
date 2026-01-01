@@ -39,12 +39,13 @@ export default async function PricingPage({
               freeDesc: t("pricing.freeDesc"),
               freeCta: t("pricing.freeCta"),
               premiumTag: t("pricing.premiumTag"),
+              premiumBadge: t("pricing.premiumBadge"),
               premiumPrice: t("pricing.premiumPrice"),
               premiumPriceUnit: t("pricing.premiumPriceUnit"),
               premiumDesc: t("pricing.premiumDesc"),
               premiumCta: t("pricing.premiumCta"),
             }}
-            contactPath={withLocale("/contact")}
+            premiumPath={withLocale("/premium")}
           />
 
           {/* Enterprise Card for Mobile */}
@@ -103,9 +104,12 @@ export default async function PricingPage({
           {/* Premium Plan */}
           <div className="relative flex flex-col rounded-[30px] border border-x-accent/40 bg-x-surface-2 p-8 shadow-deep lg:-translate-y-3">
             <div className="absolute right-6 top-6 rounded-full border border-x-accent/40 px-3 py-1 text-[0.65rem] uppercase tracking-[0.25em] text-x-accent">
+              {t("pricing.premiumBadge")}
+            </div>
+            <div className="text-xs uppercase tracking-[0.3em] text-x-soft">
               {t("pricing.premiumTag")}
             </div>
-            <div className="flex items-baseline gap-1">
+            <div className="mt-3 flex items-baseline gap-1">
               <h3 className="text-3xl font-semibold">{t("pricing.premiumPrice")}</h3>
               <span className="text-sm text-x-soft">{t("pricing.premiumPriceUnit")}</span>
             </div>
@@ -120,7 +124,7 @@ export default async function PricingPage({
             </div>
             <div className="mt-6">
               <Link
-                href={withLocale("/contact")}
+                href={withLocale("/premium")}
                 className="btn-primary block w-full text-center"
               >
                 {t("pricing.premiumCta")}
