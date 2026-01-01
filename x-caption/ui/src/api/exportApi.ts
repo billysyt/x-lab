@@ -1,6 +1,6 @@
 import { api } from "./baseApi";
 import { request } from "./request";
-import type { ConvertChineseResponse } from "../types";
+import type { ConvertChineseResponse, ExportResponse, ExportSegmentPayload, ExportLanguage } from "../types";
 
 export const exportApi = api.injectEndpoints({
   endpoints: (build) => ({
@@ -31,4 +31,34 @@ export async function apiConvertChinese(args: {
     return payload.converted_text;
   }
   throw new Error(payload?.error || "Chinese conversion failed");
+}
+
+export async function apiExportTranscript(args: {
+  segments: ExportSegmentPayload[];
+  exportLanguage: ExportLanguage | string;
+}): Promise<ExportResponse> {
+  return request<ExportResponse>({
+    url: "/export/transcript",
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      segments: args.segments,
+      export_language: args.exportLanguage
+    })
+  });
+}
+
+export async function apiExportSrt(args: {
+  segments: ExportSegmentPayload[];
+  exportLanguage: ExportLanguage | string;
+}): Promise<ExportResponse> {
+  return request<ExportResponse>({
+    url: "/export/srt",
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      segments: args.segments,
+      export_language: args.exportLanguage
+    })
+  });
 }

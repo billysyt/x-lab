@@ -1,17 +1,17 @@
 import { useCallback, useState } from "react";
 import type { ExportLanguage, TranscriptSegment } from "../../../types";
-import { apiConvertChinese } from "../../../api/exportApi";
+import { apiExportSrt, apiExportTranscript } from "../../../api/exportApi";
 import { baseFilename } from "../../../lib/format";
-import { formatSrtTimestamp } from "../../../lib/srt";
+import type { ExportSegmentPayload } from "../../../types";
 
 export function useExportHandlers(params: {
   exportLanguage: ExportLanguage;
   exportSegments: TranscriptSegment[];
-  openCcConverter: ((value: string) => string) | null;
   notify: (message: string, type?: "info" | "success" | "error") => void;
   filename: string | null | undefined;
+  onExportComplete?: () => void;
 }) {
-  const { exportLanguage, exportSegments, openCcConverter, notify, filename } = params;
+  const { exportLanguage, exportSegments, notify, filename, onExportComplete } = params;
   const [isExporting, setIsExporting] = useState(false);
 
   const saveTextFile = useCallback(async (fileName: string, content: string) => {
@@ -39,105 +39,98 @@ export function useExportHandlers(params: {
     return { success: true };
   }, []);
 
+  const buildPayload = useCallback(
+    (): ExportSegmentPayload[] =>
+      exportSegments.map((segment) => ({
+        id: segment.id,
+        start: segment.start,
+        end: segment.end,
+        text: segment.text ?? null,
+        originalText: segment.originalText ?? null
+      })),
+    [exportSegments]
+  );
+
   const handleExportTranscript = useCallback(async () => {
     if (!exportSegments.length) {
       notify("Please select a job with caption to continue.", "info");
       return;
     }
 
-    const rawText = exportSegments
-      .map((segment) => String(segment.originalText ?? segment.text ?? "").trim())
-      .filter(Boolean)
-      .join("\n");
-
-    if (!rawText) {
-      notify("Please select a job with caption to continue.", "info");
-      return;
-    }
-
-    const fallback = { text: rawText, suffix: "_original" };
-    let converted = fallback;
-
     setIsExporting(true);
     try {
-      try {
-        if (exportLanguage === "traditional") {
-          const convertedText = openCcConverter
-            ? openCcConverter(rawText)
-            : await apiConvertChinese({
-                text: rawText,
-                target: "traditional"
-              });
-          converted = { text: convertedText, suffix: "_繁體中文" };
-        } else if (exportLanguage === "simplified") {
-          const convertedText = openCcConverter
-            ? openCcConverter(rawText)
-            : await apiConvertChinese({
-                text: rawText,
-                target: "simplified"
-              });
-          converted = { text: convertedText, suffix: "_简体中文" };
-        }
-      } catch {
-        converted = fallback;
+      const payload = await apiExportTranscript({
+        segments: buildPayload(),
+        exportLanguage
+      });
+      if (!payload || payload.success === false) {
+        notify(payload?.error || "Export failed.", "error");
+        return;
       }
 
-      const fileName = `${baseFilename(filename)}_transcript${converted.suffix}.txt`;
-      const response = await saveTextFile(fileName, converted.text);
+      const suffix = payload.suffix || "_original";
+      const content = payload.content || "";
+      if (!content.trim()) {
+        notify("Please select a job with caption to continue.", "info");
+        return;
+      }
+
+      const fileName = `${baseFilename(filename)}_transcript${suffix}.txt`;
+      const response = await saveTextFile(fileName, content);
       if (response && response.success) {
+        onExportComplete?.();
         return;
       }
       if (response && response.cancelled) {
         return;
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      notify(message || "Export failed.", "error");
     } finally {
       setIsExporting(false);
     }
-  }, [exportLanguage, exportSegments, notify, openCcConverter, saveTextFile, filename]);
+  }, [buildPayload, exportLanguage, exportSegments.length, filename, notify, onExportComplete, saveTextFile]);
 
   const handleExportSrt = useCallback(async () => {
     if (!exportSegments.length) {
       notify("Please select a job with caption to continue.", "info");
       return;
     }
-    const content = exportSegments
-      .map((segment, index) => {
-        const rawText = String(segment.originalText ?? segment.text ?? "").trim();
-        if (!rawText) return null;
-        let text = rawText;
-        if (openCcConverter) {
-          try {
-            text = openCcConverter(rawText);
-          } catch {
-            text = rawText;
-          }
-        }
-        const start = formatSrtTimestamp(Number(segment.start ?? 0));
-        const end = formatSrtTimestamp(Number(segment.end ?? 0));
-        return `${index + 1}\n${start} --> ${end}\n${text}\n`;
-      })
-      .filter(Boolean)
-      .join("\n");
-
-    if (!content.trim()) {
-      notify("Please select a job with caption to continue.", "info");
-      return;
-    }
 
     setIsExporting(true);
     try {
+      const payload = await apiExportSrt({
+        segments: buildPayload(),
+        exportLanguage
+      });
+      if (!payload || payload.success === false) {
+        notify(payload?.error || "Export failed.", "error");
+        return;
+      }
+
+      const content = payload.content || "";
+      if (!content.trim()) {
+        notify("Please select a job with caption to continue.", "info");
+        return;
+      }
+
       const fileName = `${baseFilename(filename)}_captions.srt`;
       const response = await saveTextFile(fileName, content);
       if (response && response.success) {
+        onExportComplete?.();
         return;
       }
       if (response && response.cancelled) {
         return;
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      notify(message || "Export failed.", "error");
     } finally {
       setIsExporting(false);
     }
-  }, [exportSegments, notify, openCcConverter, saveTextFile, filename]);
+  }, [buildPayload, exportLanguage, exportSegments.length, filename, notify, onExportComplete, saveTextFile]);
 
   return {
     isExporting,

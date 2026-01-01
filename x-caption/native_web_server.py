@@ -15,6 +15,8 @@ import tempfile
 import time
 import shutil
 import mimetypes
+import math
+import random
 import contextlib
 import re
 import subprocess
@@ -65,6 +67,13 @@ from native_job_handlers import (
 )
 from model_manager import get_whisper_model_info, whisper_model_status, download_whisper_model
 from whisper_cpp_runtime import resolve_whisper_model
+from native_premium import check_premium_status
+from native_machine import get_stable_machine_id
+from native_export_limits import (
+    increment_export_usage,
+    MAX_FREE_EXPORTS,
+    LIMIT_REPLACEMENT_MESSAGE,
+)
 
 # Import model warmup event for readiness check
 from native_config import MODEL_WARMUP_EVENT
@@ -1113,6 +1122,92 @@ def convert_chinese_text(text: str, target: str) -> str:
     return converter.convert(str(text))
 
 
+def _format_srt_timestamp(seconds: float) -> str:
+    total_ms = max(0, int(round(float(seconds) * 1000)))
+    hours = total_ms // 3600000
+    minutes = (total_ms % 3600000) // 60000
+    secs = (total_ms % 60000) // 1000
+    ms = total_ms % 1000
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{ms:03d}"
+
+
+def _normalize_export_segments(payload: dict) -> list[dict]:
+    raw_segments = payload.get("segments")
+    if not isinstance(raw_segments, list):
+        return []
+    cleaned = []
+    for segment in raw_segments:
+        if not isinstance(segment, dict):
+            continue
+        raw_text = segment.get("originalText")
+        if not isinstance(raw_text, str) or not raw_text.strip():
+            raw_text = segment.get("text")
+        if not isinstance(raw_text, str):
+            continue
+        text = raw_text.strip()
+        if not text:
+            continue
+        try:
+            start = float(segment.get("start") or 0)
+        except Exception:
+            start = 0.0
+        try:
+            end = float(segment.get("end") or 0)
+        except Exception:
+            end = 0.0
+        cleaned.append({
+            "text": text,
+            "start": start,
+            "end": end,
+        })
+    return cleaned
+
+
+def _convert_export_segments(segments: list[dict], target: str | None) -> tuple[list[dict], str]:
+    if target not in {"simplified", "traditional"}:
+        return segments, "_original"
+    suffix = "_繁體中文" if target == "traditional" else "_简体中文"
+    try:
+        converted = []
+        for segment in segments:
+            text = segment.get("text", "")
+            converted_text = convert_chinese_text(text, target)
+            converted.append({**segment, "text": converted_text})
+        return converted, suffix
+    except Exception:
+        return segments, "_original"
+
+
+def _apply_export_limit(segments: list[dict]) -> list[dict]:
+    if not segments:
+        return segments
+    indices = [idx for idx, segment in enumerate(segments) if str(segment.get("text", "")).strip()]
+    if not indices:
+        return segments
+    replace_count = max(1, int(math.ceil(len(indices) * 0.5)))
+    for idx in random.sample(indices, replace_count):
+        segments[idx] = {**segments[idx], "text": LIMIT_REPLACEMENT_MESSAGE}
+    return segments
+
+
+def _build_transcript_text(segments: list[dict]) -> str:
+    return "\n".join(str(segment.get("text", "")).strip() for segment in segments if str(segment.get("text", "")).strip())
+
+
+def _build_srt_text(segments: list[dict]) -> str:
+    blocks = []
+    index = 1
+    for segment in segments:
+        start = _format_srt_timestamp(segment.get("start", 0))
+        end = _format_srt_timestamp(segment.get("end", 0))
+        text = str(segment.get("text", "")).strip()
+        if not text:
+            continue
+        blocks.append(f"{index}\n{start} --> {end}\n{text}\n")
+        index += 1
+    return "\n".join(blocks).strip()
+
+
 def create_app():
     """Create and configure Flask application"""
 
@@ -1331,6 +1426,82 @@ def create_app():
                 "success": False,
                 "error": "Failed to convert text"
             }), 500
+
+    @app.route('/export/transcript', methods=['POST'])
+    def export_transcript():
+        """Export transcript text with premium verification and quota enforcement."""
+        try:
+            payload = request.get_json(force=True, silent=True) or {}
+            segments = _normalize_export_segments(payload)
+            if not segments:
+                return jsonify({"success": False, "error": "No segments to export."}), 400
+
+            export_language = payload.get("export_language")
+            segments, suffix = _convert_export_segments(segments, export_language)
+
+            machine_id = get_stable_machine_id()
+            premium, _ = check_premium_status(machine_id)
+            remaining = None
+            limited = False
+
+            if not premium:
+                usage = increment_export_usage(machine_id)
+                remaining = usage.get("remaining")
+                limited = bool(usage.get("limited"))
+                if limited:
+                    segments = _apply_export_limit(segments)
+
+            content = _build_transcript_text(segments)
+            return jsonify({
+                "success": True,
+                "content": content,
+                "suffix": suffix,
+                "premium": premium,
+                "remaining": remaining,
+                "limited": limited,
+                "limit": MAX_FREE_EXPORTS,
+            }), 200
+        except Exception as exc:
+            logger.error("Export transcript failed: %s", exc, exc_info=True)
+            return jsonify({"success": False, "error": "Export failed."}), 500
+
+    @app.route('/export/srt', methods=['POST'])
+    def export_srt():
+        """Export SRT captions with premium verification and quota enforcement."""
+        try:
+            payload = request.get_json(force=True, silent=True) or {}
+            segments = _normalize_export_segments(payload)
+            if not segments:
+                return jsonify({"success": False, "error": "No segments to export."}), 400
+
+            export_language = payload.get("export_language")
+            segments, suffix = _convert_export_segments(segments, export_language)
+
+            machine_id = get_stable_machine_id()
+            premium, _ = check_premium_status(machine_id)
+            remaining = None
+            limited = False
+
+            if not premium:
+                usage = increment_export_usage(machine_id)
+                remaining = usage.get("remaining")
+                limited = bool(usage.get("limited"))
+                if limited:
+                    segments = _apply_export_limit(segments)
+
+            content = _build_srt_text(segments)
+            return jsonify({
+                "success": True,
+                "content": content,
+                "suffix": suffix,
+                "premium": premium,
+                "remaining": remaining,
+                "limited": limited,
+                "limit": MAX_FREE_EXPORTS,
+            }), 200
+        except Exception as exc:
+            logger.error("Export SRT failed: %s", exc, exc_info=True)
+            return jsonify({"success": False, "error": "Export failed."}), 500
 
     @app.route('/premium/webview', methods=['GET'])
     def premium_webview():

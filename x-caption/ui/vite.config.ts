@@ -32,6 +32,7 @@ export default defineConfig({
       "/ready": "http://127.0.0.1:11440",
       "/history": "http://127.0.0.1:11440",
       "/convert_chinese": "http://127.0.0.1:11440",
+      "/export": "http://127.0.0.1:11440",
       "/api": "http://127.0.0.1:11440",
       "/job": "http://127.0.0.1:11440",
       "/preprocess_audio": "http://127.0.0.1:11440",

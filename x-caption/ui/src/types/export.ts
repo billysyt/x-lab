@@ -5,3 +5,22 @@ export type ConvertChineseResponse = {
   converted_text?: string;
   error?: string;
 };
+
+export type ExportSegmentPayload = {
+  id?: number | string;
+  start?: number | string | null;
+  end?: number | string | null;
+  text?: string | null;
+  originalText?: string | null;
+};
+
+export type ExportResponse = {
+  success?: boolean;
+  content?: string;
+  suffix?: string;
+  premium?: boolean;
+  remaining?: number | null;
+  limited?: boolean;
+  limit?: number;
+  error?: string;
+};

@@ -78,9 +78,9 @@ export function useEditorModel() {
   const exportHandlers = useExportHandlers({
     exportLanguage,
     exportSegments: segmentsState.exportSegments,
-    openCcConverter: segmentsState.openCcConverter,
     notify: uiActions.notify,
-    filename: selectedJob?.filename
+    filename: selectedJob?.filename,
+    onExportComplete: () => uiActions.setShowExportModal(false)
   });
 
   const { playbackState, timelineViewState } = useEditorPlaybackPipeline({
