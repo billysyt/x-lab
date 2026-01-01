@@ -732,7 +732,18 @@ export function useUploadTab(props: UploadTabProps) {
               mediaSource: {
                 type: "youtube",
                 url: args.externalSource.url ?? null,
-                streamUrl: args.externalSource.streamUrl ?? null,
+                streamUrl: null, // Don't persist - will resolve fresh on activation
+                title: args.externalSource.title ?? null,
+                id: args.externalSource.id ?? null,
+                thumbnailUrl: args.externalSource.thumbnailUrl ?? null
+              }
+            }
+          : args.externalSource?.type === "internet"
+          ? {
+              mediaSource: {
+                type: "internet",
+                url: args.externalSource.url ?? null,
+                streamUrl: null, // Don't persist - will resolve fresh on activation
                 title: args.externalSource.title ?? null,
                 id: args.externalSource.id ?? null,
                 thumbnailUrl: args.externalSource.thumbnailUrl ?? null
@@ -829,20 +840,21 @@ export function useUploadTab(props: UploadTabProps) {
         ? {
             type: "internet" as const,
             url: typeof (rawSource as Record<string, unknown>).url === "string" ? (rawSource as Record<string, unknown>).url as string : null,
-            // Internet stream URLs don't expire like YouTube, so use them directly
-            streamUrl: rawStreamUrl,
+            // Don't use persisted stream URL - it may be the page URL, not actual stream
+            // Always resolve fresh on activation
+            streamUrl: null,
             title: typeof (rawSource as Record<string, unknown>).title === "string" ? (rawSource as Record<string, unknown>).title as string : null,
             id: typeof (rawSource as Record<string, unknown>).id === "string" ? (rawSource as Record<string, unknown>).id as string : null,
             thumbnailUrl: typeof (rawSource as Record<string, unknown>).thumbnailUrl === "string" ? (rawSource as Record<string, unknown>).thumbnailUrl as string : null
           }
         : null;
 
-    // For YouTube: use valid stream URL, otherwise fallback to local audio path
-    // For Internet: use stream URL if available
+    // For YouTube: use valid stream URL, otherwise null (will resolve on activation)
+    // For Internet: always null - will resolve fresh stream URL on activation
     const streamUrl = externalSource?.type === "youtube"
       ? (streamUrlValid ? rawStreamUrl : null)
       : externalSource?.type === "internet"
-      ? rawStreamUrl
+      ? null
       : null;
     const previewUrl = streamUrl ?? (mediaPath ? localToFileUrl(mediaPath as string) : null);
 

@@ -273,6 +273,7 @@ const premiumHtml = `<!doctype html>
         box-shadow: 0 12px 26px rgba(116, 240, 218, 0.22);
         transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
         animation: ctaPulse 2.2s ease-in-out infinite;
+        text-decoration: none;
       }
       .pay-chip:hover {
         transform: translateY(-1px) scale(1.02);
@@ -354,6 +355,14 @@ const premiumHtml = `<!doctype html>
         color: var(--muted);
         line-height: 1.6;
       }
+      @media (max-width: 800px) {
+        .split {
+          grid-template-columns: 1fr;
+        }
+        .qr-wrap {
+          margin-top: 20px;
+        }
+      }
     </style>
   </head>
   <body>
@@ -404,7 +413,14 @@ const premiumHtml = `<!doctype html>
             <div class="section">
               <div class="section-title">Payment</div>
               <div class="pay-row">
-                <button class="pay-chip" type="button">Pay Now</button>
+                <a class="pay-chip" href="${process.env.NEXT_PUBLIC_PREMIUM_URL || 'https://x-lab.hk/zh-Hant/premium'}" target="_blank" rel="noopener noreferrer">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                    <polyline points="15 3 21 3 21 9" />
+                    <line x1="10" y1="14" x2="21" y2="3" />
+                  </svg>
+                  Pay Now
+                </a>
               </div>
             </div>
 
@@ -506,7 +522,10 @@ const premiumHtml = `<!doctype html>
 </html>`;
 
 export async function GET() {
-  return new NextResponse(premiumHtml, {
+  const premiumUrl = process.env.NEXT_PUBLIC_PREMIUM_URL || 'https://x-lab.hk/zh-Hant/premium';
+  const html = premiumHtml.replace('${process.env.NEXT_PUBLIC_PREMIUM_URL || \'https://x-lab.hk/zh-Hant/premium\'}', premiumUrl);
+
+  return new NextResponse(html, {
     status: 200,
     headers: {
       "Content-Type": "text/html; charset=utf-8",

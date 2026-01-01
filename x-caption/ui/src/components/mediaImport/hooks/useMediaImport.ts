@@ -268,9 +268,8 @@ export function useMediaImport(params: {
           onOpenLeftDrawer();
         }
         const displayName = startPayload?.source?.title?.trim() || undefined;
-        // Use backend's stream_url for initial video preview
-        // Frontend will resolve fresh stream URL when needed (similar to YouTube)
-        const streamUrl = typeof startPayload.stream_url === "string" ? startPayload.stream_url : null;
+        // Don't use backend's stream_url - it may be the page URL, not the actual stream.
+        // Let frontend auto-resolve to get a fresh working stream URL.
         await addLocalPathItem({
           path: file.path,
           name: file.name,
@@ -278,12 +277,12 @@ export function useMediaImport(params: {
           mime: file.mime ?? null,
           displayName,
           durationSec: typeof startPayload?.duration_sec === "number" ? startPayload.duration_sec : null,
-          previewUrl: streamUrl,
-          streamUrl: streamUrl,
+          previewUrl: null,
+          streamUrl: null,
           externalSource: {
             type: "internet" as const,
             url: startPayload?.source?.url ?? url,
-            streamUrl: streamUrl,
+            streamUrl: null,
             title: startPayload?.source?.title ?? null,
             id: startPayload?.source?.id ?? null,
             thumbnailUrl: startPayload?.thumbnail_url ?? null
@@ -480,9 +479,8 @@ export function useMediaImport(params: {
             onOpenLeftDrawer();
           }
           const displayName = status?.source?.title?.trim() || undefined;
-          // Use backend's stream_url for initial video preview
-          // Frontend will resolve fresh stream URL when needed (similar to YouTube)
-          const streamUrl = typeof status.stream_url === "string" ? status.stream_url : null;
+          // Don't use backend's stream_url - it may be the page URL, not the actual stream.
+          // Let frontend auto-resolve to get a fresh working stream URL.
           await addLocalPathItem({
             path: file.path,
             name: file.name,
@@ -490,12 +488,12 @@ export function useMediaImport(params: {
             mime: file.mime ?? null,
             displayName,
             durationSec: typeof status?.duration_sec === "number" ? status.duration_sec : null,
-            previewUrl: streamUrl,
-            streamUrl: streamUrl,
+            previewUrl: null,
+            streamUrl: null,
             externalSource: {
               type: "internet" as const,
               url: status?.source?.url ?? internet.url.trim(),
-              streamUrl: streamUrl,
+              streamUrl: null,
               title: status?.source?.title ?? null,
               id: status?.source?.id ?? null,
               thumbnailUrl: status?.thumbnail_url ?? null

@@ -373,5 +373,35 @@
         "content": "If you have any questions, comments, or concerns about this privacy policy, or wish to exercise your data protection rights, please contact us at: hello@x-lab.hk. Our data protection team will carefully handle each inquiry and respond to your request as soon as possible, usually within two business days. We are committed to handling your personal data in a transparent and responsible manner, and welcome your feedback to help us continuously improve our privacy practices."
       }
     ]
+  },
+  "premiumPage": {
+    "title": "Upgrade to Premium",
+    "subtitle": "Follow the steps below to complete your purchase and unlock all premium features",
+    "step1": {
+      "title": "Send Machine Code",
+      "desc": "Find your machine code in the app and send it to us",
+      "instruction": "Please find the \"Machine Code\" in X-Caption or X-Minutes app, take a screenshot and send it to us via WhatsApp or WeChat.",
+      "imagePlaceholder": "Machine code location screenshot"
+    },
+    "step2": {
+      "title": "Choose Payment Method",
+      "desc": "Select one of the following payment methods",
+      "priceNote": "Lifetime license, one-time payment for permanent use",
+      "fps": "Faster Payment",
+      "payme": "PayMe",
+      "alipay": "Alipay HK",
+      "paymentNote": "After payment, please send us a receipt screenshot for verification"
+    },
+    "step3": {
+      "title": "Activate License",
+      "desc": "Enter the license key in the app after receiving it",
+      "instruction": "After we confirm your payment, we will send you a license key. Please enter the key in the app to activate Premium features.",
+      "imagePlaceholder": "Activation location screenshot",
+      "tipTitle": "Activation Tip",
+      "tipDesc": "The license key is bound to a single device. Please contact us if you need to switch devices."
+    },
+    "helpTitle": "Need Help?",
+    "helpDesc": "If you have any questions, feel free to contact our support team",
+    "contactUs": "Contact Us"
   }
 }

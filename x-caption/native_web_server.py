@@ -511,7 +511,8 @@ def _resolve_internet_stream(url: str) -> Dict[str, Any]:
         raise RuntimeError("Internet import requires yt-dlp. Please install the dependency.") from exc
 
     stream_opts = {
-        "format": "best[ext=mp4][acodec!=none][vcodec!=none]/best[acodec!=none][vcodec!=none]/best",
+        # No format specified - let yt-dlp automatically select the best available format
+        # For sites with separate video/audio (like Bilibili), yt-dlp will handle merging
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
@@ -538,8 +539,26 @@ def _resolve_internet_stream(url: str) -> Dict[str, Any]:
         if not stream_info:
             raise RuntimeError("No playable entries found.")
 
+    # Try to get the stream URL - handle cases where format merging returns multiple URLs
     stream_url = stream_info.get("url")
+
+    # If no direct URL, check requested_formats (for merged formats)
+    if not stream_url and "requested_formats" in stream_info:
+        # For merged formats, prefer video+audio, fallback to first available
+        formats = stream_info.get("requested_formats", [])
+        for fmt in formats:
+            if fmt.get("vcodec") != "none" and fmt.get("url"):
+                stream_url = fmt["url"]
+                break
+        if not stream_url and formats:
+            stream_url = formats[0].get("url")
+
+    # Last resort: try the manifest_url or any available URL field
     if not stream_url:
+        stream_url = stream_info.get("manifest_url") or stream_info.get("fragment_base_url")
+
+    if not stream_url:
+        logger.error("No stream URL found. Available keys: %s", list(stream_info.keys())[:20])
         raise RuntimeError("Failed to resolve stream URL.")
 
     title = (stream_info.get("title") or "internet_stream").strip()
@@ -2296,6 +2315,85 @@ def create_app():
         except Exception as exc:
             logger.error("Internet stream resolve failed: %s", exc, exc_info=True)
             return jsonify({"error": f"Failed to resolve stream: {exc}"}), 500
+
+    @app.route('/proxy/stream', methods=['GET'])
+    def proxy_stream():
+        """Proxy external video streams to bypass CORS restrictions."""
+        try:
+            stream_url = request.args.get('url')
+            if not stream_url:
+                return jsonify({"error": "URL parameter is required"}), 400
+
+            # Validate URL
+            try:
+                parsed = urlparse(stream_url)
+                if not parsed.scheme or not parsed.netloc:
+                    return jsonify({"error": "Invalid URL"}), 400
+            except Exception:
+                return jsonify({"error": "Invalid URL"}), 400
+
+            # Create request with headers to mimic browser
+            # Special handling for Bilibili CDN - they require Referer from bilibili.com
+            referer = f"{parsed.scheme}://{parsed.netloc}/"
+            if 'bilivideo.com' in parsed.netloc:
+                referer = 'https://www.bilibili.com/'
+
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': referer,
+                'Accept': '*/*',
+                'Accept-Encoding': 'identity',  # Don't use gzip/deflate for streaming
+            }
+
+            # Support range requests for video seeking
+            range_header = request.headers.get('Range')
+            if range_header:
+                headers['Range'] = range_header
+
+            req = urllib.request.Request(stream_url, headers=headers)
+
+            with urllib.request.urlopen(req, timeout=30) as response:
+                # Get content type and length
+                content_type = response.headers.get('Content-Type', 'video/mp4')
+                content_length = response.headers.get('Content-Length')
+
+                # Build response headers
+                response_headers = {
+                    'Content-Type': content_type,
+                    'Accept-Ranges': 'bytes',
+                    'Access-Control-Allow-Origin': '*',
+                }
+
+                if content_length:
+                    response_headers['Content-Length'] = content_length
+
+                # Handle range requests
+                status_code = 200
+                if range_header and response.status == 206:
+                    status_code = 206
+                    content_range = response.headers.get('Content-Range')
+                    if content_range:
+                        response_headers['Content-Range'] = content_range
+
+                # Stream the response
+                def generate():
+                    while True:
+                        chunk = response.read(8192)
+                        if not chunk:
+                            break
+                        yield chunk
+
+                return Response(generate(), status=status_code, headers=response_headers)
+
+        except urllib.error.HTTPError as e:
+            logger.error(f"Proxy stream HTTP error: {e.code} {e.reason}")
+            return jsonify({"error": f"Failed to fetch stream: {e.code} {e.reason}"}), 502
+        except urllib.error.URLError as e:
+            logger.error(f"Proxy stream URL error: {e.reason}")
+            return jsonify({"error": f"Failed to connect: {e.reason}"}), 502
+        except Exception as exc:
+            logger.error("Proxy stream failed: %s", exc, exc_info=True)
+            return jsonify({"error": f"Proxy failed: {exc}"}), 500
 
     @app.route('/import/youtube/start', methods=['POST'])
     def import_youtube_start():

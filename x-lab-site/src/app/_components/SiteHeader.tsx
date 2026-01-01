@@ -140,9 +140,10 @@ export default function SiteHeader() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
               </button>
+              {/* Invisible bridge to prevent gap issue */}
+              <div className="absolute right-0 top-full h-3 w-full" />
               {/* Dropdown Menu */}
-              <div className="pointer-events-none absolute right-0 top-full z-20 mt-2 w-[180px] translate-y-2 rounded-2xl border border-x-line bg-x-surface p-2 opacity-0 shadow-deep transition-all duration-200 group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100">
-                <div className="absolute -top-2 right-0 h-2 w-full" />
+              <div className="pointer-events-none absolute right-0 top-[calc(100%+8px)] z-20 w-[180px] translate-y-2 rounded-2xl border border-x-line bg-x-surface p-2 opacity-0 shadow-deep transition-all duration-200 group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100">
                 <button
                   onClick={() => router.push(switchLocale("zh-Hant"))}
                   className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-x-muted transition-colors hover:bg-x-surface-2 hover:text-x-text"
@@ -176,23 +177,6 @@ export default function SiteHeader() {
 
           {/* Mobile Actions */}
           <div className="flex items-center gap-2 lg:hidden">
-            {/* Mobile Language Toggle */}
-            <button
-              onClick={handleLocaleSwitch}
-              className="group relative flex h-10 items-center justify-center gap-1 rounded-xl border border-x-line px-3 text-xs font-medium text-x-muted transition hover:border-x-accent/50 hover:bg-x-surface hover:text-x-text overflow-hidden"
-            >
-              <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
-              </svg>
-              <span className="relative h-4 w-6 overflow-hidden">
-                <span className={`absolute inset-0 flex items-center justify-center transition-transform duration-300 ${locale === "zh-Hant" ? "translate-y-0" : "-translate-y-full"}`}>
-                  EN
-                </span>
-                <span className={`absolute inset-0 flex items-center justify-center transition-transform duration-300 ${locale === "en" ? "translate-y-0" : "translate-y-full"}`}>
-                  中
-                </span>
-              </span>
-            </button>
             <Link
               className="btn-primary px-3 py-2 text-xs sm:px-4 sm:text-sm"
               href={withLocale("/#products")}
@@ -302,6 +286,47 @@ export default function SiteHeader() {
               >
                 {t("nav.contact")}
               </Link>
+            </div>
+
+            {/* Language Switcher */}
+            <div className="mt-5 border-t border-x-line pt-5">
+              <span className="px-2 text-[0.65rem] font-semibold uppercase tracking-widest text-x-soft">
+                {t("nav.localeZh") === "繁體中文" ? "語言" : "Language"}
+              </span>
+              <div className="mt-3 px-2">
+                <div className="relative flex rounded-xl border border-x-line bg-x-surface p-1">
+                  {/* Sliding background */}
+                  <div
+                    className={`absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-lg bg-x-accent/15 border border-x-accent/30 transition-all duration-300 ease-out ${
+                      locale === "zh-Hant" ? "left-1" : "left-[calc(50%+2px)]"
+                    }`}
+                  />
+                  <button
+                    onClick={() => {
+                      router.push(switchLocale("zh-Hant"));
+                      closeMobileMenu();
+                    }}
+                    className={`relative z-10 flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium transition-colors duration-200 ${
+                      locale === "zh-Hant" ? "text-x-accent" : "text-x-muted"
+                    }`}
+                  >
+                    <span>🇭🇰</span>
+                    <span>繁中</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      router.push(switchLocale("en"));
+                      closeMobileMenu();
+                    }}
+                    className={`relative z-10 flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium transition-colors duration-200 ${
+                      locale === "en" ? "text-x-accent" : "text-x-muted"
+                    }`}
+                  >
+                    <span>🇺🇸</span>
+                    <span>EN</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 

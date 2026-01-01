@@ -597,19 +597,33 @@ export function usePlaybackState(params: PlaybackStateParams) {
       isOnline
     });
     const toFileUrl = (path: string) => `/media?path=${encodeURIComponent(path)}`;
+    const toProxyUrl = (streamUrl: string) => `/proxy/stream?url=${encodeURIComponent(streamUrl)}`;
     const isExternalSource = activeMedia.externalSource?.type === "youtube" || activeMedia.externalSource?.type === "internet";
+    // For internet imports, use backend proxy to bypass CORS
+    // For YouTube, prefer stream URL unless there's an error or offline
+    const isInternetImport = activeMedia.externalSource?.type === "internet";
     const preferLocalFallback = Boolean(
-      isExternalSource && (activeMedia.streamError || !isOnline)
+      isExternalSource && (activeMedia.streamError || !isOnline) && !isInternetImport
     );
     console.log("[activePreviewUrl Effect] Checking condition:", {
       hasPreviewUrl: Boolean(activeMedia.previewUrl),
       previewUrl: activeMedia.previewUrl,
       isExternalSource,
+      isInternetImport,
       preferLocalFallback,
       streamError: activeMedia.streamError,
       isOnline,
       willEarlyReturn: Boolean(activeMedia.previewUrl && !preferLocalFallback)
     });
+
+    // For internet imports with stream URL, use backend proxy to bypass CORS
+    if (isInternetImport && activeMedia.previewUrl) {
+      const proxiedUrl = toProxyUrl(activeMedia.previewUrl);
+      console.log("[activePreviewUrl Effect] Internet import, using proxy:", proxiedUrl);
+      setActivePreviewUrl(proxiedUrl);
+      return;
+    }
+
     if (activeMedia.previewUrl && !preferLocalFallback) {
       console.log("[activePreviewUrl Effect] Has previewUrl and not preferLocalFallback, setting null");
       setActivePreviewUrl(null);
@@ -660,9 +674,12 @@ export function usePlaybackState(params: PlaybackStateParams) {
     ? `/media?path=${encodeURIComponent(activeMedia.localPath)}`
     : null;
   const isExternalMediaSource = activeMedia?.externalSource?.type === "youtube" || activeMedia?.externalSource?.type === "internet";
+  const isInternetImport = activeMedia?.externalSource?.type === "internet";
   const resolvedPreviewUrl =
     isExternalMediaSource && (activeMedia.streamError || !isOnline)
       ? localPreviewUrl ?? activePreviewUrl ?? activeMedia?.previewUrl ?? null
+      : isInternetImport
+      ? activePreviewUrl // For internet imports, ONLY use proxy URL (never raw stream URL)
       : activeMedia?.previewUrl ?? activePreviewUrl;
 
   useEffect(() => {
