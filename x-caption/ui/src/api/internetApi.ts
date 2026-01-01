@@ -1,8 +1,9 @@
 import { api } from "./baseApi";
 import { request } from "./request";
-import type { YoutubeImportStatus } from "../types";
+import type { YoutubeImportStatus, YoutubeResolveResponse } from "../types";
 
 export type InternetImportStatus = YoutubeImportStatus;
+export type InternetResolveResponse = YoutubeResolveResponse;
 
 export const internetApi = api.injectEndpoints({
   endpoints: (build) => ({
@@ -36,4 +37,13 @@ export async function apiStartInternetImport(url: string): Promise<InternetImpor
 
 export async function apiGetInternetImport(downloadId: string): Promise<InternetImportStatus> {
   return request<InternetImportStatus>(`/import/internet/${downloadId}`);
+}
+
+export async function apiResolveInternetStream(url: string): Promise<InternetResolveResponse> {
+  return request<InternetResolveResponse>({
+    url: "/import/internet/resolve",
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url })
+  });
 }

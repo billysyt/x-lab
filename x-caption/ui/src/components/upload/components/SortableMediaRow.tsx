@@ -28,8 +28,10 @@ export const SortableMediaRow = memo(function SortableMediaRow({
   };
   const isListMode = viewMode === "list";
   const isYoutube = item.externalSource?.type === "youtube";
+  const isInternet = item.externalSource?.type === "internet";
+  const isExternal = isYoutube || isInternet;
   const previewKind = getPreviewKind(item);
-  const fallbackIcon = isYoutube ? "youtube" : previewKind === "video" ? "video" : "volume";
+  const fallbackIcon = isYoutube ? "youtube" : isInternet ? "globe" : previewKind === "video" ? "video" : "volume";
   const displayThumbnail = item.thumbnailUrl ?? item.externalSource?.thumbnailUrl ?? null;
   const displayName = item.displayName ?? item.name;
 
@@ -88,7 +90,7 @@ export const SortableMediaRow = memo(function SortableMediaRow({
             <div
               className={cn(
                 "flex h-7 w-7 items-center justify-center rounded-md bg-[#0f0f10]",
-                isYoutube ? "text-[#ef4444]" : "text-slate-200"
+                isYoutube ? "text-[#ef4444]" : isInternet ? "text-blue-400" : "text-slate-200"
               )}
             >
               <AppIcon name={fallbackIcon} className="text-[13px]" />
@@ -104,12 +106,16 @@ export const SortableMediaRow = memo(function SortableMediaRow({
           </div>
         ) : (
           <div className="flex w-full items-center gap-3">
-            {displayThumbnail && (previewKind === "video" || isYoutube) ? (
+            {displayThumbnail && (previewKind === "video" || isExternal) ? (
               <div className="relative h-10 w-16 overflow-hidden rounded-md bg-[#0f0f10]">
                 <img src={displayThumbnail} alt="" className="h-full w-full object-cover" />
                 {isYoutube ? (
                   <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded bg-black/60">
                     <AppIcon name="youtube" className="text-[9px] text-[#ff0000]" />
+                  </span>
+                ) : isInternet ? (
+                  <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded bg-black/60">
+                    <AppIcon name="globe" className="text-[9px] text-blue-400" />
                   </span>
                 ) : null}
               </div>
@@ -117,7 +123,7 @@ export const SortableMediaRow = memo(function SortableMediaRow({
               <div
                 className={cn(
                   "flex h-10 w-16 items-center justify-center rounded-md bg-[#0f0f10]",
-                  isYoutube ? "text-[#ef4444]" : "text-slate-300"
+                  isYoutube ? "text-[#ef4444]" : isInternet ? "text-blue-400" : "text-slate-300"
                 )}
               >
                 <AppIcon name={fallbackIcon} className="text-[14px]" />

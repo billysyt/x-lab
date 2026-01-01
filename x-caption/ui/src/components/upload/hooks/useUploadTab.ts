@@ -5,6 +5,7 @@ import { useAppDispatch, useAppSelector } from "../../../hooks";
 import { bootstrapJobs, removeJob, setJobOrder, startTranscription, updateJobDisplayName, updateJobUiState } from "../../jobs/jobsSlice";
 import { apiRemoveJob, apiUpsertJobRecord } from "../../../api/jobsApi";
 import { apiResolveYoutubeStream } from "../../../api/youtubeApi";
+import { apiResolveInternetStream } from "../../../api/internetApi";
 import { stripFileExtension } from "../../../lib/utils";
 import type { MediaItem, MediaSourceInfo, UploadTabProps, ContextMenuState, JobPreviewMeta } from "../upload.types";
 import {
@@ -233,6 +234,89 @@ export function useUploadTab(props: UploadTabProps) {
     [dispatch, jobsById, props, setLocalMedia]
   );
 
+  const resolveInternetStream = useCallback(
+    async (item: MediaItem): Promise<MediaItem | null> => {
+      if (item.externalSource?.type !== "internet") return item;
+      const url = item.externalSource.url ?? null;
+      if (!url) {
+        props.notify("Missing URL for this item.", "error");
+        return null;
+      }
+      const markStreamError = (message: string) => {
+        const nextSource: MediaSourceInfo = {
+          type: "internet",
+          url,
+          streamUrl: null,
+          title: item.externalSource?.title ?? null,
+          id: item.externalSource?.id ?? null,
+          thumbnailUrl: item.externalSource?.thumbnailUrl ?? null
+        };
+        const failedItem: MediaItem = {
+          ...item,
+          previewUrl: item.previewUrl ?? null,
+          streamUrl: null,
+          externalSource: nextSource,
+          isResolvingStream: false,
+          streamError: message
+        };
+        if (item.source === "local") {
+          setLocalMedia((prev) => prev.map((entry) => (entry.id === item.id ? failedItem : entry)));
+        }
+        if (item.jobId) {
+          const job = jobsById[item.jobId];
+          const existingUiState =
+            job?.uiState && typeof job.uiState === "object" ? (job.uiState as Record<string, unknown>) : {};
+          const nextUiState = { ...existingUiState, mediaSource: nextSource, mediaSourceError: message };
+          if (job) dispatch(updateJobUiState({ jobId: item.jobId, uiState: nextUiState }));
+          void apiUpsertJobRecord({ job_id: item.jobId, ui_state: nextUiState }).catch(() => undefined);
+        }
+        return failedItem;
+      };
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        return markStreamError("You're offline. Connect to the internet to load the video preview.");
+      }
+      try {
+        const payload = await apiResolveInternetStream(url);
+        const streamUrl = typeof payload.stream_url === "string" ? payload.stream_url : null;
+        const thumbnailUrl = typeof payload.thumbnail_url === "string" ? payload.thumbnail_url : null;
+        if (!streamUrl) throw new Error("Failed to resolve stream.");
+        const nextSource: MediaSourceInfo = {
+          type: "internet",
+          url,
+          streamUrl,
+          title: payload.source?.title ?? item.externalSource.title ?? null,
+          id: payload.source?.id ?? item.externalSource.id ?? null,
+          thumbnailUrl: thumbnailUrl ?? item.externalSource.thumbnailUrl ?? null
+        };
+        const updatedItem: MediaItem = {
+          ...item,
+          previewUrl: streamUrl,
+          streamUrl,
+          externalSource: nextSource,
+          isResolvingStream: false,
+          streamError: null
+        };
+        if (item.source === "local") {
+          setLocalMedia((prev) => prev.map((entry) => (entry.id === item.id ? updatedItem : entry)));
+        }
+        if (item.jobId) {
+          const job = jobsById[item.jobId];
+          const existingUiState =
+            job?.uiState && typeof job.uiState === "object" ? (job.uiState as Record<string, unknown>) : {};
+          const nextUiState = { ...existingUiState, mediaSource: nextSource, mediaSourceError: null };
+          if (job) dispatch(updateJobUiState({ jobId: item.jobId, uiState: nextUiState }));
+          void apiUpsertJobRecord({ job_id: item.jobId, ui_state: nextUiState }).catch(() => undefined);
+        }
+        return updatedItem;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        props.notify(message || "Failed to resolve stream.", "error");
+        return markStreamError("Unable to load video stream. Please try again later.");
+      }
+    },
+    [dispatch, jobsById, props, setLocalMedia]
+  );
+
   const persistMediaOrder = useCallback(
     (order: string[]) => {
       order.forEach((id, index) => {
@@ -328,9 +412,11 @@ export function useUploadTab(props: UploadTabProps) {
     const previewUrl = args.previewUrl ?? args.streamUrl ?? localToFileUrl(args.path);
     const externalThumb = args.externalSource?.thumbnailUrl ?? null;
     const jobId = buildImportedJobId(args.path, args.size);
-    // For YouTube videos, always set kind to "video" regardless of file extension
+    // For YouTube/Internet videos, always set kind to "video" regardless of file extension
     // (backend saves as .mp3 but it's still a video source)
-    const kind = args.externalSource?.type === "youtube" ? "video" : getKind(args.name);
+    const kind = args.externalSource?.type === "youtube" || args.externalSource?.type === "internet"
+      ? "video"
+      : getKind(args.name);
     return {
       id,
       name: args.name,
@@ -709,8 +795,9 @@ export function useUploadTab(props: UploadTabProps) {
     const rawSource =
       job.uiState && typeof job.uiState === "object" ? (job.uiState as Record<string, unknown>).mediaSource : null;
     const isYoutubeJob = rawSource && typeof rawSource === "object" && (rawSource as { type?: string }).type === "youtube";
-    // For YouTube videos, always use "video" kind regardless of file extension
-    const kind = isYoutubeJob ? "video" : getKind(job.filename);
+    const isInternetJob = rawSource && typeof rawSource === "object" && (rawSource as { type?: string }).type === "internet";
+    // For YouTube/Internet videos, always use "video" kind regardless of file extension
+    const kind = isYoutubeJob || isInternetJob ? "video" : getKind(job.filename);
     if (kind === "caption") return null;
     const localMatch = localMedia.find((item) => item.name === job.filename && item.kind === "video");
     const meta = jobPreviewMeta[id];
@@ -738,16 +825,31 @@ export function useUploadTab(props: UploadTabProps) {
             id: typeof (rawSource as Record<string, unknown>).id === "string" ? (rawSource as Record<string, unknown>).id as string : null,
             thumbnailUrl: typeof (rawSource as Record<string, unknown>).thumbnailUrl === "string" ? (rawSource as Record<string, unknown>).thumbnailUrl as string : null
           }
+        : rawSource && typeof rawSource === "object" && (rawSource as { type?: string }).type === "internet"
+        ? {
+            type: "internet" as const,
+            url: typeof (rawSource as Record<string, unknown>).url === "string" ? (rawSource as Record<string, unknown>).url as string : null,
+            // Internet stream URLs don't expire like YouTube, so use them directly
+            streamUrl: rawStreamUrl,
+            title: typeof (rawSource as Record<string, unknown>).title === "string" ? (rawSource as Record<string, unknown>).title as string : null,
+            id: typeof (rawSource as Record<string, unknown>).id === "string" ? (rawSource as Record<string, unknown>).id as string : null,
+            thumbnailUrl: typeof (rawSource as Record<string, unknown>).thumbnailUrl === "string" ? (rawSource as Record<string, unknown>).thumbnailUrl as string : null
+          }
         : null;
 
-    // Use valid stream URL, otherwise fallback to local audio path
-    const streamUrl = streamUrlValid ? rawStreamUrl : null;
+    // For YouTube: use valid stream URL, otherwise fallback to local audio path
+    // For Internet: use stream URL if available
+    const streamUrl = externalSource?.type === "youtube"
+      ? (streamUrlValid ? rawStreamUrl : null)
+      : externalSource?.type === "internet"
+      ? rawStreamUrl
+      : null;
     const previewUrl = streamUrl ?? (mediaPath ? localToFileUrl(mediaPath as string) : null);
 
     // If stream URL is invalid/expired, clear old error so fresh resolution can happen
-    // Also clear error if there's no YouTube source (shouldn't have YouTube-related errors)
+    // Also clear error if there's no external source (shouldn't have external source-related errors)
     const effectiveStreamError =
-      externalSource?.type === "youtube" && streamUrlValid && typeof sourceError === "string"
+      externalSource && streamUrl && typeof sourceError === "string"
         ? sourceError
         : null;
 
@@ -959,6 +1061,8 @@ export function useUploadTab(props: UploadTabProps) {
         return;
       }
       const isYoutube = item.externalSource?.type === "youtube";
+      const isInternet = item.externalSource?.type === "internet";
+
       if (isYoutube) {
         const existingStreamUrl = item.streamUrl ?? item.externalSource?.streamUrl ?? null;
         const streamExpired = existingStreamUrl ? isYoutubeStreamExpired(existingStreamUrl) : false;
@@ -1021,12 +1125,74 @@ export function useUploadTab(props: UploadTabProps) {
         });
         return;
       }
+
+      if (isInternet) {
+        const existingStreamUrl = item.streamUrl ?? item.externalSource?.streamUrl ?? null;
+        const shouldUseExistingStream = Boolean(existingStreamUrl) && !item.streamError;
+        console.log("[handleMediaItemActivate] Internet item:", {
+          itemId: item.id,
+          itemName: item.name,
+          itemStreamUrl: item.streamUrl,
+          itemPreviewUrl: item.previewUrl,
+          externalSourceStreamUrl: item.externalSource?.streamUrl,
+          existingStreamUrl,
+          itemStreamError: item.streamError,
+          shouldUseExistingStream
+        });
+        if (shouldUseExistingStream) {
+          const stableSource = item.externalSource ? { ...item.externalSource, streamUrl: existingStreamUrl } : item.externalSource;
+          const stableItem: MediaItem = {
+            ...item,
+            previewUrl: item.previewUrl ?? existingStreamUrl,
+            streamUrl: existingStreamUrl,
+            externalSource: stableSource,
+            isResolvingStream: false
+          };
+          console.log("[handleMediaItemActivate] Using existing stream, passing to timeline:", {
+            id: stableItem.id,
+            streamUrl: stableItem.streamUrl,
+            previewUrl: stableItem.previewUrl
+          });
+          setSelectedId(stableItem.id);
+          selectedIdRef.current = stableItem.id;
+          props.onAddToTimeline?.([stableItem]);
+          return;
+        }
+        console.log("[handleMediaItemActivate] No valid stream, resolving...");
+        const fallbackPreviewUrl = item.localPath ? localToFileUrl(item.localPath) : item.previewUrl ?? null;
+        const pendingSource = item.externalSource ? { ...item.externalSource, streamUrl: null } : item.externalSource;
+        const pendingItem: MediaItem = {
+          ...item,
+          // Don't set previewUrl during resolution - let player wait for video URL
+          previewUrl: null,
+          streamUrl: null,
+          externalSource: pendingSource,
+          isResolvingStream: true,
+          streamError: null
+        };
+        setSelectedId(pendingItem.id);
+        selectedIdRef.current = pendingItem.id;
+        props.onAddToTimeline?.([pendingItem]);
+        const resolveToken = ++resolveTokenRef.current;
+        const requestedId = pendingItem.id;
+        const requestedJobId = item.source === "job" ? item.jobId ?? null : null;
+        const resolveTarget: MediaItem = { ...item, previewUrl: fallbackPreviewUrl ?? null };
+        void resolveInternetStream(resolveTarget).then((refreshed) => {
+          if (!refreshed) return;
+          if (resolveTokenRef.current !== resolveToken) return;
+          if (selectedIdRef.current !== requestedId) return;
+          if (requestedJobId && selectedJobIdRef.current !== requestedJobId) return;
+          props.onAddToTimeline?.([refreshed]);
+        });
+        return;
+      }
+
       setSelectedId(item.id);
       selectedIdRef.current = item.id;
       props.onAddToTimeline?.([item]);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [props.onAddToTimeline, resolveYoutubeStream]
+    [props.onAddToTimeline, resolveYoutubeStream, resolveInternetStream]
   );
 
   // Effect to handle pending YouTube activation after bootstrapJobs completes

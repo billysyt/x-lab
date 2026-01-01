@@ -29,7 +29,18 @@ export function isYoutubeStreamExpired(streamUrl?: string | null): boolean {
   if (!streamUrl) return false;
   try {
     const url = new URL(streamUrl);
-    const expireParam = url.searchParams.get("expire");
+
+    // YouTube URLs can have expire in query params (?expire=...) or in path (/expire/1234567890/)
+    let expireParam = url.searchParams.get("expire");
+
+    // If not in query params, try to extract from path
+    if (!expireParam) {
+      const pathMatch = url.pathname.match(/\/expire\/(\d+)\//);
+      if (pathMatch) {
+        expireParam = pathMatch[1];
+      }
+    }
+
     if (!expireParam) return false;
     const expireSec = Number(expireParam);
     if (!Number.isFinite(expireSec)) return false;

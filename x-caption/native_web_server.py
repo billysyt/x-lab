@@ -504,6 +504,79 @@ def _resolve_youtube_stream(url: str) -> Dict[str, Any]:
     }
 
 
+def _resolve_internet_stream(url: str) -> Dict[str, Any]:
+    try:
+        from yt_dlp import YoutubeDL  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("Internet import requires yt-dlp. Please install the dependency.") from exc
+
+    stream_opts = {
+        "format": "best[ext=mp4][acodec!=none][vcodec!=none]/best[acodec!=none][vcodec!=none]/best",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        # Use impersonation to bypass Cloudflare and other anti-bot protections
+        "extractor_args": {"generic": {"impersonate": ["chrome"]}},
+    }
+
+    # Try to use impersonation if curl_cffi is available
+    try:
+        import curl_cffi  # type: ignore  # noqa: F401
+        stream_opts["http_headers"] = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+    except ImportError:
+        pass
+
+    with YoutubeDL(stream_opts) as stream_ydl:
+        stream_info = stream_ydl.extract_info(url, download=False)
+
+    if not stream_info:
+        raise RuntimeError("Failed to fetch media metadata.")
+    if "entries" in stream_info:
+        stream_info = next((entry for entry in stream_info.get("entries") or [] if entry), None)
+        if not stream_info:
+            raise RuntimeError("No playable entries found.")
+
+    stream_url = stream_info.get("url")
+    if not stream_url:
+        raise RuntimeError("Failed to resolve stream URL.")
+
+    title = (stream_info.get("title") or "internet_stream").strip()
+    safe_title = secure_filename(title) or "internet_stream"
+    safe_title = safe_title[:80].strip("-_") or "internet_stream"
+    video_id = stream_info.get("id") or uuid.uuid4().hex[:8]
+    base_name = f"{safe_title}-{video_id}"
+    downloads_dir = get_uploads_dir() / "internet"
+    thumbnail_url = None
+    thumbnails = stream_info.get("thumbnails")
+    if thumbnails and isinstance(thumbnails, list):
+        # Pick the best quality thumbnail
+        thumbnail_url = next(
+            (t["url"] for t in reversed(thumbnails) if t.get("url")),
+            None
+        )
+    thumbnail_path = None
+    if thumbnail_url:
+        thumbnail_path = _download_youtube_thumbnail(
+            thumbnail_url,
+            downloads_dir=downloads_dir,
+            base_name=base_name,
+        )
+    local_thumbnail_url = _local_media_url(thumbnail_path) if thumbnail_path else None
+
+    return {
+        "stream_url": stream_url,
+        "thumbnail_url": local_thumbnail_url,
+        "source": {
+            "url": url,
+            "title": stream_info.get("title"),
+            "id": stream_info.get("id"),
+        },
+        "duration_sec": stream_info.get("duration") if isinstance(stream_info.get("duration"), (int, float)) else None,
+    }
+
+
 def _serialize_youtube_download(state: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "download_id": state.get("id"),
@@ -2200,6 +2273,29 @@ def create_app():
         except Exception as exc:
             logger.error("YouTube stream resolve failed: %s", exc, exc_info=True)
             return jsonify({"error": f"Failed to resolve YouTube stream: {exc}"}), 500
+
+    @app.route('/import/internet/resolve', methods=['POST'])
+    def resolve_internet_stream():
+        try:
+            payload = request.get_json(silent=True) or {}
+            url = str(payload.get("url") or "").strip()
+            if not url:
+                return jsonify({"error": "URL is required."}), 400
+
+            # Validate URL format
+            try:
+                parsed = urlparse(url)
+                if not parsed.scheme or not parsed.netloc:
+                    return jsonify({"error": "Invalid URL format."}), 400
+            except Exception:
+                return jsonify({"error": "Invalid URL format."}), 400
+
+            result = _resolve_internet_stream(url)
+            return jsonify(result), 200
+
+        except Exception as exc:
+            logger.error("Internet stream resolve failed: %s", exc, exc_info=True)
+            return jsonify({"error": f"Failed to resolve stream: {exc}"}), 500
 
     @app.route('/import/youtube/start', methods=['POST'])
     def import_youtube_start():

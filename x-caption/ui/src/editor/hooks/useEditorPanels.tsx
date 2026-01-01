@@ -189,7 +189,7 @@ export function useEditorPanels(params: EditorPanelsParams) {
     commitDisplayName: mediaState.commitDisplayName,
     cancelDisplayNameEdit: mediaState.cancelDisplayNameEdit,
     showYoutubeUnavailable: playbackState.showYoutubeUnavailable,
-    youtubeUnavailableReason: playbackState.youtubeUnavailableReason || "",
+    externalSourceUnavailableReason: playbackState.externalSourceUnavailableReason || "",
     activeVideoSrc: playbackState.activeVideoSrc,
     activeVideoSlot: playbackState.activeVideoSlot,
     nextVideoTarget: playbackState.nextVideoTarget,

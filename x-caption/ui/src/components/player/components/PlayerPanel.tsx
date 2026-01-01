@@ -20,7 +20,7 @@ export type PlayerPanelProps = {
   commitDisplayName: () => void | Promise<void>;
   cancelDisplayNameEdit: () => void;
   showYoutubeUnavailable: boolean;
-  youtubeUnavailableReason: string;
+  externalSourceUnavailableReason: string;
   activeVideoSrc: string | null;
   activeVideoSlot: 0 | 1;
   nextVideoTarget: { url?: string | null } | null;
@@ -82,7 +82,7 @@ export function PlayerPanel({
   commitDisplayName,
   cancelDisplayNameEdit,
   showYoutubeUnavailable,
-  youtubeUnavailableReason,
+  externalSourceUnavailableReason,
   activeVideoSrc,
   activeVideoSlot,
   nextVideoTarget,
@@ -209,8 +209,8 @@ export function PlayerPanel({
                       <path d="M30 34l60 52" />
                     </svg>
                   </div>
-                  <div className="text-[15px] font-semibold text-slate-100">YouTube preview unavailable</div>
-                  <div className="max-w-[360px] text-[12px] text-slate-400">{youtubeUnavailableReason}</div>
+                  <div className="text-[15px] font-semibold text-slate-100">Video preview unavailable</div>
+                  <div className="max-w-[360px] text-[12px] text-slate-400">{externalSourceUnavailableReason}</div>
                 </div>
               ) : activeVideoSrc ? (
                 <>

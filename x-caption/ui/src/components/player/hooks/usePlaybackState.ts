@@ -597,31 +597,33 @@ export function usePlaybackState(params: PlaybackStateParams) {
       isOnline
     });
     const toFileUrl = (path: string) => `/media?path=${encodeURIComponent(path)}`;
-    const preferLocalYoutube = Boolean(
-      activeMedia.externalSource?.type === "youtube" && (activeMedia.streamError || !isOnline)
+    const isExternalSource = activeMedia.externalSource?.type === "youtube" || activeMedia.externalSource?.type === "internet";
+    const preferLocalFallback = Boolean(
+      isExternalSource && (activeMedia.streamError || !isOnline)
     );
     console.log("[activePreviewUrl Effect] Checking condition:", {
       hasPreviewUrl: Boolean(activeMedia.previewUrl),
       previewUrl: activeMedia.previewUrl,
-      preferLocalYoutube,
+      isExternalSource,
+      preferLocalFallback,
       streamError: activeMedia.streamError,
       isOnline,
-      willEarlyReturn: Boolean(activeMedia.previewUrl && !preferLocalYoutube)
+      willEarlyReturn: Boolean(activeMedia.previewUrl && !preferLocalFallback)
     });
-    if (activeMedia.previewUrl && !preferLocalYoutube) {
-      console.log("[activePreviewUrl Effect] Has previewUrl and not preferLocalYoutube, setting null");
+    if (activeMedia.previewUrl && !preferLocalFallback) {
+      console.log("[activePreviewUrl Effect] Has previewUrl and not preferLocalFallback, setting null");
       setActivePreviewUrl(null);
       return;
     }
-    // For YouTube items that are resolving, don't set local audio as preview
+    // For external sources that are resolving, don't set local audio as preview
     // Wait for the stream URL to be resolved
-    if (activeMedia.externalSource?.type === "youtube" && activeMedia.isResolvingStream) {
-      console.log("[activePreviewUrl Effect] YouTube resolving, setting null");
+    if (isExternalSource && activeMedia.isResolvingStream) {
+      console.log("[activePreviewUrl Effect] External source resolving, setting null");
       setActivePreviewUrl(null);
       return;
     }
-    if (activeMedia.externalSource?.type === "youtube") {
-      console.log("[activePreviewUrl Effect] YouTube item, checking fallback paths");
+    if (isExternalSource) {
+      console.log("[activePreviewUrl Effect] External source item, checking fallback paths");
       if (activeMedia.localPath) {
         const url = toFileUrl(activeMedia.localPath);
         console.log("[activePreviewUrl Effect] Setting local file URL:", url);
@@ -657,8 +659,9 @@ export function usePlaybackState(params: PlaybackStateParams) {
   const localPreviewUrl = activeMedia?.localPath
     ? `/media?path=${encodeURIComponent(activeMedia.localPath)}`
     : null;
+  const isExternalMediaSource = activeMedia?.externalSource?.type === "youtube" || activeMedia?.externalSource?.type === "internet";
   const resolvedPreviewUrl =
-    activeMedia?.externalSource?.type === "youtube" && (activeMedia.streamError || !isOnline)
+    isExternalMediaSource && (activeMedia.streamError || !isOnline)
       ? localPreviewUrl ?? activePreviewUrl ?? activeMedia?.previewUrl ?? null
       : activeMedia?.previewUrl ?? activePreviewUrl;
 
@@ -671,7 +674,8 @@ export function usePlaybackState(params: PlaybackStateParams) {
 
   useEffect(() => {
     if (!activeMedia) return;
-    if (activeMedia.externalSource?.type !== "youtube") return;
+    const isExternalSource = activeMedia.externalSource?.type === "youtube" || activeMedia.externalSource?.type === "internet";
+    if (!isExternalSource) return;
     if (!isOnline) return;
     if (activeMedia.isResolvingStream) return;
     // Don't auto-resolve if there's already an error - video load failures (CORS, format)
@@ -721,10 +725,14 @@ export function usePlaybackState(params: PlaybackStateParams) {
       setPreviewLoading(false);
       setPreviewError("Preview failed to load.");
       // Only set streamError if we DON'T have a valid previewUrl
-      // During automatic activation, we have a fresh YouTube URL that should work
+      // During automatic activation, we have a fresh stream URL that should work
       // Don't mark it as failed just because of a transient loading error
-      if (activeMedia?.externalSource?.type === "youtube" && !activeMedia.streamError && !activeMedia.previewUrl) {
-        const nextMedia = { ...activeMedia, streamError: "YouTube preview failed to load." };
+      const isExternalSource = activeMedia?.externalSource?.type === "youtube" || activeMedia?.externalSource?.type === "internet";
+      if (isExternalSource && !activeMedia.streamError && !activeMedia.previewUrl) {
+        const errorMessage = activeMedia?.externalSource?.type === "youtube"
+          ? "YouTube preview failed to load."
+          : "Video preview failed to load.";
+        const nextMedia = { ...activeMedia, streamError: errorMessage };
         setActiveMedia(nextMedia);
         setTimelineClips((prev) =>
           prev.map((clip) => (clip.media.id === nextMedia.id ? { ...clip, media: nextMedia } : clip))
@@ -759,20 +767,22 @@ export function usePlaybackState(params: PlaybackStateParams) {
   const audioPreviewSrc = activePreviewKind === "audio" ? resolvedPreviewUrl : null;
   const showPreviewSpinner = previewLoading || Boolean(activeMedia?.isResolvingStream);
 
-  // Check if audio fallback is available for YouTube media
+  // Check if audio fallback is available for external sources (YouTube/Internet)
   const hasAudioFallback =
-    activeMedia?.externalSource?.type === "youtube" &&
+    (activeMedia?.externalSource?.type === "youtube" || activeMedia?.externalSource?.type === "internet") &&
     (activeMedia.localPath || (activeMedia.source === "job" && activeMedia.jobId));
 
-  // Only show "YouTube preview unavailable" if there's NO audio fallback
+  // Only show "preview unavailable" if there's NO audio fallback
   // When audio fallback exists, we gracefully show audio preview instead
-  const youtubeUnavailableReason =
-    activeMedia?.externalSource?.type === "youtube" && !activeMedia?.isResolvingStream && !hasAudioFallback
+  const externalSourceUnavailableReason =
+    (activeMedia?.externalSource?.type === "youtube" || activeMedia?.externalSource?.type === "internet") &&
+    !activeMedia?.isResolvingStream &&
+    !hasAudioFallback
       ? !isOnline
-        ? "You're offline. Connect to the internet to load the YouTube preview."
+        ? "You're offline. Connect to the internet to load the video preview."
         : activeMedia.streamError || null
       : null;
-  const showYoutubeUnavailable = Boolean(youtubeUnavailableReason);
+  const showYoutubeUnavailable = Boolean(externalSourceUnavailableReason);
 
   useEffect(() => {
     const audioEl = audioRef.current;
@@ -1136,24 +1146,26 @@ export function usePlaybackState(params: PlaybackStateParams) {
     if (!clipTimeline.length && !activeMedia) {
       return;
     }
-    // For YouTube: only resolve if there's no stream URL AND no error.
+    // For external sources (YouTube/Internet): only resolve if there's no stream URL AND no error.
     // If there's an error (video failed to load), just play audio fallback instead of re-resolving.
-    const hasYoutubeAudioFallback =
-      activeMedia?.externalSource?.type === "youtube" &&
+    const hasExternalAudioFallback =
+      (activeMedia?.externalSource?.type === "youtube" || activeMedia?.externalSource?.type === "internet") &&
       (activeMedia.localPath || (activeMedia.source === "job" && activeMedia.jobId));
-    const shouldResolveYoutube =
-      activeMedia?.externalSource?.type === "youtube" &&
+    const shouldResolveExternalStream =
+      (activeMedia?.externalSource?.type === "youtube" || activeMedia?.externalSource?.type === "internet") &&
       !resolvedPreviewUrl &&
       !activeMedia.streamError;
-    if (shouldResolveYoutube) {
+    if (shouldResolveExternalStream) {
       pendingPlayRef.current = true;
       pendingPlayTargetRef.current = activeMedia?.id ?? null;
       setPlayback((prev) => ({ ...prev, isPlaying: true }));
       void resolveYoutubeStreamForMedia(activeMedia);
       return;
     }
-    // If YouTube video failed but has audio fallback, just play the audio
-    if (activeMedia?.externalSource?.type === "youtube" && activeMedia.streamError && hasYoutubeAudioFallback) {
+    // If external video failed but has audio fallback, just play the audio
+    if ((activeMedia?.externalSource?.type === "youtube" || activeMedia?.externalSource?.type === "internet") &&
+        activeMedia.streamError &&
+        hasExternalAudioFallback) {
       // Fall through to normal playback - will use audio
     }
     if (clipTimeline.length) {
@@ -1538,7 +1550,7 @@ export function usePlaybackState(params: PlaybackStateParams) {
     activeVideoSrc,
     audioPreviewSrc,
     showPreviewSpinner,
-    youtubeUnavailableReason,
+    externalSourceUnavailableReason,
     showYoutubeUnavailable,
     shouldShowPreviewPoster,
     nextVideoTarget,

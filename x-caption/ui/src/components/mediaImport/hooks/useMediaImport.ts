@@ -268,6 +268,9 @@ export function useMediaImport(params: {
           onOpenLeftDrawer();
         }
         const displayName = startPayload?.source?.title?.trim() || undefined;
+        // Use backend's stream_url for initial video preview
+        // Frontend will resolve fresh stream URL when needed (similar to YouTube)
+        const streamUrl = typeof startPayload.stream_url === "string" ? startPayload.stream_url : null;
         await addLocalPathItem({
           path: file.path,
           name: file.name,
@@ -275,17 +278,17 @@ export function useMediaImport(params: {
           mime: file.mime ?? null,
           displayName,
           durationSec: typeof startPayload?.duration_sec === "number" ? startPayload.duration_sec : null,
-          previewUrl: startPayload?.stream_url ?? null,
-          streamUrl: startPayload?.stream_url ?? null,
+          previewUrl: streamUrl,
+          streamUrl: streamUrl,
           externalSource: {
             type: "internet" as const,
             url: startPayload?.source?.url ?? url,
-            streamUrl: startPayload?.stream_url ?? null,
+            streamUrl: streamUrl,
             title: startPayload?.source?.title ?? null,
             id: startPayload?.source?.id ?? null,
             thumbnailUrl: startPayload?.thumbnail_url ?? null
           },
-          transcriptionKind: "audio"
+          transcriptionKind: "video"
         });
         dispatch(
           patchMediaImport({
@@ -477,6 +480,9 @@ export function useMediaImport(params: {
             onOpenLeftDrawer();
           }
           const displayName = status?.source?.title?.trim() || undefined;
+          // Use backend's stream_url for initial video preview
+          // Frontend will resolve fresh stream URL when needed (similar to YouTube)
+          const streamUrl = typeof status.stream_url === "string" ? status.stream_url : null;
           await addLocalPathItem({
             path: file.path,
             name: file.name,
@@ -484,17 +490,17 @@ export function useMediaImport(params: {
             mime: file.mime ?? null,
             displayName,
             durationSec: typeof status?.duration_sec === "number" ? status.duration_sec : null,
-            previewUrl: status?.stream_url ?? null,
-            streamUrl: status?.stream_url ?? null,
+            previewUrl: streamUrl,
+            streamUrl: streamUrl,
             externalSource: {
               type: "internet" as const,
               url: status?.source?.url ?? internet.url.trim(),
-              streamUrl: status?.stream_url ?? null,
+              streamUrl: streamUrl,
               title: status?.source?.title ?? null,
               id: status?.source?.id ?? null,
               thumbnailUrl: status?.thumbnail_url ?? null
             },
-            transcriptionKind: "audio"
+            transcriptionKind: "video"
           });
           dispatch(
             patchMediaImport({
