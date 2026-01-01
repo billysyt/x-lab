@@ -102,7 +102,7 @@ export default async function PricingPage({
           </div>
 
           {/* Premium Plan */}
-          <div className="relative flex flex-col rounded-[30px] border border-x-accent/40 bg-x-surface-2 p-8 shadow-deep lg:-translate-y-3">
+          <div className="relative flex flex-col rounded-[30px] border border-x-accent/40 bg-x-surface-2 p-8 shadow-deep lg:-translate-y-3 transition-transform duration-300 hover:scale-[1.02]">
             <div className="absolute right-6 top-6 rounded-full border border-x-accent/40 px-3 py-1 text-[0.65rem] uppercase tracking-[0.25em] text-x-accent">
               {t("pricing.premiumBadge")}
             </div>

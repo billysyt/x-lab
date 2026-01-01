@@ -56,7 +56,7 @@
     "premiumFeatures": [
       "All Free plan features included",
       "No limitations",
-      "WhiteList access",
+      "WaitList access",
       "7x24 Support"
     ],
     "premiumCta": "Upgrade Now",
@@ -264,7 +264,7 @@
     "questions": [
       {
         "q": "What languages does X-Lab AI support?",
-        "a": "X-Lab AI supports Cantonese, Mandarin, English, and many other languages. The system automatically detects the language and generates accurate subtitles, with support for both Traditional and Simplified Chinese output."
+        "a": "X-Lab AI supports over 80+ languages, including Cantonese, Mandarin, English, Japanese, Korean, French, German, Spanish, Portuguese, Italian, Russian, Arabic, Hindi, Thai, Vietnamese, and many more. The system automatically detects the language and generates accurate subtitles, with support for both Traditional and Simplified Chinese output."
       },
       {
         "q": "Is my data uploaded to servers?",
@@ -272,15 +272,15 @@
       },
       {
         "q": "What file formats are supported?",
-        "a": "X-Lab AI supports common video formats like MP4, MOV, AVI, MKV, as well as audio formats like MP3, WAV, M4A, and more. Subtitles can be exported in SRT, VTT, and other formats."
+        "a": "X-Lab AI supports common video formats like MP4, MOV, AVI, MKV, as well as audio formats like MP3, WAV, M4A, and more. Subtitles can be exported in SRT, TXT, and other formats."
       },
       {
-        "q": "What are the limitations of the free version?",
-        "a": "The free version provides basic features including subtitle generation and export. Upgrade to Premium to unlock unlimited exports, priority processing speed, and more advanced features."
+        "q": "What's the difference with Premium?",
+        "a": "The free version already includes all core features. Upgrading to Premium gives you priority access to new features, WaitList access, and 7x24 support. For details, please visit the pricing page: https://x-lab.hk/en/pricing"
       },
       {
         "q": "How can I get technical support?",
-        "a": "You can contact us through the form on our Contact page or email hello@x-lab.ai. We will respond to your inquiry within one business day."
+        "a": "You can contact us through the form on our Contact page or email hello@x-lab.hk. We will respond to your inquiry within three business days."
       }
     ]
   },

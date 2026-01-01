@@ -20,7 +20,7 @@ function FAQAccordion({ items }: { items: FAQItem[] }) {
         >
           <button
             onClick={() => setOpenIndex(openIndex === index ? null : index)}
-            className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition-colors hover:bg-x-surface-2/50 sm:px-6 sm:py-5"
+            className="flex w-full cursor-pointer items-center justify-between gap-4 px-5 py-4 text-left transition-colors hover:bg-x-surface-2/50 sm:px-6 sm:py-5"
           >
             <span className="text-sm font-semibold text-x-text sm:text-base">
               {item.q}
