@@ -1,4 +1,5 @@
 import { getTranslations } from "next-intl/server";
+import ContactForm from "./ContactForm";
 
 export default async function ContactPage({
   params,
@@ -11,17 +12,9 @@ export default async function ContactPage({
   return (
     <div className="relative overflow-hidden">
       {/* Page-specific decorations */}
-      <div className="pointer-events-none absolute inset-0 -z-10">
-        <img
-          src="/space-hero.svg"
-          alt=""
-          className="absolute -right-24 top-20 w-[420px] opacity-35 animate-[drift_18s_ease-in-out_infinite]"
-        />
-        <img
-          src="/contact-orbit.svg"
-          alt=""
-          className="absolute -left-24 -top-20 w-[380px] opacity-60 animate-[orbit_28s_linear_infinite]"
-        />
+      <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+        <div className="absolute -right-40 top-0 h-[600px] w-[600px] bg-gradient-radial from-x-accent/5 via-transparent to-transparent blur-3xl" />
+        <div className="absolute -left-40 top-20 h-[500px] w-[500px] bg-gradient-radial from-x-accent/8 via-x-accent/3 to-transparent blur-3xl animate-pulse-slow" />
         <div className="absolute left-1/2 top-32 h-24 w-[2px] bg-gradient-to-b from-transparent via-x-accent/60 to-transparent animate-[scan_7s_ease-in-out_infinite]" />
       </div>
 
@@ -35,53 +28,7 @@ export default async function ContactPage({
 
         <section className="grid gap-12 lg:grid-cols-[1.05fr_0.95fr]">
           <div>
-            <form
-              className="space-y-6"
-              action="mailto:hello@x-lab.hk"
-              method="post"
-              encType="text/plain"
-            >
-              <div className="space-y-2">
-                <label className="text-xs uppercase tracking-[0.3em] text-x-soft">
-                  {t("fieldName")}
-                </label>
-                <input
-                  className="w-full border-b border-x-line/60 bg-transparent pb-3 text-base text-x-text transition focus:border-x-accent focus:outline-none"
-                  name="name"
-                  placeholder={t("fieldNamePlaceholder")}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs uppercase tracking-[0.3em] text-x-soft">
-                  {t("fieldEmail")}
-                </label>
-                <input
-                  className="w-full border-b border-x-line/60 bg-transparent pb-3 text-base text-x-text transition focus:border-x-accent focus:outline-none"
-                  name="email"
-                  type="email"
-                  placeholder={t("fieldEmailPlaceholder")}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs uppercase tracking-[0.3em] text-x-soft">
-                  {t("fieldMessage")}
-                </label>
-                <textarea
-                  className="min-h-[80px] w-full resize-none border-b border-x-line/60 bg-transparent pb-3 text-base text-x-text transition focus:border-x-accent focus:outline-none"
-                  name="message"
-                  placeholder={t("fieldMessagePlaceholder")}
-                  rows={2}
-                  required
-                />
-              </div>
-              <div className="pt-2">
-                <button className="btn-primary" type="submit">
-                  {t("submit")}
-                </button>
-              </div>
-            </form>
+            <ContactForm />
           </div>
 
           <div>
@@ -99,11 +46,13 @@ export default async function ContactPage({
               <div className="lg:mt-8 lg:border-t lg:border-x-line/60 lg:pt-6">
                 <div className="text-xs uppercase tracking-[0.3em] text-x-soft">{t("wechatLabel")}</div>
                 <div className="mt-3 lg:mt-4">
-                  <img
-                    src="/wechat-group-qr.svg"
-                    alt={t("wechatAlt")}
-                    className="h-28 w-28 border border-x-line/60 bg-x-surface/40 p-2 shadow-glow-sm lg:h-40 lg:w-40 lg:p-3"
-                  />
+                  <div className="inline-flex h-32 w-32 items-center justify-center rounded-2xl bg-white p-3 shadow-[0_18px_35px_rgba(0,0,0,0.35)] lg:h-44 lg:w-44 lg:p-4">
+                    <img
+                      src="/wechat-qrcode.png"
+                      alt={t("wechatAlt")}
+                      className="h-full w-full object-contain"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
