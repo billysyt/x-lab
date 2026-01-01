@@ -67,7 +67,6 @@ def get_models_dir() -> Path:
     """
     data_dir = get_data_dir()
     user_models_dir = data_dir / 'models'
-    user_models_dir.mkdir(parents=True, exist_ok=True)
 
     if is_frozen():
         # Check macOS .app bundle Resources folder first

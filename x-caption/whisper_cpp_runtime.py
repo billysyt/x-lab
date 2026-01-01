@@ -130,6 +130,19 @@ def resolve_whisper_model(model_path: Optional[str] = None) -> Optional[Path]:
     if default_model.exists() and default_model.is_file():
         return default_model
 
+    try:
+        from native_model_obfuscation import obfuscated_model_ready, assemble_obfuscated_model
+    except Exception:
+        obfuscated_model_ready = None  # type: ignore
+        assemble_obfuscated_model = None  # type: ignore
+
+    if obfuscated_model_ready and assemble_obfuscated_model:
+        try:
+            if obfuscated_model_ready(get_models_dir()):
+                return assemble_obfuscated_model(get_models_dir())
+        except Exception:
+            pass
+
     bundle_candidate = get_bundle_dir() / "whisper" / info.filename
     if bundle_candidate.exists() and bundle_candidate.is_file():
         return bundle_candidate
