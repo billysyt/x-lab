@@ -48,26 +48,28 @@ export function CaptionSetupPanel({
           disabled={captionControlsDisabled}
         />
       </div>
-      <div className="space-y-2">
-        <label className="text-[11px] font-semibold text-slate-400" htmlFor="chineseStyleSelect">
-          Cantonese Output Style
-        </label>
-        <Select
-          className={cn(
-            "stt-select-dark",
-            (!isCantoneseLanguage || captionControlsDisabled || isSecondCaptionActive) && "opacity-60"
-          )}
-          id="chineseStyle"
-          buttonId="chineseStyleSelect"
-          value={String(settings.chineseStyle)}
-          options={[
-            { value: "written", label: "Written (書面語)" },
-            { value: "spoken", label: "Spoken (口語)" }
-          ]}
-          onChange={(value) => onChineseStyleChange(value as SettingsState["chineseStyle"])}
-          disabled={!isCantoneseLanguage || captionControlsDisabled || isSecondCaptionActive}
-        />
-      </div>
+      {isCantoneseLanguage && (
+        <div className="space-y-2">
+          <label className="text-[11px] font-semibold text-slate-400" htmlFor="chineseStyleSelect">
+            Cantonese Output Style
+          </label>
+          <Select
+            className={cn(
+              "stt-select-dark",
+              (captionControlsDisabled || isSecondCaptionActive) && "opacity-60"
+            )}
+            id="chineseStyle"
+            buttonId="chineseStyleSelect"
+            value={String(settings.chineseStyle)}
+            options={[
+              { value: "written", label: "Written (書面語)" },
+              { value: "spoken", label: "Spoken (口語)" }
+            ]}
+            onChange={(value) => onChineseStyleChange(value as SettingsState["chineseStyle"])}
+            disabled={captionControlsDisabled || isSecondCaptionActive}
+          />
+        </div>
+      )}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label className="text-[11px] font-semibold text-slate-400" htmlFor="secondCaptionLanguageSelect">
@@ -102,7 +104,18 @@ export function CaptionSetupPanel({
           id="secondCaptionLanguage"
           buttonId="secondCaptionLanguageSelect"
           value={secondCaptionLanguage}
-          options={[{ value: "yue", label: "English" }]}
+          options={[
+            {
+              value: "yue",
+              label: "English",
+              disabled: settings.language === "en"
+            },
+            {
+              value: "zh",
+              label: "Chinese",
+              disabled: settings.language === "yue" || settings.language === "auto" || settings.language === "zh"
+            }
+          ]}
           onChange={(value) => onSecondCaptionLanguageChange(value as "yue" | "zh" | "en")}
           disabled={!isSecondCaptionActive || captionControlsDisabled}
         />

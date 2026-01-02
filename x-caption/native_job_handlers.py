@@ -82,7 +82,10 @@ def _postprocess_caption_segments(segments: Iterable[Dict[str, Any]]) -> list[Di
     return processed
 
 
-def _should_apply_cantonese_prefix(language: str, chinese_style: Optional[str]) -> bool:
+def _should_apply_cantonese_prefix(language: str, chinese_style: Optional[str], second_caption_language: Optional[str] = None) -> bool:
+    # If second caption language is Chinese (zh), treat it as written style
+    if second_caption_language and second_caption_language.strip().lower() == "zh":
+        return True
     if not chinese_style:
         return False
     normalized_style = chinese_style.strip().lower()
@@ -96,7 +99,7 @@ def _should_apply_english_translate_prefix(language: str, second_caption_languag
     if not second_caption_language:
         return False
     normalized_language = (second_caption_language or "").strip().lower()
-    if normalized_language != "en":
+    if normalized_language != "yue":
         return False
     source_language = (language or "").strip().lower()
     return source_language in {"auto", "yue"}
@@ -707,8 +710,8 @@ def process_transcription_job(
         if _should_apply_english_translate_prefix(language, second_caption_language):
             prefix_path = _resolve_english_translate_prefix_path()
             prefix_label = "English translate"
-        elif _should_apply_cantonese_prefix(language, chinese_style):
-            prefix_path = _resolve_prefix_path(chinese_style)
+        elif _should_apply_cantonese_prefix(language, chinese_style, second_caption_language):
+            prefix_path = _resolve_prefix_path(chinese_style if chinese_style else "written")
             prefix_label = "Cantonese"
 
         if prefix_path and prefix_path.exists():

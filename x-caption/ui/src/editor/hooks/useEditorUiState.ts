@@ -117,11 +117,16 @@ export function useEditorUiState(params: EditorUiParams) {
     setSecondCaptionEnabled((prev) => {
       const next = !prev;
       if (next) {
-        setSecondCaptionLanguage("yue");
+        // Set default based on current language to avoid disabled options
+        if (settings.language === "en") {
+          setSecondCaptionLanguage("zh");
+        } else {
+          setSecondCaptionLanguage("yue");
+        }
       }
       return next;
     });
-  }, [captionControlsDisabled]);
+  }, [captionControlsDisabled, settings.language]);
 
   return {
     handleOpenFiles,

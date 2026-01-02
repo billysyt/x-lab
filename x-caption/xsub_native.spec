@@ -28,8 +28,9 @@ def _add_if_exists(entries, source, target=None):
 datas = []
 _add_if_exists(datas, "templates", "templates")
 _add_if_exists(datas, "static", "static")
-_add_if_exists(datas, "data/sample", "data/sample")
-_add_if_exists(datas, "sample", "sample")
+# Note: sample folder excluded - not needed in production
+# _add_if_exists(datas, "data/sample", "data/sample")
+# _add_if_exists(datas, "sample", "sample")
 _add_if_exists(datas, "ffmpeg", "ffmpeg")
 _add_if_exists(datas, "whisper", "whisper")
 _add_if_exists(datas, "merge", "merge")
@@ -150,3 +151,30 @@ coll = COLLECT(
     upx_exclude=[],
     name=exe_name,
 )
+
+# macOS .app bundle (only for macOS)
+if sys.platform == "darwin":
+    app = BUNDLE(
+        coll,
+        name="X-Caption.app",
+        icon=icon_path,
+        bundle_identifier="com.xlab.xcaption",
+        version="1.0.0",
+        info_plist={
+            "CFBundleName": "X-Caption",
+            "CFBundleDisplayName": "X-Caption",
+            "CFBundleExecutable": "x-caption",
+            "CFBundleIdentifier": "com.xlab.xcaption",
+            "CFBundleVersion": "1.0.0",
+            "CFBundleShortVersionString": "1.0.0",
+            "CFBundlePackageType": "APPL",
+            "CFBundleSignature": "????",
+            "LSMinimumSystemVersion": "10.13.0",
+            "NSHighResolutionCapable": True,
+            "NSSupportsAutomaticGraphicsSwitching": True,
+            "NSHumanReadableCopyright": "Copyright © 2026 X-Lab. All rights reserved.",
+            "LSApplicationCategoryType": "public.app-category.productivity",
+            "NSMicrophoneUsageDescription": "X-Caption needs microphone access for audio transcription.",
+            "NSCameraUsageDescription": "X-Caption needs camera access for video processing.",
+        },
+    )

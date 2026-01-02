@@ -1,0 +1,44 @@
+
+[95m[1m============================================================
+  Building React UI
+============================================================[0m
+
+[94m[INFO][0m Using virtual environment Python: /Users/billysin/Desktop/Projects/x-lab/x-caption/.venv/bin/python3
+[94m[INFO][0m Running: /Users/billysin/Desktop/Projects/x-lab/x-caption/.venv/bin/python3 /Users/billysin/Desktop/Projects/x-lab/x-caption/scripts/build_ui.py
+[92m[SUCCESS][0m UI built successfully
+
+[95m[1m============================================================
+  Building .app Bundle with PyInstaller
+============================================================[0m
+
+[94m[INFO][0m Using virtual environment Python: /Users/billysin/Desktop/Projects/x-lab/x-caption/.venv/bin/python3
+[94m[INFO][0m Running: /Users/billysin/Desktop/Projects/x-lab/x-caption/.venv/bin/python3 -m PyInstaller /Users/billysin/Desktop/Projects/x-lab/x-caption/xsub_native.spec --clean --noconfirm
+[92m[SUCCESS][0m App bundle created: /Users/billysin/Desktop/Projects/x-lab/x-caption/dist/X-Caption.app
+[93m[WARNING][0m Skipping code signing (--no-sign)
+
+[95m[1m============================================================
+  Creating DMG
+============================================================[0m
+
+[94m[INFO][0m Copying app to temporary DMG directory...
+[94m[INFO][0m Creating DMG image...
+[94m[INFO][0m Running: hdiutil create -volname X-Caption -srcfolder /Users/billysin/Desktop/Projects/x-lab/x-caption/dist/dmg_temp -ov -format UDZO -imagekey zlib-level=9 /Users/billysin/Desktop/Projects/x-lab/x-caption/dist/X-Caption-macOS-arm64.dmg
+[92m[SUCCESS][0m DMG created: /Users/billysin/Desktop/Projects/x-lab/x-caption/dist/X-Caption-macOS-arm64.dmg
+[93m[WARNING][0m Skipping notarization (app not signed)
+
+[95m[1m============================================================
+  Build Complete!
+============================================================[0m
+
+  App Bundle: /Users/billysin/Desktop/Projects/x-lab/x-caption/dist/X-Caption.app
+  DMG File: /Users/billysin/Desktop/Projects/x-lab/x-caption/dist/X-Caption-macOS-arm64.dmg
+  Signed: No
+  Notarized: No
+
+[93m[WARNING][0m App is NOT signed. It will show security warnings.
+[94m[INFO][0m To sign and notarize, run:
+[94m[INFO][0m   export APPLE_SIGNING_IDENTITY='Developer ID Application: Your Name (TEAM_ID)'
+[94m[INFO][0m   export APPLE_ID='your@email.com'
+[94m[INFO][0m   export APPLE_APP_PASSWORD='xxxx-xxxx-xxxx-xxxx'
+[94m[INFO][0m   export APPLE_TEAM_ID='YOUR_TEAM_ID'
+[94m[INFO][0m   python scripts/build_macos.py --sign --notarize
