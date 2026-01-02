@@ -122,6 +122,11 @@ model_downloads: Dict[str, Dict[str, Any]] = {}
 model_download_lock = threading.Lock()
 active_model_download_id: Optional[str] = None
 
+# Whisper model package (obfuscated chunks) download tracking
+package_downloads: Dict[str, Dict[str, Any]] = {}
+package_download_lock = threading.Lock()
+active_package_download_id: Optional[str] = None
+
 # YouTube import download tracking
 youtube_downloads: Dict[str, Dict[str, Any]] = {}
 youtube_download_lock = threading.Lock()
@@ -1021,6 +1026,11 @@ def _serialize_model_download(state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _get_package_download_state(download_id: str) -> Optional[Dict[str, Any]]:
+    with package_download_lock:
+        return package_downloads.get(download_id)
+
+
 def _get_download_state(download_id: str) -> Optional[Dict[str, Any]]:
     with model_download_lock:
         return model_downloads.get(download_id)
@@ -1094,6 +1104,167 @@ def _start_whisper_model_download() -> Dict[str, Any]:
                     active_model_download_id = None
 
     thread = threading.Thread(target=_run_download, name=f"WhisperModelDownload-{download_id}", daemon=True)
+    thread.start()
+    return state
+
+
+def _start_whisper_package_download() -> Dict[str, Any]:
+    global active_package_download_id
+    with package_download_lock:
+        if active_package_download_id:
+            existing = package_downloads.get(active_package_download_id)
+            if existing and existing.get("status") in {"queued", "downloading"}:
+                return existing
+
+        download_id = uuid.uuid4().hex
+        state = {
+            "id": download_id,
+            "status": "queued",
+            "progress": None,
+            "downloaded_bytes": 0,
+            "total_bytes": None,
+            "message": "Starting package download...",
+            "error": None,
+            "error_type": None,
+            "expected_path": str(get_data_dir()),
+            "download_url": "https://x-lab-hk.s3.ap-east-1.amazonaws.com/m/",
+            "started_at": time.time(),
+            "updated_at": time.time(),
+        }
+        package_downloads[download_id] = state
+        active_package_download_id = download_id
+
+    def _build_ssl_context() -> Optional[ssl.SSLContext]:
+        if certifi is None:
+            return None
+        try:
+            return ssl.create_default_context(cafile=certifi.where())
+        except Exception:
+            return None
+
+    def _content_length(url: str) -> Optional[int]:
+        context = _build_ssl_context()
+        try:
+            req = urllib.request.Request(url, method="HEAD")
+            with urllib.request.urlopen(req, timeout=30, context=context) as response:
+                value = response.headers.get("Content-Length")
+                if value and value.isdigit():
+                    return int(value)
+        except Exception:
+            return None
+        return None
+
+    def _run_download() -> None:
+        nonlocal state
+
+        def progress_cb(downloaded: int, total: Optional[int], message: str) -> None:
+            with package_download_lock:
+                state["downloaded_bytes"] = downloaded
+                state["total_bytes"] = total
+                state["message"] = message
+                if total and total > 0:
+                    state["progress"] = int(min(100, (downloaded / total) * 100))
+                else:
+                    state["progress"] = None
+                state["status"] = "downloading"
+                state["updated_at"] = time.time()
+
+        base_url = "https://x-lab-hk.s3.ap-east-1.amazonaws.com/m/"
+        context = _build_ssl_context()
+        try:
+            from native_model_obfuscation import (
+                obfuscated_model_ready,
+                expected_chunk_names,
+                chunk_storage_dir,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Chunk metadata not available: {exc}") from exc
+
+        try:
+            chunk_names = expected_chunk_names()
+            if not chunk_names:
+                raise RuntimeError("Chunk metadata is missing.")
+
+            target_dir = chunk_storage_dir(get_models_dir())
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            chunk_sizes: Dict[str, Optional[int]] = {}
+            total_bytes = 0
+            for name in chunk_names:
+                size = _content_length(f"{base_url}{name}")
+                chunk_sizes[name] = size
+                if size:
+                    total_bytes += size
+
+            if total_bytes <= 0:
+                total_bytes = None
+
+            downloaded = 0
+            for name in chunk_names:
+                size = chunk_sizes.get(name)
+                path = target_dir / name
+                if size and path.exists() and path.stat().st_size == size:
+                    downloaded += size
+
+            progress_cb(downloaded, total_bytes, "Downloading package...")
+
+            for name in chunk_names:
+                size = chunk_sizes.get(name)
+                target_path = target_dir / name
+                if size and target_path.exists() and target_path.stat().st_size == size:
+                    continue
+                tmp_path = target_path.with_suffix(target_path.suffix + ".part")
+                if tmp_path.exists():
+                    try:
+                        tmp_path.unlink()
+                    except Exception:
+                        pass
+
+                url = f"{base_url}{name}"
+                req = urllib.request.Request(url, headers={"User-Agent": "X-Caption/1.0"})
+                with urllib.request.urlopen(req, timeout=30, context=context) as response:
+                    with tmp_path.open("wb") as handle:
+                        while True:
+                            chunk = response.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            handle.write(chunk)
+                            downloaded += len(chunk)
+                            progress_cb(downloaded, total_bytes, "Downloading package...")
+
+                tmp_path.replace(target_path)
+
+            if not obfuscated_model_ready(get_models_dir()):
+                raise RuntimeError("Model package download completed but files are incomplete.")
+
+            with package_download_lock:
+                state["status"] = "completed"
+                state["progress"] = 100
+                state["message"] = "Package downloaded."
+                state["updated_at"] = time.time()
+        except urllib.error.URLError as exc:
+            with package_download_lock:
+                state["status"] = "failed"
+                state["error"] = f"Unable to reach the download server: {exc}"
+                state["error_type"] = "network"
+                state["updated_at"] = time.time()
+        except Exception as exc:  # pragma: no cover - unexpected failure
+            with package_download_lock:
+                state["status"] = "failed"
+                state["error"] = str(exc)
+                state["error_type"] = "unknown"
+                state["updated_at"] = time.time()
+        finally:
+            global active_package_download_id
+            with package_download_lock:
+                if active_package_download_id == state.get("id"):
+                    active_package_download_id = None
+
+    thread = threading.Thread(
+        target=_run_download,
+        name=f"WhisperPackageDownload-{download_id}",
+        daemon=True,
+    )
     thread.start()
     return state
 
@@ -1311,6 +1482,26 @@ def create_app():
             logger.error("Failed to read Whisper model status: %s", exc)
             return jsonify({"error": str(exc)}), 500
 
+    @app.route('/models/whisper/package/status', methods=['GET'])
+    def whisper_package_status_endpoint():
+        """Return current Whisper model package (obfuscated chunks) availability."""
+        try:
+            from native_model_obfuscation import obfuscated_model_ready, expected_chunk_names, chunk_storage_dir
+            models_root = get_models_dir()
+            ready = obfuscated_model_ready(models_root)
+            chunk_dir = chunk_storage_dir(models_root)
+            chunk_names = expected_chunk_names()
+            expected_paths = [str(chunk_dir / name) for name in chunk_names] if chunk_names else None
+            return jsonify({
+                "ready": ready,
+                "expected_path": str(chunk_dir),
+                "expected_paths": expected_paths,
+                "download_url": "https://x-lab-hk.s3.ap-east-1.amazonaws.com/m/"
+            }), 200
+        except Exception as exc:
+            logger.error("Failed to read Whisper package status: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
     @app.route('/models/whisper/download', methods=['POST'])
     def whisper_model_download():
         """Kick off Whisper model download (runs in background)."""
@@ -1334,6 +1525,34 @@ def create_app():
     def whisper_model_download_status(download_id: str):
         """Check Whisper model download progress."""
         state = _get_download_state(download_id)
+        if not state:
+            return jsonify({"error": "Download not found"}), 404
+        return jsonify(_serialize_model_download(state)), 200
+
+    @app.route('/models/whisper/package/download', methods=['POST'])
+    def whisper_package_download():
+        """Kick off Whisper model package download (runs in background)."""
+        try:
+            from native_model_obfuscation import obfuscated_model_ready
+            if obfuscated_model_ready(get_models_dir()):
+                return jsonify({
+                    "status": "ready",
+                    "ready": True,
+                    "download_url": "https://x-lab-hk.s3.ap-east-1.amazonaws.com/m/"
+                }), 200
+
+            state = _start_whisper_package_download()
+            response = _serialize_model_download(state)
+            response["status"] = state.get("status")
+            return jsonify(response), 202
+        except Exception as exc:
+            logger.error("Failed to start Whisper package download: %s", exc, exc_info=True)
+            return jsonify({"error": str(exc)}), 500
+
+    @app.route('/models/whisper/package/download/<download_id>', methods=['GET'])
+    def whisper_package_download_status(download_id: str):
+        """Check Whisper package download progress."""
+        state = _get_package_download_state(download_id)
         if not state:
             return jsonify({"error": "Download not found"}), 404
         return jsonify(_serialize_model_download(state)), 200

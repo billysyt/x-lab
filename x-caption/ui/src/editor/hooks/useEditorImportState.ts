@@ -1,10 +1,11 @@
 import { useOverlayState } from "../../components/layout/hooks/useOverlayState";
 import { useTranscriptActions } from "../../components/transcript/hooks/useTranscriptActions";
-import type { RefObject } from "react";
+import { useState, type RefObject } from "react";
 import type { UploadTabHandle } from "../../components/upload/components/UploadTab";
 import type { AppDispatch } from "../../store";
 import type { Job } from "../../types";
 import type { MediaItem } from "../../components/upload/components/UploadTab";
+import type { ConfirmModalState } from "../../components/layout/AppOverlays.types";
 
 export function useEditorImportState(params: {
   dispatch: AppDispatch;
@@ -21,6 +22,7 @@ export function useEditorImportState(params: {
   srtInputRef: RefObject<HTMLInputElement | null>;
   handleRequestFilePicker: (open: () => void) => void;
   ensureWhisperModelReady: () => Promise<boolean>;
+  ensureWhisperPackageReady: () => Promise<boolean>;
   timelineClipCount: number;
 }) {
   const {
@@ -38,8 +40,11 @@ export function useEditorImportState(params: {
     srtInputRef,
     handleRequestFilePicker,
     ensureWhisperModelReady,
+    ensureWhisperPackageReady,
     timelineClipCount
   } = params;
+
+  const [confirmModal, setConfirmModal] = useState<ConfirmModalState | null>(null);
 
   const overlayState = useOverlayState({
     appVersion,
@@ -61,9 +66,12 @@ export function useEditorImportState(params: {
     uploadRef,
     handleRequestFilePicker,
     ensureWhisperModelReady,
+    ensureWhisperPackageReady,
+    confirmModal,
+    setConfirmModal,
     setShowImportModal: overlayState.mediaImport.modals.setShowImportModal,
     timelineClipCount
   });
 
-  return { overlayState, transcriptActions };
+  return { overlayState, transcriptActions, confirmModal, setConfirmModal };
 }

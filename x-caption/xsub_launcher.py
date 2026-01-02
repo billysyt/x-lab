@@ -10,6 +10,7 @@ import os
 import sys
 import hashlib
 import logging
+import importlib
 import threading
 import time
 import urllib.error
@@ -28,6 +29,16 @@ from pathlib import Path
 from native_premium import activate_premium_key, get_premium_details
 
 IS_WINDOWS = sys.platform == "win32"
+
+
+def _startup_profile_enabled() -> bool:
+    return bool(os.environ.get("XCAPTION_STARTUP_PROFILE") or os.environ.get("XSUB_STARTUP_PROFILE"))
+
+
+def _log_startup_timing(label: str, start: float) -> None:
+    if _startup_profile_enabled():
+        elapsed = time.perf_counter() - start
+        print(f"[STARTUP] {label}: {elapsed:.3f}s")
 
 
 def _read_text_first(paths):
@@ -273,8 +284,12 @@ def check_and_setup_environment() -> bool:
     from native_config import get_config, setup_environment
     from native_ffmpeg import setup_ffmpeg_environment, test_ffmpeg
 
+    overall_start = time.perf_counter()
+
     print("Setting up environment...")
+    setup_start = time.perf_counter()
     setup_environment()
+    _log_startup_timing("setup_environment", setup_start)
 
     # Display configuration
     config = get_config()
@@ -283,7 +298,9 @@ def check_and_setup_environment() -> bool:
 
     # Set up FFmpeg
     print("Configuring FFmpeg...")
+    ffmpeg_start = time.perf_counter()
     ffmpeg_ok = setup_ffmpeg_environment()
+    _log_startup_timing("setup_ffmpeg_environment", ffmpeg_start)
 
     if not ffmpeg_ok:
         print("WARNING: FFmpeg not found!")
@@ -312,10 +329,13 @@ def check_and_setup_environment() -> bool:
         else:
             print("   Continuing without FFmpeg... (non-interactive mode)")
     else:
+        ffmpeg_test_start = time.perf_counter()
         if test_ffmpeg():
             print("FFmpeg is ready")
+        _log_startup_timing("test_ffmpeg", ffmpeg_test_start)
 
     print()
+    _log_startup_timing("check_and_setup_environment total", overall_start)
     return True
 
 
@@ -369,7 +389,12 @@ def start_worker_threads():
 
 def start_web_server(port: int = 11440):
     """Start the web server in a background thread."""
-    from native_web_server import create_app, start_server
+    overall_start = time.perf_counter()
+    import_start = time.perf_counter()
+    native_web_server = importlib.import_module("native_web_server")
+    _log_startup_timing("import native_web_server", import_start)
+    create_app = native_web_server.create_app
+    start_server = native_web_server.start_server
 
     print(f"[WEB] Starting web server on port {port}...")
     ui_mode = "React UI"
@@ -378,10 +403,14 @@ def start_web_server(port: int = 11440):
     print(f"[UI] {ui_mode} with WebSocket emulation (HTTP polling)")
 
     # Patch job handlers for real-time updates
+    patch_start = time.perf_counter()
     patch_job_handlers()
+    _log_startup_timing("patch_job_handlers", patch_start)
 
     # Create Flask app
+    app_start = time.perf_counter()
     app = create_app()
+    _log_startup_timing("create_app", app_start)
 
     # Start server in background thread
     server_thread = threading.Thread(
@@ -396,6 +425,7 @@ def start_web_server(port: int = 11440):
 
     print("[OK] Web server started")
     print()
+    _log_startup_timing("start_web_server total", overall_start)
 
     return server_thread
 
@@ -1057,6 +1087,7 @@ def wait_for_server(port: int = 11440, timeout: float = 10.0) -> bool:
     """Wait for the HTTP server health endpoint to become available."""
     health_url = f"http://127.0.0.1:{port}/health"
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    profile_start = time.perf_counter()
     start = time.time()
     printed = False
 
@@ -1067,6 +1098,9 @@ def wait_for_server(port: int = 11440, timeout: float = 10.0) -> bool:
                 if response.status == 200:
                     if printed:
                         print("[WEB] Server is ready.")
+                    if _startup_profile_enabled():
+                        elapsed = time.perf_counter() - profile_start
+                        print(f"[STARTUP] Health check ready in {elapsed:.3f}s")
                     return True
         except urllib.error.URLError:
             pass
@@ -1079,6 +1113,9 @@ def wait_for_server(port: int = 11440, timeout: float = 10.0) -> bool:
 
     print("[WEB] Server is taking longer than expected but will continue starting in the background.")
     print(f"      You can periodically refresh {health_url} to check availability.")
+    if _startup_profile_enabled():
+        elapsed = time.perf_counter() - profile_start
+        print(f"[STARTUP] Health check timed out after {elapsed:.3f}s (timeout {timeout:.1f}s)")
     return False
 
 

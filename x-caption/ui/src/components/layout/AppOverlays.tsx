@@ -5,6 +5,7 @@ import { CaptionMenuOverlay } from "../timeline/components/CaptionMenuOverlay";
 import { GapMenuOverlay } from "../timeline/components/GapMenuOverlay";
 import { GapAdjustModalOverlay } from "../timeline/components/GapAdjustModalOverlay";
 import { AlertModalOverlay } from "../common/AlertModalOverlay";
+import { ConfirmModalOverlay } from "../common/ConfirmModalOverlay";
 import { OpenMediaModal } from "../mediaImport/components/OpenMediaModal";
 import { YoutubeImportModal } from "../mediaImport/components/YoutubeImportModal";
 import { InternetImportModal } from "../mediaImport/components/InternetImportModal";
@@ -48,6 +49,7 @@ export function AppOverlays({
   setGapAdjustModal,
   onAdjustGapAfter,
   alerts,
+  confirm,
   mediaImport,
   premium,
   updates,
@@ -55,6 +57,7 @@ export function AppOverlays({
   modelDownload
 }: AppOverlaysProps) {
   const { notify, alertModal, setAlertModal } = alerts;
+  const { confirmModal, setConfirmModal } = confirm;
   const {
     modals: { showOpenModal, setShowOpenModal, showYoutubeModal, setShowYoutubeModal, showInternetModal, setShowInternetModal, showImportModal, setShowImportModal },
     youtube: {
@@ -183,6 +186,7 @@ export function AppOverlays({
       />
 
       <AlertModalOverlay alertModal={alertModal} setAlertModal={setAlertModal} />
+      <ConfirmModalOverlay confirmModal={confirmModal} setConfirmModal={setConfirmModal} />
 
       <OpenMediaModal
         showOpenModal={showOpenModal}
@@ -294,6 +298,8 @@ export type {
   GapAdjustModalState,
   PremiumDetails,
   AlertOverlayProps,
+  ConfirmOverlayProps,
+  ConfirmModalState,
   MediaImportOverlayProps,
   PremiumOverlayProps,
   UpdateOverlayProps,

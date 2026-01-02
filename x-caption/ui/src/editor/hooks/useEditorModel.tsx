@@ -60,6 +60,7 @@ export function useEditorModel() {
   const {
     modelDownload,
     ensureWhisperModelReady,
+    ensureWhisperPackageReady,
     clearModelDownload,
     handleRetryModelDownload,
     modelDownloadActive,
@@ -111,7 +112,7 @@ export function useEditorModel() {
     isAnotherJobProcessing: activeJobState.isAnotherJobProcessing
   });
 
-  const { overlayState, transcriptActions } = useEditorImportState({
+  const { overlayState, transcriptActions, confirmModal, setConfirmModal } = useEditorImportState({
     dispatch,
     appVersion,
     isOnline,
@@ -126,6 +127,7 @@ export function useEditorModel() {
     srtInputRef,
     handleRequestFilePicker: uiState.handleRequestFilePicker,
     ensureWhisperModelReady,
+    ensureWhisperPackageReady,
     timelineClipCount: mediaState.timelineClips.length
   });
 
@@ -204,6 +206,8 @@ export function useEditorModel() {
     uploadRef,
     windowState,
     overlayState,
+    confirmModal,
+    setConfirmModal,
     mediaState,
     playbackState,
     timelineViewState,

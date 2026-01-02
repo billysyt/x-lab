@@ -56,7 +56,7 @@ export function PremiumModalOverlay({
         aria-modal="true"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex h-[70vh] w-full flex-col">
+        <div className="flex h-[70vh] max-h-[580px] w-full flex-col">
           <div className="relative flex-1">
             {premiumWebviewStatus !== "error" ? (
               <iframe

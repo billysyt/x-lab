@@ -15,7 +15,7 @@ type EditorUiParams = {
   setIsLeftDrawerOpen: (value: boolean) => void;
   settings: SettingsState;
   isTranscribing: boolean;
-  modelDownload: { status?: string; totalBytes?: number; downloadedBytes?: number };
+  modelDownload: { status?: string; totalBytes?: number; downloadedBytes?: number; kind?: "whisper" | "package" };
   isActiveJobProcessing: boolean;
   isAnotherJobProcessing: boolean;
 };
@@ -105,7 +105,9 @@ export function useEditorUiState(params: EditorUiParams) {
     : isAnotherJobProcessing
       ? "Another job processing..."
       : modelDownload.status === "downloading"
-        ? "Downloading model..."
+        ? modelDownload.kind === "package"
+          ? "Downloading package..."
+          : "Downloading model..."
         : "AI Generate Caption";
   const isGenerateDisabled =
     modelDownload.status === "checking" || modelDownload.status === "downloading" || isTranscribing;

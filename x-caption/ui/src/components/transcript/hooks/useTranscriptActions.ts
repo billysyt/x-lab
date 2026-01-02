@@ -8,6 +8,8 @@ import { fileFromBase64 } from "../../../lib/file";
 import { parseSrt } from "../../../lib/srt";
 import { stripFileExtension } from "../../../lib/utils";
 import { apiUpsertJobRecord } from "../../../api/jobsApi";
+import { apiGetWhisperPackageStatus } from "../../../api/modelApi";
+import type { ConfirmModalState } from "../../layout/AppOverlays.types";
 
 type TranscriptActionsParams = {
   dispatch: AppDispatch;
@@ -19,6 +21,9 @@ type TranscriptActionsParams = {
   uploadRef: RefObject<UploadTabHandle>;
   handleRequestFilePicker: (open: () => void) => void;
   ensureWhisperModelReady: () => Promise<boolean>;
+  ensureWhisperPackageReady: () => Promise<boolean>;
+  confirmModal: ConfirmModalState | null;
+  setConfirmModal: (value: ConfirmModalState | null) => void;
   setShowImportModal: (value: boolean) => void;
   timelineClipCount: number;
 };
@@ -34,6 +39,9 @@ export function useTranscriptActions(params: TranscriptActionsParams) {
     uploadRef,
     handleRequestFilePicker,
     ensureWhisperModelReady,
+    ensureWhisperPackageReady,
+    confirmModal,
+    setConfirmModal,
     setShowImportModal,
     timelineClipCount
   } = params;
@@ -176,10 +184,50 @@ export function useTranscriptActions(params: TranscriptActionsParams) {
       setShowImportModal(true);
       return;
     }
+    if (confirmModal) return;
+
+    let packageReady = false;
+    try {
+      const packageStatus = await apiGetWhisperPackageStatus();
+      packageReady = packageStatus.ready;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      notify(message || "Failed to check model package.", "error");
+      return;
+    }
+
+    if (!packageReady) {
+      setConfirmModal({
+        title: "Download Required Package?",
+        message: "This feature needs an extra package. Download it now?",
+        confirmLabel: "Download",
+        cancelLabel: "Cancel",
+        tone: "info",
+        onConfirm: async () => {
+          const ok = await ensureWhisperPackageReady();
+          if (!ok) return;
+          const ready = await ensureWhisperModelReady();
+          if (!ready) return;
+          uploadRef.current?.submitTranscription?.();
+        },
+        onCancel: () => undefined
+      });
+      return;
+    }
+
     const ready = await ensureWhisperModelReady();
     if (!ready) return;
     uploadRef.current?.submitTranscription?.();
-  }, [ensureWhisperModelReady, setShowImportModal, timelineClipCount, uploadRef]);
+  }, [
+    confirmModal,
+    ensureWhisperModelReady,
+    ensureWhisperPackageReady,
+    notify,
+    setConfirmModal,
+    setShowImportModal,
+    timelineClipCount,
+    uploadRef
+  ]);
 
   return {
     handleSrtSelected,

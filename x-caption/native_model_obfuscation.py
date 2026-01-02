@@ -61,15 +61,26 @@ def _hashed_chunk_names() -> list[str]:
     return names
 
 
-def _expected_chunk_paths(model_dir: Path) -> list[Path]:
+def expected_chunk_names() -> list[str]:
     if CHUNK_NAMES:
-        return [model_dir / name for name in CHUNK_NAMES]
+        return list(CHUNK_NAMES)
     hashed = _hashed_chunk_names()
     if hashed:
-        return [model_dir / name for name in hashed]
+        return hashed
     if not (CHUNK_PREFIX and CHUNK_EXT and CHUNK_COUNT and CHUNK_PAD):
         return []
-    return [model_dir / f"{CHUNK_PREFIX}{index:0{CHUNK_PAD}d}{CHUNK_EXT}" for index in range(1, CHUNK_COUNT + 1)]
+    return [f"{CHUNK_PREFIX}{index:0{CHUNK_PAD}d}{CHUNK_EXT}" for index in range(1, CHUNK_COUNT + 1)]
+
+
+def chunk_storage_dir(models_root: Path) -> Path:
+    return _chunk_root(models_root)
+
+
+def _expected_chunk_paths(model_dir: Path) -> list[Path]:
+    names = expected_chunk_names()
+    if not names:
+        return []
+    return [model_dir / name for name in names]
 
 
 def _chunk_root(models_root: Path) -> Path:

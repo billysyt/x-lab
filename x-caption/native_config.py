@@ -7,6 +7,7 @@ import os
 import sys
 import shutil
 import threading
+import time
 from pathlib import Path
 import logging
 
@@ -17,6 +18,17 @@ VERSION = "0.1.0"
 
 # Model warmup event - signals when transcription models are loaded and ready
 MODEL_WARMUP_EVENT = threading.Event()
+_ENV_READY = False
+
+
+def startup_profile_enabled() -> bool:
+    return bool(os.environ.get("XCAPTION_STARTUP_PROFILE") or os.environ.get("XSUB_STARTUP_PROFILE"))
+
+
+def _log_startup_timing(label: str, start: float) -> None:
+    if startup_profile_enabled():
+        elapsed = time.perf_counter() - start
+        print(f"[STARTUP] {label}: {elapsed:.3f}s")
 
 
 def is_frozen():
@@ -65,6 +77,7 @@ def get_models_dir() -> Path:
     2. Bundled models in _internal/data/models (PyInstaller) -> copied to user dir
     3. User data directory (for downloaded models / runtime updates)
     """
+    start = time.perf_counter()
     data_dir = get_data_dir()
     user_models_dir = data_dir / 'models'
 
@@ -96,6 +109,7 @@ def get_models_dir() -> Path:
 
             if bundle_dir.exists():
                 _ensure_models_copied(bundle_dir, user_models_dir)
+                _log_startup_timing("get_models_dir (bundled resources)", start)
                 return user_models_dir
 
         # Check PyInstaller _MEIPASS (bundled in spec)
@@ -103,14 +117,17 @@ def get_models_dir() -> Path:
         bundled_models = bundle_dir / 'data' / 'models'
         if bundled_models.exists():
             _ensure_models_copied(bundled_models, user_models_dir)
+            _log_startup_timing("get_models_dir (pyinstaller bundle)", start)
             return user_models_dir
 
     # Development mode or no bundled models - use local directory
+    _log_startup_timing("get_models_dir (local)", start)
     return user_models_dir
 
 
 def _ensure_models_copied(source: Path, destination: Path):
     """Copy bundled models to user-writable directory if needed."""
+    copy_start = time.perf_counter() if startup_profile_enabled() else None
     try:
         sentinel = destination / f".bundled_version_{VERSION}"
         bundled_entries = [entry.name for entry in source.iterdir()] if source.exists() else []
@@ -157,6 +174,8 @@ def _ensure_models_copied(source: Path, destination: Path):
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(entry, target)
             sentinel.touch()
+            if copy_start is not None:
+                _log_startup_timing("copy bundled models", copy_start)
     except Exception as copy_exc:
         logger.warning(f"Failed to prepare models directory from {source}: {copy_exc}")
 
@@ -256,6 +275,10 @@ def get_static_dir() -> Path:
 
 def setup_environment():
     """Set up environment variables for the application"""
+    global _ENV_READY
+    if _ENV_READY:
+        return
+    start = time.perf_counter()
     _refresh_msvc_runtime()
 
     # Set application directories
@@ -293,6 +316,8 @@ def setup_environment():
     logger.info(f"Application data directory: {get_data_dir()}")
     logger.info(f"Models directory: {get_models_dir()}")
     logger.info(f"Transcriptions directory: {get_transcriptions_dir()}")
+    _ENV_READY = True
+    _log_startup_timing("setup_environment total", start)
 
 
 

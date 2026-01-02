@@ -19,3 +19,12 @@ export type WhisperModelDownload = {
   expected_path?: string;
   download_url?: string;
 };
+
+export type WhisperPackageStatus = {
+  ready: boolean;
+  expected_path?: string;
+  expected_paths?: string[] | null;
+  download_url?: string;
+};
+
+export type WhisperPackageDownload = WhisperModelDownload;

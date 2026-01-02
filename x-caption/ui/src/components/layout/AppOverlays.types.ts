@@ -34,6 +34,21 @@ export type AlertOverlayProps = {
   setAlertModal: (value: { title: string; message: string; tone: ToastType } | null) => void;
 };
 
+export type ConfirmModalState = {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  tone?: ToastType;
+  onConfirm: () => void;
+  onCancel?: () => void;
+};
+
+export type ConfirmOverlayProps = {
+  confirmModal: ConfirmModalState | null;
+  setConfirmModal: (value: ConfirmModalState | null) => void;
+};
+
 export type MediaImportOverlayProps = {
   modals: {
     showOpenModal: boolean;
@@ -179,6 +194,7 @@ export type AppOverlaysProps = {
   setGapAdjustModal: (value: GapAdjustModalState | null) => void;
   onAdjustGapAfter: (segment: TranscriptSegment, mode: "insert" | "remove", ms: number, maxRemoveMs: number) => void;
   alerts: AlertOverlayProps;
+  confirm: ConfirmOverlayProps;
   mediaImport: MediaImportOverlayProps;
   premium: PremiumOverlayProps;
   updates: UpdateOverlayProps;

@@ -16,6 +16,7 @@ import { useSubtitleState } from "../../components/player/hooks/useSubtitleState
 import { useTimelineViewState } from "../../components/timeline/hooks/useTimelineViewState";
 import { useTranscriptActions } from "../../components/transcript/hooks/useTranscriptActions";
 import { useWindowState } from "../../components/layout/hooks/useWindowState";
+import type { ConfirmModalState } from "../../components/layout/AppOverlays.types";
 
 type EditorPanelsLayout = {
   isCompact: boolean;
@@ -72,6 +73,8 @@ type EditorPanelsParams = {
   uploadRef: RefObject<UploadTabHandle>;
   windowState: ReturnType<typeof useWindowState>;
   overlayState: ReturnType<typeof useOverlayState>;
+  confirmModal: ConfirmModalState | null;
+  setConfirmModal: (value: ConfirmModalState | null) => void;
   mediaState: ReturnType<typeof useMediaState>;
   playbackState: ReturnType<typeof usePlaybackState>;
   timelineViewState: ReturnType<typeof useTimelineViewState>;
@@ -91,6 +94,8 @@ export function useEditorPanels(params: EditorPanelsParams) {
     uploadRef,
     windowState,
     overlayState,
+    confirmModal,
+    setConfirmModal,
     mediaState,
     playbackState,
     timelineViewState,
@@ -350,6 +355,10 @@ export function useEditorPanels(params: EditorPanelsParams) {
       notify,
       alertModal,
       setAlertModal
+    },
+    confirm: {
+      confirmModal,
+      setConfirmModal
     },
     mediaImport,
     premium: {
