@@ -5,7 +5,6 @@ data/
 .venv/
 .venv312/
 dist/
-ffmpeg/
 installer/windows/X-Caption-Setup.exe
 ui/node_modules/
 ui/.vite/
