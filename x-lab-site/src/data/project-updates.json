@@ -5,7 +5,7 @@
       "released_at": "2026-01-01",
       "download_url": "https://x-lab.hk/downloads#x-caption",
       "notes": "Initial release.",
-      "force_update": true,
+      "force_update": false,
       "min_supported": "0.1.0"
     }
   ],
