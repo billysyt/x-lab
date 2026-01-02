@@ -152,6 +152,12 @@ export type ModelDownloadOverlayProps = {
   onRetryModelDownload: () => void;
 };
 
+export type AboutOverlayProps = {
+  showAboutModal: boolean;
+  setShowAboutModal: (value: boolean) => void;
+  version: string;
+};
+
 export type AppOverlaysProps = {
   isCompact: boolean;
   isLeftDrawerOpen: boolean;
@@ -200,4 +206,5 @@ export type AppOverlaysProps = {
   updates: UpdateOverlayProps;
   exporting: ExportOverlayProps;
   modelDownload: ModelDownloadOverlayProps;
+  about: AboutOverlayProps;
 };

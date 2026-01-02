@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import os
+import platform
 import time
 import threading
 import zlib
@@ -142,14 +143,189 @@ def _legacy_paths(machine_id: str) -> tuple[Path, ...]:
     return tuple(legacy)
 
 
+# ============================================================================
+# OS-Level Persistent Storage (survives app reinstall, no admin needed)
+# ============================================================================
+
+def _get_system_storage_paths(machine_id: str) -> list[Path]:
+    """Get persistent storage paths OUTSIDE app directory (survives reinstall)."""
+    paths = []
+    hashed_name = _hashed_filename(machine_id, "sys", length=24)
+
+    system = platform.system()
+
+    if system == "Windows":
+        # User-level paths (no admin needed)
+        appdata = os.environ.get("APPDATA")
+        localappdata = os.environ.get("LOCALAPPDATA")
+        userprofile = os.environ.get("USERPROFILE")
+
+        if appdata:
+            paths.append(Path(appdata) / "Microsoft" / "Windows" / "INetCache" / hashed_name)
+        if localappdata:
+            paths.append(Path(localappdata) / "Microsoft" / "Windows" / "Caches" / hashed_name)
+        if userprofile:
+            paths.append(Path(userprofile) / ".config" / hashed_name)
+
+    elif system == "Darwin":  # macOS
+        home = Path.home()
+        paths.append(home / "Library" / "Application Support" / ".systemcache" / hashed_name)
+        paths.append(home / "Library" / "Preferences" / ".cache" / hashed_name)
+        paths.append(home / ".config" / hashed_name)
+
+    else:  # Linux and others
+        home = Path.home()
+        paths.append(home / ".config" / ".systemcache" / hashed_name)
+        paths.append(home / ".local" / "share" / ".cache" / hashed_name)
+        paths.append(home / ".cache" / ".sysdata" / hashed_name)
+
+    return paths
+
+
+def _get_install_marker_paths(machine_id: str) -> list[Path]:
+    """Get install marker paths (proves app was used before)."""
+    paths = []
+    marker_name = _hashed_filename(machine_id, "marker", length=28)
+
+    system = platform.system()
+
+    if system == "Windows":
+        appdata = os.environ.get("APPDATA")
+        localappdata = os.environ.get("LOCALAPPDATA")
+
+        if appdata:
+            paths.append(Path(appdata) / "Microsoft" / "Internet Explorer" / "DOMStore" / marker_name)
+        if localappdata:
+            paths.append(Path(localappdata) / "Microsoft" / "Event Viewer" / marker_name)
+
+    elif system == "Darwin":
+        home = Path.home()
+        paths.append(home / "Library" / "Caches" / ".metadata" / marker_name)
+        paths.append(home / "Library" / "Logs" / ".systemlog" / marker_name)
+
+    else:  # Linux
+        home = Path.home()
+        paths.append(home / ".cache" / ".metadata" / marker_name)
+        paths.append(home / ".local" / "share" / ".logs" / marker_name)
+
+    return paths
+
+
+def _save_to_registry_windows(machine_id: str, payload: dict, key: bytes) -> bool:
+    """Save to Windows Registry (HKEY_CURRENT_USER, no admin needed)."""
+    if platform.system() != "Windows":
+        return False
+
+    try:
+        import winreg
+    except ImportError:
+        return False
+
+    value_name = _hashed_filename(machine_id, "reg", length=20)
+    blob = _encode_blob({"payload": payload, "sig": _sign_payload(payload, key)})
+    encoded = base64.b64encode(blob).decode("ascii")
+
+    # Multiple registry locations (harder to find all of them)
+    reg_paths = [
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\SessionInfo"),
+        (winreg.HKEY_CURRENT_USER, r"Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\BagMRU"),
+    ]
+
+    success = False
+    for hkey, subkey in reg_paths:
+        try:
+            reg_key = winreg.CreateKey(hkey, subkey)
+            winreg.SetValueEx(reg_key, value_name, 0, winreg.REG_SZ, encoded)
+            winreg.CloseKey(reg_key)
+            success = True
+        except Exception:
+            pass
+
+    return success
+
+
+def _load_from_registry_windows(machine_id: str, key: bytes) -> dict | None:
+    """Load from Windows Registry."""
+    if platform.system() != "Windows":
+        return None
+
+    try:
+        import winreg
+    except ImportError:
+        return None
+
+    value_name = _hashed_filename(machine_id, "reg", length=20)
+    machine_hash = _machine_hash(machine_id)
+
+    reg_paths = [
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\SessionInfo"),
+        (winreg.HKEY_CURRENT_USER, r"Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\BagMRU"),
+    ]
+
+    for hkey, subkey in reg_paths:
+        try:
+            reg_key = winreg.OpenKey(hkey, subkey)
+            encoded, _ = winreg.QueryValueEx(reg_key, value_name)
+            winreg.CloseKey(reg_key)
+
+            blob = base64.b64decode(encoded)
+            raw = _decode_blob(blob)
+            if not raw:
+                continue
+
+            payload = raw.get("payload")
+            signature = raw.get("sig")
+            if not isinstance(payload, dict) or not isinstance(signature, str):
+                continue
+
+            expected = _sign_payload(payload, key)
+            if not hmac.compare_digest(signature, expected):
+                continue
+
+            if payload.get("machine_hash") != machine_hash:
+                continue
+
+            return payload
+        except Exception:
+            pass
+
+    return None
+
+
+def _save_install_markers(machine_id: str, key: bytes) -> None:
+    """Create install markers to prove app was used before."""
+    marker_payload = {
+        "v": 1,
+        "machine_hash": _machine_hash(machine_id),
+        "installed_at": int(time.time()),
+    }
+
+    for path in _get_install_marker_paths(machine_id):
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _write_payload(path, marker_payload, key)
+        except Exception:
+            pass
+
+
+def _check_install_markers(machine_id: str) -> bool:
+    """Check if app was installed/used before."""
+    return any(p.exists() for p in _get_install_marker_paths(machine_id))
+
+
 def load_export_usage(machine_id: str) -> dict:
     key = _derive_key(machine_id)
     machine_hash = _machine_hash(machine_id)
     primary, backup = _usage_paths(machine_id)
     legacy_paths = _legacy_paths(machine_id)
+    system_paths = _get_system_storage_paths(machine_id)
 
     tampered = False
     counts = []
+    primary_backup_exists = False
+    system_storage_exists = False
+
+    # Check file-based storage (primary, backup, legacy)
     for path in (primary, backup, *legacy_paths):
         payload, invalid = _read_payload(path, key)
         if invalid:
@@ -162,6 +338,48 @@ def load_export_usage(machine_id: str) -> dict:
         count = payload.get("count")
         if isinstance(count, int) and count >= 0:
             counts.append(count)
+            primary_backup_exists = True
+
+    # Check system-level storage separately
+    for path in system_paths:
+        payload, invalid = _read_payload(path, key)
+        if invalid:
+            tampered = True
+            continue
+        if not payload:
+            continue
+        if payload.get("machine_hash") != machine_hash:
+            continue
+        count = payload.get("count")
+        if isinstance(count, int) and count >= 0:
+            counts.append(count)
+            system_storage_exists = True
+
+    # Check Windows Registry (separate storage)
+    registry_payload = _load_from_registry_windows(machine_id, key)
+    if registry_payload:
+        count = registry_payload.get("count")
+        if isinstance(count, int) and count >= 0:
+            counts.append(count)
+            system_storage_exists = True
+
+    # Check if app was previously installed
+    has_been_installed = _check_install_markers(machine_id)
+
+    # TAMPER DETECTION: If system storage/markers exist but primary files don't,
+    # user likely deleted main files to reset count
+    if not primary_backup_exists and (system_storage_exists or has_been_installed):
+        return {
+            "count": max(counts + [MAX_FREE_EXPORTS + 1]),
+            "tampered": True,
+        }
+
+    # If files are missing/tampered but app was installed before, assume tampering
+    if not counts and has_been_installed:
+        return {
+            "count": MAX_FREE_EXPORTS + 1,
+            "tampered": True,
+        }
 
     if tampered:
         return {
@@ -191,12 +409,35 @@ def save_export_usage(machine_id: str, count: int) -> None:
         "updated_at": int(time.time()),
     }
     primary, backup = _usage_paths(machine_id)
+    system_paths = _get_system_storage_paths(machine_id)
+
+    # Write to primary and backup
     _write_payload(primary, payload, key)
-    # Best-effort backup
     try:
         _write_payload(backup, payload, key)
     except Exception:
         pass
+
+    # Write to all system-level storage paths (best-effort)
+    for path in system_paths:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _write_payload(path, payload, key)
+        except Exception:
+            pass
+
+    # Write to Windows Registry (best-effort)
+    try:
+        _save_to_registry_windows(machine_id, payload, key)
+    except Exception:
+        pass
+
+    # Create/update install markers (proves app was used)
+    try:
+        _save_install_markers(machine_id, key)
+    except Exception:
+        pass
+
     # Remove legacy files after successful write (best-effort).
     for legacy in _legacy_paths(machine_id):
         try:

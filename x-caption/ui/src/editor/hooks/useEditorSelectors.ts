@@ -6,6 +6,7 @@ export function useEditorSelectors() {
   const exportLanguage = useAppSelector((s) => s.transcript.exportLanguage);
   const appVersion = useAppSelector((s) => s.app.version);
   const showExportModal = useAppSelector((s) => s.app.showExportModal);
+  const showAboutModal = useAppSelector((s) => s.app.showAboutModal);
   const isPlayerModalOpen = useAppSelector((s) => s.app.isPlayerModalOpen);
   const isPlayerModalVisible = useAppSelector((s) => s.app.isPlayerModalVisible);
   const isLeftDrawerOpen = useAppSelector((s) => s.app.isLeftDrawerOpen);
@@ -34,6 +35,7 @@ export function useEditorSelectors() {
     exportLanguage,
     appVersion,
     showExportModal,
+    showAboutModal,
     isPlayerModalOpen,
     isPlayerModalVisible,
     isLeftDrawerOpen,

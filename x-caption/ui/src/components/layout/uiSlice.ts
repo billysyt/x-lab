@@ -9,6 +9,7 @@ type AppState = {
   showExportModal: boolean;
   showPremiumModal: boolean;
   showPremiumStatusModal: boolean;
+  showAboutModal: boolean;
   updateModal: UpdateModalInfo | null;
   alertModal: { title: string; message: string; tone: ToastType } | null;
   isPlayerModalOpen: boolean;
@@ -23,6 +24,7 @@ const initialState: AppState = {
   showExportModal: false,
   showPremiumModal: false,
   showPremiumStatusModal: false,
+  showAboutModal: false,
   updateModal: null,
   alertModal: null,
   isPlayerModalOpen: false,
@@ -49,6 +51,9 @@ const slice = createSlice({
     },
     setShowPremiumStatusModal(state, action: PayloadAction<boolean>) {
       state.showPremiumStatusModal = action.payload;
+    },
+    setShowAboutModal(state, action: PayloadAction<boolean>) {
+      state.showAboutModal = action.payload;
     },
     setUpdateModal(state, action: PayloadAction<UpdateModalInfo | null>) {
       state.updateModal = action.payload;
@@ -77,6 +82,7 @@ export const {
   setShowExportModal,
   setShowPremiumModal,
   setShowPremiumStatusModal,
+  setShowAboutModal,
   setUpdateModal,
   setAlertModal,
   setIsPlayerModalOpen,

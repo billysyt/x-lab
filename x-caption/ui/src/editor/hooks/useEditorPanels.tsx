@@ -39,6 +39,8 @@ type EditorPanelsUi = {
   setIsPlayerModalVisible: (value: boolean) => void;
   showExportModal: boolean;
   setShowExportModal: (value: boolean) => void;
+  showAboutModal: boolean;
+  setShowAboutModal: (value: boolean) => void;
   currentSubtitle: string;
   captionControlsDisabled: boolean;
   isCantoneseLanguage: boolean;
@@ -63,6 +65,7 @@ type EditorPanelsUi = {
   handleRetryModelDownload: () => void;
   openExternalUrl: (url: string) => void;
   handleRequestFilePicker: (open: () => void) => void;
+  appVersion: string | null;
 };
 
 type EditorPanelsParams = {
@@ -127,6 +130,8 @@ export function useEditorPanels(params: EditorPanelsParams) {
     setIsPlayerModalVisible,
     showExportModal,
     setShowExportModal,
+    showAboutModal,
+    setShowAboutModal,
     currentSubtitle,
     captionControlsDisabled,
     isCantoneseLanguage,
@@ -150,7 +155,8 @@ export function useEditorPanels(params: EditorPanelsParams) {
     clearModelDownload,
     handleRetryModelDownload,
     openExternalUrl,
-    handleRequestFilePicker
+    handleRequestFilePicker,
+    appVersion
   } = ui;
 
   const { updateState, premiumState, mediaImport } = overlayState;
@@ -408,6 +414,11 @@ export function useEditorPanels(params: EditorPanelsParams) {
       modelProgressText,
       onClearModelDownload: clearModelDownload,
       onRetryModelDownload: handleRetryModelDownload
+    },
+    about: {
+      showAboutModal,
+      setShowAboutModal,
+      version: appVersion || "Unknown"
     }
   };
 

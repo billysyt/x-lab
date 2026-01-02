@@ -429,6 +429,199 @@ def start_web_server(port: int = 11440):
     return server_thread
 
 
+# Global menu handler to prevent garbage collection
+_MENU_HANDLER = None
+_MENU_HANDLER_CLASS = None
+
+
+def _get_or_create_menu_handler_class():
+    """Get or create the MenuHandler class (singleton pattern)."""
+    global _MENU_HANDLER_CLASS
+
+    if _MENU_HANDLER_CLASS is not None:
+        return _MENU_HANDLER_CLASS
+
+    try:
+        import objc
+
+        # Menu handler class that persists - must inherit from NSObject
+        class MenuHandler(objc.lookUpClass("NSObject")):
+            @objc.python_method
+            def init(self):
+                self = objc.super(MenuHandler, self).init()
+                return self
+
+            def showAbout_(self, sender):
+                """Trigger About modal in React UI via JavaScript."""
+                try:
+                    logger.info("About menu clicked - triggering React modal")
+
+                    # Use a background thread to avoid blocking the main thread
+                    def trigger_modal():
+                        try:
+                            # Trigger the About modal by dispatching Redux action via JavaScript
+                            js_code = """
+                            (function() {
+                                try {
+                                    if (window.store && window.store.dispatch) {
+                                        window.store.dispatch({ type: 'app/setShowAboutModal', payload: true });
+                                        return true;
+                                    }
+                                    return false;
+                                } catch (e) {
+                                    console.error('Error dispatching about modal:', e);
+                                    return false;
+                                }
+                            })();
+                            """
+                            # Find the pywebview window and execute JavaScript
+                            import webview
+                            windows = webview.windows
+                            if windows and len(windows) > 0:
+                                result = windows[0].evaluate_js(js_code)
+                                logger.info(f"About modal triggered, result: {result}")
+                            else:
+                                logger.warning("No webview windows found to trigger About modal")
+                        except Exception as e:
+                            logger.error(f"Error in trigger_modal thread: {e}", exc_info=True)
+
+                    # Run in background thread to avoid blocking
+                    import threading
+                    threading.Thread(target=trigger_modal, daemon=True).start()
+
+                except Exception as e:
+                    logger.error(f"Error triggering about modal: {e}", exc_info=True)
+
+        _MENU_HANDLER_CLASS = MenuHandler
+        return MenuHandler
+    except Exception as exc:
+        logger.error(f"Failed to create MenuHandler class: {exc}")
+        return None
+
+
+def setup_macos_menu():
+    """Set up native macOS menu with About option."""
+    global _MENU_HANDLER
+
+    if sys.platform != "darwin":
+        return
+
+    try:
+        from native_config import VERSION
+        from AppKit import (
+            NSApp,
+            NSMenu,
+            NSMenuItem,
+            NSAlert,
+            NSAlertStyleInformational,
+            NSApplication,
+        )
+        import objc
+
+        # Get or create the MenuHandler class
+        MenuHandler = _get_or_create_menu_handler_class()
+        if MenuHandler is None:
+            logger.error("Could not create MenuHandler class")
+            return
+
+        # Create and retain handler if not already created
+        if _MENU_HANDLER is None:
+            _MENU_HANDLER = MenuHandler.alloc().init()
+
+            # Verify handler can respond to selector
+            if not _MENU_HANDLER.respondsToSelector_("showAbout:"):
+                logger.warning("MenuHandler does not respond to showAbout: selector!")
+            else:
+                logger.info("MenuHandler successfully responds to showAbout: selector")
+
+        # Create main menu bar
+        main_menu = NSMenu.alloc().init()
+
+        # Create app menu (first menu)
+        app_menu_item = NSMenuItem.alloc().init()
+        main_menu.addItem_(app_menu_item)
+
+        # Create app submenu
+        app_menu = NSMenu.alloc().init()
+        app_menu_item.setSubmenu_(app_menu)
+
+        # Add About menu item - DON'T use the standard "orderFrontStandardAboutPanel:" action
+        # because that shows Python's About dialog. Use our custom action instead.
+        about_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "About X-Caption",
+            "showAbout:",
+            ""
+        )
+        about_item.setTarget_(_MENU_HANDLER)
+        app_menu.addItem_(about_item)
+
+        logger.info(f"About menu item created with target: {_MENU_HANDLER}, action: showAbout:")
+
+        # Add separator
+        app_menu.addItem_(NSMenuItem.separatorItem())
+
+        # Add Hide X-Caption (Cmd+H)
+        hide_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Hide X-Caption",
+            "hide:",
+            "h"
+        )
+        app_menu.addItem_(hide_item)
+
+        # Add Hide Others (Cmd+Opt+H)
+        hide_others_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Hide Others",
+            "hideOtherApplications:",
+            "h"
+        )
+        hide_others_item.setKeyEquivalentModifierMask_(
+            1 << 18 | 1 << 19  # NSEventModifierFlagOption | NSEventModifierFlagCommand
+        )
+        app_menu.addItem_(hide_others_item)
+
+        # Add Show All
+        show_all_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Show All",
+            "unhideAllApplications:",
+            ""
+        )
+        app_menu.addItem_(show_all_item)
+
+        # Add separator
+        app_menu.addItem_(NSMenuItem.separatorItem())
+
+        # Add Quit X-Caption (Cmd+Q)
+        quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Quit X-Caption",
+            "terminate:",
+            "q"
+        )
+        app_menu.addItem_(quit_item)
+
+        # Set as the main menu
+        NSApp.setMainMenu_(main_menu)
+
+        # Verify what was actually set
+        try:
+            current_menu = NSApp.mainMenu()
+            if current_menu:
+                first_item = current_menu.itemAtIndex_(0)
+                if first_item:
+                    submenu = first_item.submenu()
+                    if submenu:
+                        about_item_check = submenu.itemAtIndex_(0)
+                        if about_item_check:
+                            logger.info(f"Verified: Menu item title is '{about_item_check.title()}'")
+                            logger.info(f"Verified: Menu item action is '{about_item_check.action()}'")
+                            logger.info(f"Verified: Menu item target is '{about_item_check.target()}'")
+        except Exception as e:
+            logger.debug(f"Could not verify menu: {e}")
+
+        logger.info("macOS native menu configured successfully")
+    except Exception as exc:
+        logger.warning("Failed to set up macOS menu: %s", exc)
+
+
 def open_browser(port: int = 11440, width: int = 1480, height: int = 900) -> str:
     """Open native window with embedded Chromium, falling back to system browser."""
     from native_config import VERSION
@@ -945,12 +1138,42 @@ def open_browser(port: int = 11440, width: int = 1480, height: int = 900) -> str
 
         bridge = EmbeddedBridge(webview)
 
+        # Set app name BEFORE creating the window
+        if sys.platform == "darwin":
+            try:
+                from AppKit import NSApp, NSProcessInfo, NSApplicationActivationPolicyRegular
+                from Foundation import NSBundle, NSMutableDictionary
+
+                # Set process name
+                processInfo = NSProcessInfo.processInfo()
+                processInfo.setProcessName_("X-Caption")
+
+                # Override bundle info
+                bundle = NSBundle.mainBundle()
+                if bundle:
+                    info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
+                    if info:
+                        info = NSMutableDictionary.dictionaryWithDictionary_(info)
+                        info["CFBundleName"] = "X-Caption"
+                        info["CFBundleDisplayName"] = "X-Caption"
+
+                # Set activation policy and activate
+                NSApp.setActivationPolicy_(NSApplicationActivationPolicyRegular)
+                NSApp.activateIgnoringOtherApps_(True)
+
+                logger.info("Set app name to X-Caption")
+            except Exception as e:
+                logger.warning(f"Could not set app name: {e}")
+
         try:
             webview.settings["DRAG_REGION_SELECTOR"] = ".pywebview-drag-region"
             if "DRAG_REGION_DIRECT_TARGET_ONLY" in webview.settings:
                 webview.settings["DRAG_REGION_DIRECT_TARGET_ONLY"] = False
             if "ALLOW_FULLSCREEN" in webview.settings:
                 webview.settings["ALLOW_FULLSCREEN"] = True
+            # Disable default menu if the setting exists
+            if "OPEN_DEVTOOLS_IN_DEBUG" in webview.settings:
+                webview.settings["OPEN_DEVTOOLS_IN_DEBUG"] = False
         except Exception:
             pass
 
@@ -1035,6 +1258,28 @@ def open_browser(port: int = 11440, width: int = 1480, height: int = 900) -> str
         def on_webview_ready():
             try:
                 if sys.platform == "darwin":
+                    # Delay menu setup to ensure it overrides pywebview's default menu
+                    # Use performSelectorOnMainThread to ensure it runs on the main thread
+                    def delayed_menu_setup():
+                        logger.info("Waiting for webview to fully initialize before setting menu...")
+                        time.sleep(1.0)  # Wait for webview to finish initialization
+                        logger.info("Setting up custom macOS menu now...")
+
+                        # Run on main thread using AppKit
+                        try:
+                            from AppKit import NSApp
+                            from PyObjCTools import AppHelper
+
+                            # Schedule menu setup on main thread
+                            AppHelper.callAfter(setup_macos_menu)
+                            logger.info("Custom menu setup scheduled on main thread")
+                        except Exception as e:
+                            logger.error(f"Failed to schedule menu setup: {e}")
+                            # Fallback: try direct call
+                            setup_macos_menu()
+
+                    threading.Thread(target=delayed_menu_setup, daemon=True).start()
+
                     try:
                         native_window = getattr(window, "native", None)
                         if native_window:

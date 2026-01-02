@@ -5,7 +5,8 @@ import {
   setIsPlayerModalOpen as setIsPlayerModalOpenAction,
   setIsPlayerModalVisible as setIsPlayerModalVisibleAction,
   setIsTranscriptEdit as setIsTranscriptEditAction,
-  setShowExportModal as setShowExportModalAction
+  setShowExportModal as setShowExportModalAction,
+  setShowAboutModal as setShowAboutModalAction
 } from "../../components/layout/uiSlice";
 import type { ToastType } from "../../components/common/ToastHost";
 import type { AppDispatch } from "../../store";
@@ -38,6 +39,13 @@ export function useEditorUiActions(params: EditorUiActionsParams) {
   const setShowExportModal = useCallback(
     (value: boolean) => {
       dispatch(setShowExportModalAction(value));
+    },
+    [dispatch]
+  );
+
+  const setShowAboutModal = useCallback(
+    (value: boolean) => {
+      dispatch(setShowAboutModalAction(value));
     },
     [dispatch]
   );
@@ -92,6 +100,7 @@ export function useEditorUiActions(params: EditorUiActionsParams) {
     setAlertModal,
     notify,
     setShowExportModal,
+    setShowAboutModal,
     setIsPlayerModalOpen,
     setIsPlayerModalVisible,
     setIsLeftDrawerOpen,

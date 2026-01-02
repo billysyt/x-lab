@@ -15,6 +15,7 @@ import { UpdateModalOverlay } from "../updates/components/UpdateModalOverlay";
 import { ExportModalOverlay } from "../export/components/ExportModalOverlay";
 import { ModelDownloadModalOverlay } from "../model/components/ModelDownloadModalOverlay";
 import { ImportPromptModal } from "../mediaImport/components/ImportPromptModal";
+import { AboutModalOverlay } from "../about/components/AboutModalOverlay";
 
 export function AppOverlays({
   isCompact,
@@ -54,7 +55,8 @@ export function AppOverlays({
   premium,
   updates,
   exporting,
-  modelDownload
+  modelDownload,
+  about
 }: AppOverlaysProps) {
   const { notify, alertModal, setAlertModal } = alerts;
   const { confirmModal, setConfirmModal } = confirm;
@@ -135,6 +137,8 @@ export function AppOverlays({
     onClearModelDownload,
     onRetryModelDownload
   } = modelDownload;
+
+  const { showAboutModal, setShowAboutModal, version } = about;
 
   return (
     <>
@@ -286,6 +290,12 @@ export function AppOverlays({
         setShowImportModal={setShowImportModal}
         onOpenModal={handleOpenModal}
       />
+
+      <AboutModalOverlay
+        showAboutModal={showAboutModal}
+        setShowAboutModal={setShowAboutModal}
+        version={version}
+      />
     </>
   );
 }
@@ -304,5 +314,6 @@ export type {
   PremiumOverlayProps,
   UpdateOverlayProps,
   ExportOverlayProps,
-  ModelDownloadOverlayProps
+  ModelDownloadOverlayProps,
+  AboutOverlayProps
 } from "./AppOverlays.types";

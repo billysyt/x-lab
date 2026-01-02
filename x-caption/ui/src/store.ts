@@ -21,5 +21,10 @@ export const store = configureStore({
 
 setupListeners(store.dispatch);
 
+// Expose store to window for native menu integration
+if (typeof window !== "undefined") {
+  (window as any).store = store;
+}
+
 export type RootState = ReturnType<typeof store.getState>;
 export type AppDispatch = typeof store.dispatch;
