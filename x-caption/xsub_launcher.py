@@ -405,8 +405,22 @@ def start_web_server(port: int = 11440):
     )
     server_thread.start()
 
-    # Wait for server to start
-    time.sleep(0.5)
+    # Wait for server to actually be ready (not just started)
+    health_url = f"http://127.0.0.1:{port}/health"
+    import urllib.request
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    max_wait = 10.0
+    start_time = time.time()
+
+    while time.time() - start_time < max_wait:
+        try:
+            request = urllib.request.Request(health_url)
+            with opener.open(request, timeout=1) as response:
+                if response.status == 200:
+                    break
+        except:
+            pass
+        time.sleep(0.1)
 
     print("[OK] Web server started")
     print()
@@ -1594,13 +1608,12 @@ def open_browser(port: int = 11440, width: int = 1480, height: int = 900) -> str
                 pass
 
         def poll_and_load():
-            print("[WEB] Loading interface...")
-            window.load_url(url)
+            # Server should already be ready, but do a quick check
             if dev_url:
-                wait_for_url(dev_url)
-            else:
-                wait_for_server(port)
-            print("[WEB] Backend is ready. Reloading interface...")
+                # For dev mode, still need to wait for Vite
+                if not wait_for_url(dev_url):
+                    print("[WEB] Dev server not ready, loading anyway...")
+            print("[WEB] Loading interface...")
             window.load_url(url)
 
         threading.Thread(target=poll_and_load, daemon=True).start()
