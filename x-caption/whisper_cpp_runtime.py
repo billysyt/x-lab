@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from native_config import get_models_dir, get_bundle_dir
+from native_config import get_models_dir, get_bundle_dir, get_data_dir, get_bundled_models_dir
 from model_manager import get_whisper_model_info
 
 logger = logging.getLogger(__name__)
@@ -99,8 +99,12 @@ def resolve_whisper_engine() -> Optional[Path]:
         candidates.append(Path(env_path))
 
     models_dir = get_models_dir()
-    candidates.append(models_dir / "whisper" / _platform_exe_name("engine"))
-    candidates.append(models_dir / "whisper" / _platform_exe_name("whisper"))
+    candidates.append(models_dir / _platform_exe_name("engine"))
+    candidates.append(models_dir / _platform_exe_name("whisper"))
+
+    legacy_models_dir = get_data_dir() / "models" / "whisper"
+    candidates.append(legacy_models_dir / _platform_exe_name("engine"))
+    candidates.append(legacy_models_dir / _platform_exe_name("whisper"))
 
     bundle_dir = get_bundle_dir()
     candidates.append(bundle_dir / "whisper" / _platform_exe_name("engine"))
@@ -121,14 +125,21 @@ def resolve_whisper_model(model_path: Optional[str] = None) -> Optional[Path]:
         if candidate.exists() and candidate.is_file():
             return candidate
         if not candidate.is_absolute():
-            local_candidate = get_models_dir() / "whisper" / candidate
+            local_candidate = get_models_dir() / candidate
             if local_candidate.exists() and local_candidate.is_file():
                 return local_candidate
+            legacy_candidate = get_data_dir() / "models" / "whisper" / candidate
+            if legacy_candidate.exists() and legacy_candidate.is_file():
+                return legacy_candidate
 
     info = get_whisper_model_info(get_models_dir())
     default_model = info.path
     if default_model.exists() and default_model.is_file():
         return default_model
+
+    legacy_model = get_data_dir() / "models" / "whisper" / info.filename
+    if legacy_model.exists() and legacy_model.is_file():
+        return legacy_model
 
     try:
         from native_model_obfuscation import obfuscated_model_ready, assemble_obfuscated_model
@@ -142,6 +153,18 @@ def resolve_whisper_model(model_path: Optional[str] = None) -> Optional[Path]:
                 return assemble_obfuscated_model(get_models_dir())
         except Exception:
             pass
+
+    bundle_root = get_bundled_models_dir()
+    if bundle_root:
+        bundle_info = get_whisper_model_info(bundle_root)
+        if bundle_info.path.exists() and bundle_info.path.is_file():
+            return bundle_info.path
+        if obfuscated_model_ready and assemble_obfuscated_model:
+            try:
+                if obfuscated_model_ready(bundle_root):
+                    return assemble_obfuscated_model(bundle_root)
+            except Exception:
+                pass
 
     bundle_candidate = get_bundle_dir() / "whisper" / info.filename
     if bundle_candidate.exists() and bundle_candidate.is_file():
@@ -238,17 +261,15 @@ def transcribe_whisper_cpp(
     engine = resolve_whisper_engine()
     if not engine:
         raise RuntimeError(
-            "Whisper engine not found. Place a whisper.cpp binary at data/models/whisper/engine, "
-            "or add whisper/video.mjs with its native addon, or set XCAPTION_WHISPER_ENGINE to the path."
+            "Transcription engine not found. Place the engine binary in the data directory, "
+            "or add the node-based engine module, or set XCAPTION_WHISPER_ENGINE to the path."
         )
 
     model_file = resolve_whisper_model(model_path)
     if not model_file:
-        info = get_whisper_model_info(get_models_dir())
         raise RuntimeError(
-            "Whisper model not found. "
-            f"Download it from {info.url} and place it at {info.path}, "
-            "or use the in-app downloader."
+            "Model assets not found. "
+            "Use the in-app package downloader to fetch the required files."
         )
 
     audio_path = Path(audio_path)
@@ -265,7 +286,7 @@ def transcribe_whisper_cpp(
     txt_path = output_prefix.with_suffix(".txt")
 
     if progress_callback:
-        progress_callback(10, "Starting Whisper transcription")
+        progress_callback(10, "Starting transcription")
 
     if engine.suffix.lower() == ".mjs":
         progress_marker = _PROGRESS_MARKER
@@ -298,7 +319,7 @@ console.log('{json_marker}' + JSON.stringify(result));
         )
         if return_code != 0:
             details = output.strip() or "Unknown error"
-            raise RuntimeError(f"Whisper node runner failed: {details}")
+            raise RuntimeError(f"Transcription runner failed: {details}")
 
         parsed = None
         if json_payload:
@@ -317,7 +338,7 @@ console.log('{json_marker}' + JSON.stringify(result));
                     except Exception:
                         continue
         if parsed is None:
-            raise RuntimeError("Whisper node runner returned no JSON output")
+            raise RuntimeError("Transcription runner returned no JSON output")
 
         if isinstance(parsed, str):
             try:
@@ -375,7 +396,7 @@ console.log('{json_marker}' + JSON.stringify(result));
                 pass
 
         if progress_callback:
-            progress_callback(90, "Finalizing Whisper transcript")
+            progress_callback(90, "Finalizing transcript")
 
         return {
             "segments": segments,
@@ -415,7 +436,7 @@ console.log('{json_marker}' + JSON.stringify(result));
 
     if return_code != 0:
         details = output.strip() or "Unknown error"
-        raise RuntimeError(f"Whisper engine failed: {details}")
+        raise RuntimeError(f"Transcription engine failed: {details}")
 
     segments: List[Dict[str, Any]] = []
     detected_language = None
@@ -443,7 +464,7 @@ console.log('{json_marker}' + JSON.stringify(result));
             logger.warning("Failed to parse whisper SRT output: %s", exc)
 
     if progress_callback:
-        progress_callback(90, "Finalizing Whisper transcript")
+        progress_callback(90, "Finalizing transcript")
 
     transcript_text = " ".join([seg["text"] for seg in segments]).strip()
     duration = None

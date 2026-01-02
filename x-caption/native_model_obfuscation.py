@@ -144,10 +144,10 @@ def _assembly_cache_path() -> Path:
 
 def assemble_obfuscated_model(models_root: Path) -> Path:
     if not obfuscated_model_ready(models_root):
-        raise RuntimeError("Obfuscated Whisper model is incomplete.")
+        raise RuntimeError("Model package is incomplete.")
     tail = _tail_bytes()
     if tail is None:
-        raise RuntimeError("Obfuscated Whisper model tail is missing.")
+        raise RuntimeError("Model package tail is missing.")
 
     global _ASSEMBLED_PATH
     with _ASSEMBLY_LOCK:
@@ -205,7 +205,11 @@ def maybe_obfuscate_model(model_path: Path, *, delete_original: bool = True, mod
         return False
 
     if models_root is None:
-        models_root = model_path.parent.parent
+        parent = model_path.parent
+        if parent.name == "whisper" and parent.parent.name == "models":
+            models_root = parent.parent
+        else:
+            models_root = parent
     model_dir = _chunk_root(models_root)
     model_dir.mkdir(parents=True, exist_ok=True)
     chunks = _expected_chunk_paths(model_dir)

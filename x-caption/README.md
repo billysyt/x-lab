@@ -63,11 +63,7 @@ Note: On Linux/macOS use `source .venv312/bin/activate`.
 
 ## Running in Development
 1. Activate the virtual environment and install requirements (see above).
-2. (Optional) Pre-download the Whisper model into `data/models/whisper/model.bin`:
-   ```bash
-   python model_manager.py --download
-   ```
-   Or skip this step and let the app download the model automatically the first time you generate captions.
+2. (Optional) Let the app pre-download the Whisper package (obfuscated `.dll` chunks) the first time you generate captions.
 3. Launch the app:
    ```bash
    python xsub_launcher.py
@@ -75,9 +71,8 @@ Note: On Linux/macOS use `source .venv312/bin/activate`.
 4. The launcher will start the backend on `http://127.0.0.1:11220`, open the PyWebView window, and block until shutdown.
 
 ### Offline runtime notes
-- The packaged desktop build ships without models. Whisper models are downloaded on demand the first time you click **AI Generate Caption**.
-- If the device is offline, download the Whisper model manually and place it at `data/models/whisper/model.bin` (or the user data models folder in production).
-- Override the default model download URL or filename with `XCAPTION_WHISPER_MODEL_URL` and `XCAPTION_WHISPER_MODEL_FILE`.
+- The packaged desktop build ships without models. Whisper packages are downloaded on demand the first time you click **AI Generate Caption**.
+- For offline use, download once while online so the `.dll` chunks are cached in the data directory.
 
 ### Frontend (React UI)
 The React UI source lives in `ui/` and is built into `static/ui/` (served by Flask and bundled by PyInstaller).

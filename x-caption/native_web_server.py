@@ -52,6 +52,7 @@ from native_config import (
     get_data_dir,
     get_config,
     get_models_dir,
+    get_bundled_models_dir,
     VERSION
 )
 setup_environment()
@@ -1490,6 +1491,11 @@ def create_app():
             models_root = get_models_dir()
             ready = obfuscated_model_ready(models_root)
             chunk_dir = chunk_storage_dir(models_root)
+            bundle_root = get_bundled_models_dir()
+            if not ready and bundle_root:
+                ready = obfuscated_model_ready(bundle_root)
+                if ready:
+                    chunk_dir = chunk_storage_dir(bundle_root)
             chunk_names = expected_chunk_names()
             expected_paths = [str(chunk_dir / name) for name in chunk_names] if chunk_names else None
             return jsonify({
@@ -1512,8 +1518,7 @@ def create_app():
                     **status_payload,
                     "status": "ready",
                 }), 200
-
-            state = _start_whisper_model_download()
+            state = _start_whisper_package_download()
             response = _serialize_model_download(state)
             response["status"] = state.get("status")
             return jsonify(response), 202
@@ -1526,6 +1531,8 @@ def create_app():
         """Check Whisper model download progress."""
         state = _get_download_state(download_id)
         if not state:
+            state = _get_package_download_state(download_id)
+        if not state:
             return jsonify({"error": "Download not found"}), 404
         return jsonify(_serialize_model_download(state)), 200
 
@@ -1534,7 +1541,13 @@ def create_app():
         """Kick off Whisper model package download (runs in background)."""
         try:
             from native_model_obfuscation import obfuscated_model_ready
-            if obfuscated_model_ready(get_models_dir()):
+            models_root = get_models_dir()
+            ready = obfuscated_model_ready(models_root)
+            if not ready:
+                bundle_root = get_bundled_models_dir()
+                if bundle_root:
+                    ready = obfuscated_model_ready(bundle_root)
+            if ready:
                 return jsonify({
                     "status": "ready",
                     "ready": True,
@@ -2946,12 +2959,10 @@ def create_app():
                     second_caption_language = None
 
             if not resolve_whisper_model(model):
-                info = get_whisper_model_info(get_models_dir())
                 return jsonify({
                     "error": (
-                        "Whisper model not found. "
-                        f"Download it from {info.url} and place it at {info.path}, "
-                        "or use the in-app downloader."
+                        "Model assets not found. "
+                        "Use the in-app downloader."
                     )
                 }), 400
 

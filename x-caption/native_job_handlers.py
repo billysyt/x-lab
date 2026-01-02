@@ -433,6 +433,10 @@ def _rnnoise_model_path() -> Optional[Path]:
         path = candidate
     else:
         path = get_models_dir() / "rnnoise" / model_name
+        if not path.exists():
+            legacy_path = get_models_dir() / "models" / "rnnoise" / model_name
+            if legacy_path.exists():
+                path = legacy_path
 
     if not path.exists():
         logger.warning(

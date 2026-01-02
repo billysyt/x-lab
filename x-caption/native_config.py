@@ -70,114 +70,56 @@ def get_data_dir() -> Path:
 
 
 def get_models_dir() -> Path:
-    """Get the models directory
-
-    Priority:
-    1. Bundled models in .app/Contents/Resources/data/models (macOS) -> copied to user dir
-    2. Bundled models in _internal/data/models (PyInstaller) -> copied to user dir
-    3. User data directory (for downloaded models / runtime updates)
-    """
-    start = time.perf_counter()
-    data_dir = get_data_dir()
-    user_models_dir = data_dir / 'models'
-
-    if is_frozen():
-        # Check macOS .app bundle Resources folder first
-        if sys.platform == 'darwin':
-            # macOS: Check Contents/Resources/data/models
-            models_path_pref = os.environ.get('XCAPTION_MODELS_PATH') or os.environ.get('XSUB_MODELS_PATH')
-            if not models_path_pref:
-                try:
-                    import plistlib
-                    plist_path = Path(sys.executable).parent.parent / 'Info.plist'
-                    if plist_path.exists():
-                        with plist_path.open('rb') as plist_file:
-                            info = plistlib.load(plist_file)
-                        models_path_pref = info.get('X-CaptionModelsPath') or info.get('XSubModelsPath')
-                except Exception as plist_exc:
-                    logger.warning(f"Failed to read Info.plist for models path: {plist_exc}")
-
-            bundle_root = Path(sys.executable).parent.parent
-            if models_path_pref:
-                path_candidate = Path(models_path_pref)
-                if not path_candidate.is_absolute():
-                    bundle_dir = bundle_root / path_candidate
-                else:
-                    bundle_dir = path_candidate
-            else:
-                bundle_dir = bundle_root / 'Resources' / 'data' / 'models'
-
-            if bundle_dir.exists():
-                _ensure_models_copied(bundle_dir, user_models_dir)
-                _log_startup_timing("get_models_dir (bundled resources)", start)
-                return user_models_dir
-
-        # Check PyInstaller _MEIPASS (bundled in spec)
-        bundle_dir = get_bundle_dir()
-        bundled_models = bundle_dir / 'data' / 'models'
-        if bundled_models.exists():
-            _ensure_models_copied(bundled_models, user_models_dir)
-            _log_startup_timing("get_models_dir (pyinstaller bundle)", start)
-            return user_models_dir
-
-    # Development mode or no bundled models - use local directory
-    _log_startup_timing("get_models_dir (local)", start)
-    return user_models_dir
+    """Return the writable models directory (downloads go here)."""
+    env_path = os.environ.get('XCAPTION_MODELS_DIR') or os.environ.get('XSUB_MODELS_DIR')
+    if env_path:
+        path = Path(env_path).expanduser()
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    return get_data_dir()
 
 
-def _ensure_models_copied(source: Path, destination: Path):
-    """Copy bundled models to user-writable directory if needed."""
-    copy_start = time.perf_counter() if startup_profile_enabled() else None
-    try:
-        sentinel = destination / f".bundled_version_{VERSION}"
-        bundled_entries = [entry.name for entry in source.iterdir()] if source.exists() else []
-        missing_entries = [
-            entry_name
-            for entry_name in bundled_entries
-            if not (destination / entry_name).exists()
-        ]
+def get_models_dir_lazy() -> Path:
+    """Return the models directory without any extra work."""
+    return get_models_dir()
 
-        if sentinel.exists() and not missing_entries:
-            return
 
-        if sentinel.exists() and missing_entries:
+def get_bundled_models_dir() -> Path | None:
+    """Return bundled models directory if present (read-only)."""
+    if not is_frozen():
+        return None
+
+    if sys.platform == 'darwin':
+        models_path_pref = os.environ.get('XCAPTION_MODELS_PATH') or os.environ.get('XSUB_MODELS_PATH')
+        if not models_path_pref:
             try:
-                sentinel.unlink()
-            except OSError:
-                pass
-            logger.warning(
-                "Bundled models sentinel present but missing entries %s. Re-synchronizing.",
-                ", ".join(missing_entries),
-            )
+                import plistlib
+                plist_path = Path(sys.executable).parent.parent / 'Info.plist'
+                if plist_path.exists():
+                    with plist_path.open('rb') as plist_file:
+                        info = plistlib.load(plist_file)
+                    models_path_pref = info.get('X-CaptionModelsPath') or info.get('XSubModelsPath')
+            except Exception as plist_exc:
+                logger.warning(f"Failed to read Info.plist for models path: {plist_exc}")
 
-        if destination.exists():
-            for entry_name in bundled_entries:
-                target_path = destination / entry_name
-                if target_path.exists():
-                    if target_path.is_dir():
-                        shutil.rmtree(target_path, ignore_errors=True)
-                    else:
-                        try:
-                            target_path.unlink()
-                        except OSError:
-                            pass
+        bundle_root = Path(sys.executable).parent.parent
+        if models_path_pref:
+            path_candidate = Path(models_path_pref)
+            if not path_candidate.is_absolute():
+                bundle_dir = bundle_root / path_candidate
+            else:
+                bundle_dir = path_candidate
         else:
-            destination.mkdir(parents=True, exist_ok=True)
+            bundle_dir = bundle_root / 'Resources' / 'data' / 'models'
 
-        if source.exists():
-            logger.info(f"Copying bundled models from {source} to {destination}")
-            for entry in source.iterdir():
-                target = destination / entry.name
-                if entry.is_dir():
-                    shutil.copytree(entry, target, dirs_exist_ok=True)
-                else:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(entry, target)
-            sentinel.touch()
-            if copy_start is not None:
-                _log_startup_timing("copy bundled models", copy_start)
-    except Exception as copy_exc:
-        logger.warning(f"Failed to prepare models directory from {source}: {copy_exc}")
+        if bundle_dir.exists():
+            return bundle_dir
+
+    bundle_dir = get_bundle_dir()
+    bundled_models = bundle_dir / 'data' / 'models'
+    if bundled_models.exists():
+        return bundled_models
+    return None
 
 
 def _refresh_msvc_runtime():
@@ -284,7 +226,7 @@ def setup_environment():
     # Set application directories
     os.environ['XCAPTION_BUNDLE_DIR'] = str(get_bundle_dir())
     os.environ['XCAPTION_DATA_DIR'] = str(get_data_dir())
-    os.environ['XCAPTION_MODELS_DIR'] = str(get_models_dir())
+    os.environ['XCAPTION_MODELS_DIR'] = str(get_models_dir_lazy())
     os.environ['XCAPTION_TRANSCRIPTIONS_DIR'] = str(get_transcriptions_dir())
     os.environ['XCAPTION_UPLOADS_DIR'] = str(get_uploads_dir())
     os.environ['XSUB_BUNDLE_DIR'] = os.environ['XCAPTION_BUNDLE_DIR']
@@ -314,7 +256,7 @@ def setup_environment():
 
     logger.info(f"Application bundle directory: {get_bundle_dir()}")
     logger.info(f"Application data directory: {get_data_dir()}")
-    logger.info(f"Models directory: {get_models_dir()}")
+    logger.info(f"Models directory: {get_models_dir_lazy()}")
     logger.info(f"Transcriptions directory: {get_transcriptions_dir()}")
     _ENV_READY = True
     _log_startup_timing("setup_environment total", start)

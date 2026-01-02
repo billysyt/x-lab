@@ -281,7 +281,7 @@ def get_resource_path(relative_path: str) -> Path:
 
 def check_and_setup_environment() -> bool:
     """Check and set up environment."""
-    from native_config import get_config, setup_environment
+    from native_config import get_data_dir, get_models_dir_lazy, setup_environment
     from native_ffmpeg import setup_ffmpeg_environment, test_ffmpeg
 
     overall_start = time.perf_counter()
@@ -291,10 +291,9 @@ def check_and_setup_environment() -> bool:
     setup_environment()
     _log_startup_timing("setup_environment", setup_start)
 
-    # Display configuration
-    config = get_config()
-    print(f"Data directory: {config['data_dir']}")
-    print(f"Models directory: {config['models_dir']}")
+    # Display configuration (avoid heavy model sync on startup)
+    print(f"Data directory: {get_data_dir()}")
+    print(f"Models directory: {get_models_dir_lazy()}")
 
     # Set up FFmpeg
     print("Configuring FFmpeg...")
@@ -1011,10 +1010,13 @@ def open_browser(port: int = 11440, width: int = 1480, height: int = 900) -> str
                 pass
 
         def poll_and_load():
-            wait_for_server(port)
+            print("[WEB] Loading interface...")
+            window.load_url(url)
             if dev_url:
                 wait_for_url(dev_url)
-            print("[WEB] Backend is ready. Loading interface...")
+            else:
+                wait_for_server(port)
+            print("[WEB] Backend is ready. Reloading interface...")
             window.load_url(url)
 
         threading.Thread(target=poll_and_load, daemon=True).start()
@@ -1075,9 +1077,6 @@ def open_browser(port: int = 11440, width: int = 1480, height: int = 900) -> str
 
     except Exception as exc:
         logger.error("Failed to open embedded window: %s", exc, exc_info=True)
-    ready = wait_for_server(port)
-    if not ready:
-        print("[WEB] Backend is still starting; the page may take a while to load.")
     webbrowser.open(url, new=2)
     print(f"[INFO] Browser opened at {url}")
     return "fallback"
@@ -1251,9 +1250,8 @@ def main():
             print("Hint: This appears to be a CUDA/GPU error.")
             print("   Try setting device='cpu' in transcription settings.")
         elif "MODEL" in error_str or "WHISPER" in error_str:
-            print("Hint: Whisper model issue detected.")
-            print("   Run 'python model_manager.py --download' to download the model,")
-            print("   or use the in-app downloader from the AI Generate Caption button.")
+            print("Hint: Model asset issue detected.")
+            print("   Use the in-app downloader from the AI Generate Caption button.")
         elif "MEMORY" in error_str:
             print("Hint: Memory error detected.")
             print("   Try with a smaller audio file or restart your computer.")
@@ -1263,7 +1261,7 @@ def main():
         else:
             print("Hint: For troubleshooting:")
             print("   1. Check crash_report.json for detailed stack traces")
-            print("   2. Confirm Whisper model exists in data/models/whisper/model.bin")
+            print("   2. Confirm the model package exists in data/")
             print("   3. Run 'python xsub_launcher.py --help' for diagnostics")
 
         print()

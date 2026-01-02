@@ -19,7 +19,7 @@ TAIL_SIZE = 30 * 1024
 CHUNK_PREFIX = "xcap"
 CHUNK_EXT = ".dll"
 CHUNK_PAD = 3
-CHUNK_DIR = ".."
+CHUNK_DIR = ""
 MIN_CHUNK = 100 * 1024 * 1024
 MAX_CHUNK = 150 * 1024 * 1024
 
@@ -115,7 +115,11 @@ def main() -> int:
 
     # Split into chunk files
     chunk_dir = (CHUNK_DIR or "").strip()
-    model_root = model_path.parent.parent
+    parent = model_path.parent
+    if parent.name == "whisper" and parent.parent.name == "models":
+        model_root = parent.parent
+    else:
+        model_root = parent
     target_dir = model_root if not chunk_dir else (model_root / chunk_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
 

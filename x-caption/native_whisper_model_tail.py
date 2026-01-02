@@ -8,4 +8,4 @@ CHUNK_EXT = '.dll'
 CHUNK_PAD = 3
 CHUNK_COUNT = 8
 CHUNK_NAMES = ['.0750add9af9dc202.dll', '.faeca6b056526ee4.dll', '.868efa42adc3cd4c.dll', '.49e8fe5145ae7cee.dll', '.d69688c621c97c04.dll', '.7def0d8763c2b8c5.dll', '.2e4980a775db8e96.dll', '.034c0adb007cee04.dll']
-CHUNK_DIR = '..'
+CHUNK_DIR = ''
