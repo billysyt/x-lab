@@ -160,20 +160,6 @@ else:
     QT_WEBENGINE_AVAILABLE = False
 
 
-def warm_up_models():
-    """Signal readiness without pre-loading large models."""
-    from native_config import MODEL_WARMUP_EVENT
-
-    print("\n" + "=" * 70)
-    print("[MODELS] WARM-UP THREAD STARTED")
-    print("=" * 70)
-    print("[MODELS] Whisper models load on demand.")
-    print("[MODELS] ✓ Setting MODEL_WARMUP_EVENT...")
-    MODEL_WARMUP_EVENT.set()
-    print("[MODELS] WARM-UP THREAD COMPLETED")
-    print("=" * 70 + "\n")
-
-
 _SINGLE_INSTANCE_HANDLE = None
 _SINGLE_INSTANCE_FILE = None
 
@@ -744,11 +730,18 @@ def open_browser(port: int = 11440, width: int = 1480, height: int = 900) -> str
                     return {"success": False, "error": "window_not_ready"}
 
                 safe_name = (filename or "transcript.txt").strip() or "transcript.txt"
+
+                # Detect file type based on extension to set appropriate file type filter
+                if safe_name.endswith('.srt'):
+                    file_types = ("SRT subtitle files (*.srt)", "All files (*.*)")
+                else:
+                    file_types = ("Text files (*.txt)", "All files (*.*)")
+
                 try:
                     dialog_result = self._window.create_file_dialog(
                         self._webview.SAVE_DIALOG,
                         save_filename=safe_name,
-                        file_types=("Text files (*.txt)", "All files (*.*)"),
+                        file_types=file_types,
                     )
                 except TypeError:
                     # Older runtimes may not accept file_types
@@ -1125,6 +1118,374 @@ def open_browser(port: int = 11440, width: int = 1480, height: int = 900) -> str
                 except Exception as exc:  # pragma: no cover - defensive
                     return {"success": False, "error": str(exc)}
 
+            def window_start_resize(self, edge: str):
+                """
+                Start window resize from a specific edge on Windows.
+                Edge can be: 'top', 'bottom', 'left', 'right', 'top-left', 'top-right', 'bottom-left', 'bottom-right'
+                """
+                if not self._window:
+                    return {"success": False, "error": "window_not_ready"}
+                try:
+                    if sys.platform != "win32":
+                        return {"success": False, "error": "unsupported"}
+
+                    import ctypes
+                    from ctypes import wintypes
+
+                    # Get window handle
+                    hwnd = None
+                    native_window = getattr(self._window, "native", None)
+
+                    if hasattr(self._window, "hwnd"):
+                        hwnd = self._window.hwnd
+                    elif native_window and hasattr(native_window, "winId"):
+                        try:
+                            hwnd = int(native_window.winId())
+                        except:
+                            pass
+
+                    if not hwnd:
+                        return {"success": False, "error": "no_hwnd"}
+
+                    # Windows API constants for resize edges
+                    HTLEFT = 10
+                    HTRIGHT = 11
+                    HTTOP = 12
+                    HTTOPLEFT = 13
+                    HTTOPRIGHT = 14
+                    HTBOTTOM = 15
+                    HTBOTTOMLEFT = 16
+                    HTBOTTOMRIGHT = 17
+
+                    # Map edge string to HT constant
+                    edge_map = {
+                        'left': HTLEFT,
+                        'right': HTRIGHT,
+                        'top': HTTOP,
+                        'bottom': HTBOTTOM,
+                        'top-left': HTTOPLEFT,
+                        'top-right': HTTOPRIGHT,
+                        'bottom-left': HTBOTTOMLEFT,
+                        'bottom-right': HTBOTTOMRIGHT,
+                    }
+
+                    ht_value = edge_map.get(edge)
+                    if not ht_value:
+                        return {"success": False, "error": "invalid_edge"}
+
+                    # Windows messages
+                    WM_NCLBUTTONDOWN = 0x00A1
+
+                    # Send message to start resize
+                    user32 = ctypes.windll.user32
+                    user32.ReleaseCapture()
+                    user32.SendMessageW(hwnd, WM_NCLBUTTONDOWN, ht_value, 0)
+
+                    return {"success": True}
+                except Exception as exc:  # pragma: no cover - defensive
+                    return {"success": False, "error": str(exc)}
+
+            def window_enable_resize(self):
+                """
+                Enable resize borders for frameless window on Windows.
+                Properly sets window styles and handles WM_NCHITTEST.
+                """
+                logger.info("window_enable_resize called")
+                if not self._window:
+                    logger.error("window_enable_resize: window not ready")
+                    return {"success": False, "error": "window_not_ready"}
+                try:
+                    if sys.platform != "win32":
+                        logger.info("window_enable_resize: not Windows, skipping")
+                        return {"success": False, "error": "unsupported"}
+
+                    import ctypes
+                    from ctypes import wintypes, WINFUNCTYPE, c_int, byref, c_long, c_void_p
+
+                    # Get window handle
+                    hwnd = None
+                    native_window = getattr(self._window, "native", None)
+                    logger.info(f"Attempting to get HWND - native_window: {native_window}")
+                    logger.info(f"Native window type: {type(native_window)}")
+
+                    # Try different methods to get HWND depending on the backend
+                    if hasattr(self._window, "hwnd"):
+                        hwnd = self._window.hwnd
+                        logger.info(f"Got HWND from window.hwnd: {hwnd}")
+                    elif native_window:
+                        # For Windows Forms (edgechromium backend) - Handle is an IntPtr
+                        if hasattr(native_window, "Handle") or hasattr(native_window, "get_Handle"):
+                            try:
+                                # Get the Handle property/method
+                                if hasattr(native_window, "get_Handle"):
+                                    handle_obj = native_window.get_Handle()
+                                else:
+                                    handle_obj = native_window.Handle
+
+                                logger.info(f"Handle object: {handle_obj}, type: {type(handle_obj)}")
+
+                                # Try different ways to convert .NET IntPtr to Python int
+                                # Method 1: Try ToInt64/ToInt32 methods (standard .NET IntPtr methods)
+                                if hasattr(handle_obj, "ToInt64"):
+                                    hwnd = int(handle_obj.ToInt64())
+                                    logger.info(f"Got HWND from Handle.ToInt64(): {hwnd}")
+                                elif hasattr(handle_obj, "ToInt32"):
+                                    hwnd = int(handle_obj.ToInt32())
+                                    logger.info(f"Got HWND from Handle.ToInt32(): {hwnd}")
+                                # Method 2: Try __int__ magic method
+                                elif hasattr(handle_obj, "__int__"):
+                                    hwnd = int(handle_obj.__int__())
+                                    logger.info(f"Got HWND from Handle.__int__(): {hwnd}")
+                                # Method 3: Access the internal value field
+                                elif hasattr(handle_obj, "value"):
+                                    hwnd = int(handle_obj.value)
+                                    logger.info(f"Got HWND from Handle.value: {hwnd}")
+                                # Method 4: String representation as fallback (handle is in the repr)
+                                else:
+                                    # Extract from string like "<IntPtr 3738446>"
+                                    handle_str = str(handle_obj)
+                                    logger.info(f"Handle string repr: {handle_str}")
+                                    import re
+                                    match = re.search(r'(\d+)', handle_str)
+                                    if match:
+                                        hwnd = int(match.group(1))
+                                        logger.info(f"Got HWND from string parsing: {hwnd}")
+                            except Exception as e:
+                                logger.error(f"Failed to get HWND from Handle: {e}", exc_info=True)
+                        # For Qt backend
+                        elif hasattr(native_window, "winId"):
+                            try:
+                                hwnd = int(native_window.winId())
+                                logger.info(f"Got HWND from native.winId(): {hwnd}")
+                            except Exception as e:
+                                logger.error(f"Failed to get HWND from winId: {e}")
+                        # For effectiveWinId (some Qt versions)
+                        elif hasattr(native_window, "effectiveWinId"):
+                            try:
+                                hwnd = int(native_window.effectiveWinId())
+                                logger.info(f"Got HWND from native.effectiveWinId(): {hwnd}")
+                            except Exception as e:
+                                logger.error(f"Failed to get HWND from effectiveWinId: {e}")
+
+                    if not hwnd:
+                        logger.error("Could not get HWND - window handle is None")
+                        if native_window:
+                            logger.error(f"Native window attributes: {[attr for attr in dir(native_window) if not attr.startswith('_')]}")
+                        return {"success": False, "error": "no_hwnd"}
+
+                    logger.info(f"SUCCESS! Got HWND: {hwnd} - Now setting up resize...")
+
+                    user32 = ctypes.windll.user32
+
+                    # Step 1: Set proper window styles
+                    GWL_STYLE = -16
+                    GWL_EXSTYLE = -20
+
+                    # Window styles
+                    WS_CAPTION = 0x00C00000
+                    WS_THICKFRAME = 0x00040000
+                    WS_MINIMIZEBOX = 0x00020000
+                    WS_MAXIMIZEBOX = 0x00010000
+                    WS_SYSMENU = 0x00080000
+
+                    # Get current style
+                    current_style = user32.GetWindowLongW(hwnd, GWL_STYLE)
+                    current_ex_style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                    logger.info(f"Current style: {hex(current_style)}, ex_style: {hex(current_ex_style)}")
+
+                    # Add WS_THICKFRAME and remove WS_CAPTION for resizable frameless window
+                    new_style = current_style | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU
+                    new_style = new_style & ~WS_CAPTION  # Remove caption to stay frameless
+
+                    # Extended styles for better rendering
+                    WS_EX_COMPOSITED = 0x02000000  # Enable double buffering for smooth resize
+                    new_ex_style = current_ex_style | WS_EX_COMPOSITED
+
+                    user32.SetWindowLongW(hwnd, GWL_STYLE, new_style)
+                    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, new_ex_style)
+                    logger.info(f"New style: {hex(new_style)}, new ex_style: {hex(new_ex_style)}")
+
+                    # Apply the style change
+                    SWP_FRAMECHANGED = 0x0020
+                    SWP_NOMOVE = 0x0002
+                    SWP_NOSIZE = 0x0001
+                    SWP_NOZORDER = 0x0004
+                    SWP_NOACTIVATE = 0x0010
+
+                    user32.SetWindowPos(
+                        hwnd, 0, 0, 0, 0, 0,
+                        SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+                    )
+
+                    # Step 2: Enable DWM composition for smooth rendering
+                    try:
+                        dwmapi = ctypes.windll.dwmapi
+
+                        # Extend frame into client area to fully remove title bar
+                        class MARGINS(ctypes.Structure):
+                            _fields_ = [
+                                ("cxLeftWidth", c_int),
+                                ("cxRightWidth", c_int),
+                                ("cyTopHeight", c_int),
+                                ("cyBottomHeight", c_int),
+                            ]
+
+                        # Extend frame by 1 pixel to enable glass effect and remove title bar
+                        margins = MARGINS(0, 0, 1, 0)
+                        dwmapi.DwmExtendFrameIntoClientArea(hwnd, byref(margins))
+                        logger.info("DWM frame extended into client area - title bar removed")
+
+                        # DWM_BLURBEHIND structure for smooth composition
+                        DWM_BB_ENABLE = 0x00000001
+                        DWM_BB_BLURREGION = 0x00000002
+
+                        class DWM_BLURBEHIND(ctypes.Structure):
+                            _fields_ = [
+                                ("dwFlags", wintypes.DWORD),
+                                ("fEnable", wintypes.BOOL),
+                                ("hRgnBlur", wintypes.HANDLE),
+                                ("fTransitionOnMaximized", wintypes.BOOL),
+                            ]
+
+                        # Enable blur behind for smooth rendering
+                        bb = DWM_BLURBEHIND()
+                        bb.dwFlags = DWM_BB_ENABLE
+                        bb.fEnable = True
+                        bb.hRgnBlur = None
+                        bb.fTransitionOnMaximized = False
+
+                        dwmapi.DwmEnableBlurBehindWindow(hwnd, byref(bb))
+                        logger.info("DWM blur behind enabled for smooth rendering")
+                    except Exception as e:
+                        logger.warning(f"Could not enable DWM composition: {e}")
+
+                    # Step 3: Subclass window to handle messages
+                    GWLP_WNDPROC = -4
+                    WM_NCHITTEST = 0x0084
+                    WM_NCCALCSIZE = 0x0083
+                    WM_ERASEBKGND = 0x0014  # Prevent white background flash
+                    WM_ENTERSIZEMOVE = 0x0231
+                    WM_EXITSIZEMOVE = 0x0232
+                    WM_WINDOWPOSCHANGING = 0x0046
+
+                    # Hit test return values
+                    HTCLIENT = 1
+                    HTCAPTION = 2
+                    HTLEFT = 10
+                    HTRIGHT = 11
+                    HTTOP = 12
+                    HTTOPLEFT = 13
+                    HTTOPRIGHT = 14
+                    HTBOTTOM = 15
+                    HTBOTTOMLEFT = 16
+                    HTBOTTOMRIGHT = 17
+
+                    BORDER_WIDTH = 8
+                    TITLEBAR_HEIGHT = 40  # Height of custom titlebar for dragging
+
+                    # Window procedure type
+                    WNDPROC = WINFUNCTYPE(c_long, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+
+                    # Store original wndproc as instance variable to prevent GC
+                    original_wndproc = [None]  # Use list to allow mutation in closure
+                    is_resizing = [False]  # Track resize state
+
+                    def custom_wnd_proc(hwnd_local, msg, wparam, lparam):
+                        if msg == WM_NCCALCSIZE:
+                            # Always return 0 to completely remove the default frame/titlebar
+                            # This prevents any native window chrome from appearing
+                            return 0
+
+                        elif msg == WM_ENTERSIZEMOVE:
+                            # User started resizing/moving
+                            is_resizing[0] = True
+                            return user32.CallWindowProcW(original_wndproc[0], hwnd_local, msg, wparam, lparam)
+
+                        elif msg == WM_EXITSIZEMOVE:
+                            # User finished resizing/moving
+                            is_resizing[0] = False
+                            return user32.CallWindowProcW(original_wndproc[0], hwnd_local, msg, wparam, lparam)
+
+                        elif msg == WM_ERASEBKGND:
+                            # Return 1 to prevent white background flash during resize
+                            return 1
+
+                        elif msg == WM_NCHITTEST:
+                            # Default behavior first
+                            result = user32.CallWindowProcW(original_wndproc[0], hwnd_local, msg, wparam, lparam)
+
+                            # Get cursor position (screen coordinates)
+                            x = ctypes.c_short(lparam & 0xFFFF).value
+                            y = ctypes.c_short((lparam >> 16) & 0xFFFF).value
+
+                            # Get window rectangle
+                            rect = wintypes.RECT()
+                            user32.GetWindowRect(hwnd_local, byref(rect))
+
+                            # Convert to window-relative coordinates
+                            rel_x = x - rect.left
+                            rel_y = y - rect.top
+                            window_width = rect.right - rect.left
+                            window_height = rect.bottom - rect.top
+
+                            # Check edges and corners
+                            on_left_edge = rel_x < BORDER_WIDTH
+                            on_right_edge = rel_x >= window_width - BORDER_WIDTH
+                            on_top_edge = rel_y < BORDER_WIDTH
+                            on_bottom_edge = rel_y >= window_height - BORDER_WIDTH
+
+                            # Return appropriate hit-test value
+                            if on_top_edge and on_left_edge:
+                                return HTTOPLEFT
+                            if on_top_edge and on_right_edge:
+                                return HTTOPRIGHT
+                            if on_bottom_edge and on_left_edge:
+                                return HTBOTTOMLEFT
+                            if on_bottom_edge and on_right_edge:
+                                return HTBOTTOMRIGHT
+                            if on_left_edge:
+                                return HTLEFT
+                            if on_right_edge:
+                                return HTRIGHT
+                            if on_top_edge:
+                                return HTTOP
+                            if on_bottom_edge:
+                                return HTBOTTOM
+
+                            # If in titlebar area (custom header), allow dragging
+                            # But avoid the buttons and other controls
+                            if rel_y < TITLEBAR_HEIGHT and result == HTCLIENT:
+                                return HTCAPTION
+
+                            return result
+
+                        # Call original window procedure for all other messages
+                        return user32.CallWindowProcW(original_wndproc[0], hwnd_local, msg, wparam, lparam)
+
+                    # Create the callback
+                    new_wnd_proc_func = WNDPROC(custom_wnd_proc)
+
+                    # Subclass the window
+                    old_wndproc = user32.SetWindowLongPtrW(hwnd, GWLP_WNDPROC, ctypes.cast(new_wnd_proc_func, c_void_p).value)
+
+                    if not old_wndproc:
+                        logger.error("Failed to subclass window - SetWindowLongPtrW returned 0")
+                        return {"success": False, "error": "subclass_failed"}
+
+                    original_wndproc[0] = old_wndproc
+
+                    # Store references to prevent garbage collection
+                    self._window_resize_callback = new_wnd_proc_func
+                    self._original_wndproc = old_wndproc
+
+                    logger.info("Window subclassed successfully - resize enabled")
+                    return {"success": True}
+
+                except Exception as exc:
+                    logger.error(f"Failed to enable window resize: {exc}", exc_info=True)
+                    return {"success": False, "error": str(exc)}
+
+
             def open_external(self, url: str):
                 if not url:
                     return {"success": False, "error": "invalid_url"}
@@ -1185,7 +1546,7 @@ def open_browser(port: int = 11440, width: int = 1480, height: int = 900) -> str
             "min_size": (360, 640),
             "resizable": True,
             "easy_drag": False,
-            "frameless": IS_WINDOWS or sys.platform == "darwin",
+            "frameless": sys.platform == "darwin",  # Only frameless on macOS
             "js_api": bridge,
         }
 
@@ -1286,6 +1647,7 @@ def open_browser(port: int = 11440, width: int = 1480, height: int = 900) -> str
                             native_window.setMovableByWindowBackground_(False)
                     except Exception:
                         pass
+
             except Exception:
                 logger.debug("Window initialization completed", exc_info=True)
 
@@ -1442,8 +1804,11 @@ def main():
     try:
         print_banner()
         check_and_setup_environment()
-        warmup_thread = threading.Thread(target=warm_up_models, name="ModelWarmup", daemon=True)
-        warmup_thread.start()
+
+        # Set model warmup event immediately (models load on demand)
+        from native_config import MODEL_WARMUP_EVENT
+        MODEL_WARMUP_EVENT.set()
+
         start_worker_threads()
 
         port = int(os.environ.get("PORT", 11440))

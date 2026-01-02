@@ -28,7 +28,9 @@ export function useExportHandlers(params: {
       }
     }
 
-    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    // Use appropriate MIME type based on file extension to preserve extension on Windows
+    const mimeType = fileName.endsWith('.srt') ? 'application/x-subrip;charset=utf-8' : 'text/plain;charset=utf-8';
+    const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;

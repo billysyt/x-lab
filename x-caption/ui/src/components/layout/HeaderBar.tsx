@@ -218,7 +218,7 @@ export function HeaderBar({
             {showCustomWindowControls && !isMac ? (
               <div className="ml-2 flex items-center gap-1 pl-2">
                 <button
-                  className="pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md text-[10px] text-slate-400 transition-colors hover:bg-slate-700/50 hover:text-slate-200"
+                  className="pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md text-[10px] text-slate-300 transition-colors hover:bg-slate-700/50 hover:text-white"
                   onClick={() => onWindowAction("minimize")}
                   type="button"
                   aria-label="Minimize"
@@ -227,7 +227,7 @@ export function HeaderBar({
                   <AppIcon name="windowMinimize" className="text-[10px]" />
                 </button>
                 <button
-                  className="pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md text-[10px] text-slate-400 transition-colors hover:bg-blue-600/20 hover:text-blue-300"
+                  className="pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md text-[10px] text-slate-300 transition-colors hover:bg-slate-700/50 hover:text-white"
                   onClick={() => onWindowAction("zoom")}
                   type="button"
                   aria-label={isMaximized ? "Restore" : "Maximize"}
@@ -236,7 +236,7 @@ export function HeaderBar({
                   <AppIcon name={isMaximized ? "windowRestore" : "windowMaximize"} className="text-[9px]" />
                 </button>
                 <button
-                  className="pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md text-[10px] text-slate-400 transition-colors hover:bg-red-600/20 hover:text-red-300"
+                  className="pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md text-[10px] text-slate-300 transition-colors hover:bg-slate-700/50 hover:text-white"
                   onClick={() => onWindowAction("close")}
                   type="button"
                   aria-label="Close"

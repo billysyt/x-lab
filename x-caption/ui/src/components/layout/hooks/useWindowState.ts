@@ -11,9 +11,7 @@ export function useWindowState() {
     typeof window !== "undefined"
       ? /Mac/i.test(window.navigator.platform || "") || /Macintosh/i.test(window.navigator.userAgent || "")
       : false;
-  // Only show custom window controls on macOS (frameless)
-  // Windows uses native titlebar with built-in controls
-  const showCustomWindowControls = isMac;
+  const showCustomWindowControls = isMac;  // Only show custom controls on macOS
   const [useCustomDrag, setUseCustomDrag] = useState(false);
 
   // Custom drag for macOS using native window drag event to avoid cross-display drift.

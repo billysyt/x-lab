@@ -108,6 +108,14 @@ def _write_payload(path: Path, payload: dict, key: bytes) -> None:
         "payload": payload,
         "sig": signature,
     }
+    # On Windows, remove existing file first to avoid permission issues with hidden files
+    if os.name == "nt" and path.exists():
+        try:
+            # Unhide the file first so we can delete it
+            ctypes.windll.kernel32.SetFileAttributesW(str(path), 0x80)  # FILE_ATTRIBUTE_NORMAL
+            path.unlink()
+        except Exception:
+            pass
     path.write_bytes(_encode_blob(blob))
     _mark_hidden(path)
 

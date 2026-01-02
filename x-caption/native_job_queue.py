@@ -92,55 +92,28 @@ class NativeJobQueue:
             return None
 
     def _recover_pending_jobs(self) -> None:
-        """Recover queued/started jobs from the last session."""
+        """Reset interrupted jobs to pending status without auto-resuming."""
         try:
             with self.lock:
                 rows = self.conn.execute(
                     """
-                    SELECT job_id, func_name, kwargs, status, created_at, meta
+                    SELECT job_id, func_name, status
                     FROM jobs
-                    WHERE queue_name = ? AND status IN ('queued', 'started')
+                    WHERE queue_name = ? AND status IN ('started')
                     """,
                     (self.name,),
                 ).fetchall()
         except Exception as exc:
-            logger.warning("Failed to load pending jobs for recovery: %s", exc)
+            logger.warning("Failed to load interrupted jobs for recovery: %s", exc)
             return
 
-        recovered = 0
-        failed = 0
+        reset_count = 0
 
         for row in rows:
-            job_id, func_name, kwargs_raw, status, created_at, meta_raw = row
-            func = self._resolve_callable(func_name)
-            if func is None:
-                failed += 1
-                error_message = "Failed to recover job after restart (handler not available)."
-                self.update_job_status(job_id, 'failed', error=error_message)
-                try:
-                    from native_history import upsert_job_record
+            job_id, func_name, status = row
 
-                    upsert_job_record({
-                        "job_id": job_id,
-                        "filename": job_id,
-                        "status": "failed",
-                        "summary": error_message,
-                    })
-                except Exception:
-                    pass
-                continue
-
-            try:
-                kwargs = json.loads(kwargs_raw) if kwargs_raw else {}
-            except Exception:
-                kwargs = {}
-
-            try:
-                meta = json.loads(meta_raw) if meta_raw else {}
-            except Exception:
-                meta = {}
-
-            # Reset status to queued so worker can pick it up again.
+            # Reset interrupted jobs back to pending (queued) status
+            # Do NOT add them back to the job queue - user must manually restart
             with self.lock:
                 self.conn.execute(
                     "UPDATE jobs SET status = ?, started_at = NULL, ended_at = NULL, error = NULL WHERE job_id = ?",
@@ -148,29 +121,21 @@ class NativeJobQueue:
                 )
                 self.conn.commit()
 
-            job = Job(job_id=job_id, func=func, kwargs=kwargs, queue_name=self.name)
-            job.func_name = func_name
-            job._status = 'queued'
-            job.created_at = datetime.fromtimestamp(created_at) if created_at else datetime.now()
-            job.meta = meta or {}
-            self.active_jobs[job_id] = job
-
-            self.job_queue.put((job, func, kwargs))
+            # Update metadata to indicate the job was interrupted
             self.update_job_meta(
                 job_id,
                 {
-                    "message": "Recovered job after restart. Restarting transcription...",
+                    "message": "Job was interrupted. Please restart manually.",
                     "progress": 0,
                 },
             )
-            recovered += 1
+            reset_count += 1
 
-        if recovered or failed:
+        if reset_count > 0:
             logger.info(
-                "Job recovery complete for queue '%s': recovered=%s failed=%s",
+                "Job recovery complete for queue '%s': reset to pending=%s (not auto-resumed)",
                 self.name,
-                recovered,
-                failed,
+                reset_count,
             )
 
     def _init_db(self):
