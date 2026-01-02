@@ -34,10 +34,11 @@ def create_styled_dmg(app_path: Path, output_dmg: Path, volume_name: str = "X-Ca
     Create a styled DMG with proper icon positioning.
 
     This creates a DMG that looks professional with:
+    - Custom volume icon
     - App icon on the left
     - Applications folder link on the right
     - Properly sized window
-    - Icon view with large icons
+    - Large icon view
     """
     print(f"Creating professional DMG installer...")
 
@@ -60,6 +61,15 @@ def create_styled_dmg(app_path: Path, output_dmg: Path, volume_name: str = "X-Ca
     applications_link = temp_dmg_dir / "Applications"
     applications_link.symlink_to("/Applications")
 
+    # Copy volume icon (make .VolumeIcon.icns)
+    print(f"  Adding volume icon...")
+    icon_source = app_path.parent.parent / "icon.icns"
+    if icon_source.exists():
+        volume_icon = temp_dmg_dir / ".VolumeIcon.icns"
+        shutil.copy2(icon_source, volume_icon)
+    else:
+        print(f"    Warning: icon.icns not found at {icon_source}")
+
     # Create a temporary writable DMG first
     temp_dmg = output_dmg.parent / f"{output_dmg.stem}_temp.dmg"
     if temp_dmg.exists():
@@ -72,6 +82,7 @@ def create_styled_dmg(app_path: Path, output_dmg: Path, volume_name: str = "X-Ca
         "-srcfolder", str(temp_dmg_dir),
         "-ov",
         "-format", "UDRW",  # Read-write format
+        "-fs", "HFS+",  # Use HFS+ for better compatibility
         str(temp_dmg)
     ], check=True, capture_output=True)
 
@@ -97,6 +108,19 @@ def create_styled_dmg(app_path: Path, output_dmg: Path, volume_name: str = "X-Ca
 
     print(f"  Mounted at: {mount_point}")
 
+    # Set custom volume icon attribute
+    try:
+        volume_icon_path = Path(mount_point) / ".VolumeIcon.icns"
+        if volume_icon_path.exists():
+            subprocess.run(
+                ["SetFile", "-a", "C", mount_point],
+                check=True,
+                capture_output=True
+            )
+            print(f"  ✓ Custom volume icon set")
+    except Exception as e:
+        print(f"    Warning: Could not set volume icon: {e}")
+
     # Apply styling with AppleScript
     print(f"  Applying window styling...")
 
@@ -111,6 +135,7 @@ tell application "Finder"
         set viewOptions to the icon view options of container window
         set arrangement of viewOptions to not arranged
         set icon size of viewOptions to 128
+        set text size of viewOptions to 14
 
         -- Position app icon on the left
         set position of item "{app_path.name}" of container window to {{160, 205}}
@@ -119,10 +144,9 @@ tell application "Finder"
         set position of item "Applications" of container window to {{480, 205}}
 
         -- Update and close
-        close
-        open
         update without registering applications
-        delay 2
+        delay 1
+        close
     end tell
 end tell
 '''
@@ -138,12 +162,31 @@ end tell
     except subprocess.CalledProcessError as e:
         print(f"  Warning: Could not apply styling: {e.stderr}")
 
-    # Give the system time to apply changes
-    time.sleep(2)
+    # Give the system time to apply changes and write .DS_Store
+    print(f"  Waiting for system to save settings...")
+    time.sleep(3)
+
+    # Sync to ensure .DS_Store is written
+    subprocess.run(["sync"], check=False)
+    time.sleep(1)
 
     # Unmount
     print(f"  Unmounting DMG...")
-    subprocess.run(["hdiutil", "detach", mount_point], check=True, capture_output=True)
+    max_attempts = 5
+    for attempt in range(max_attempts):
+        try:
+            subprocess.run(["hdiutil", "detach", mount_point], check=True, capture_output=True, timeout=10)
+            break
+        except subprocess.TimeoutExpired:
+            print(f"    Detach timeout, retry {attempt + 1}/{max_attempts}...")
+            time.sleep(2)
+        except subprocess.CalledProcessError as e:
+            if attempt < max_attempts - 1:
+                print(f"    Detach failed, retry {attempt + 1}/{max_attempts}...")
+                time.sleep(2)
+            else:
+                print(f"    Force detaching...")
+                subprocess.run(["hdiutil", "detach", mount_point, "-force"], check=False)
 
     # Convert to compressed read-only format
     print(f"  Converting to compressed format...")

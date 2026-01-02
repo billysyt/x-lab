@@ -33,14 +33,45 @@ def _log_startup_timing(label: str, start: float) -> None:
 
 def is_frozen():
     """Check if running as PyInstaller bundle"""
-    return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+    # Check multiple indicators that we're running as a bundle
+
+    # PyInstaller sets sys.frozen
+    if getattr(sys, 'frozen', False):
+        return True
+
+    # Check if we're running from inside a .app bundle (macOS)
+    if sys.platform == 'darwin':
+        exe_path = Path(sys.executable)
+        # If executable is inside .app/Contents/MacOS/, we're bundled
+        if '.app/Contents/MacOS' in str(exe_path):
+            return True
+
+    # Check if sys._MEIPASS exists (PyInstaller temporary folder)
+    if hasattr(sys, '_MEIPASS'):
+        return True
+
+    return False
 
 
 def get_bundle_dir() -> Path:
     """Get the bundle directory (where bundled resources are)"""
     if is_frozen():
         # Running as PyInstaller bundle
-        return Path(sys._MEIPASS)
+        # Try _MEIPASS first (standard PyInstaller location)
+        if hasattr(sys, '_MEIPASS'):
+            return Path(sys._MEIPASS)
+
+        # For macOS .app bundles without _MEIPASS, use Resources directory
+        if sys.platform == 'darwin' and '.app/Contents/MacOS' in str(sys.executable):
+            # Executable is at X-Caption.app/Contents/MacOS/x-caption
+            # Resources are at X-Caption.app/Contents/Resources/
+            exe_path = Path(sys.executable)
+            resources_dir = exe_path.parent.parent / 'Resources'
+            if resources_dir.exists():
+                return resources_dir
+
+        # Fallback: use directory containing executable
+        return Path(sys.executable).parent
     else:
         # Running in development mode
         return Path(__file__).parent
@@ -221,6 +252,14 @@ def setup_environment():
     if _ENV_READY:
         return
     start = time.perf_counter()
+
+    # Log detection results for debugging
+    frozen_state = is_frozen()
+    logger.info(f"Application frozen state: {frozen_state}")
+    logger.info(f"sys.frozen: {getattr(sys, 'frozen', False)}")
+    logger.info(f"sys._MEIPASS: {hasattr(sys, '_MEIPASS')}")
+    logger.info(f"sys.executable: {sys.executable}")
+
     _refresh_msvc_runtime()
 
     # Set application directories

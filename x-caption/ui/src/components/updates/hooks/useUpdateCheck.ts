@@ -16,7 +16,10 @@ export function useUpdateCheck(appVersion: string | null) {
 
   useEffect(() => {
     const updateUrl = (import.meta as any)?.env?.VITE_UPDATE_CHECK_URL;
-    if (!updateUrl || typeof updateUrl !== "string") return;
+    if (!updateUrl || typeof updateUrl !== "string") {
+      console.log("[UpdateCheck] VITE_UPDATE_CHECK_URL not configured, skipping update check");
+      return;
+    }
     const envVersion =
       typeof (import.meta as any)?.env?.VITE_APP_VERSION === "string"
         ? (import.meta as any).env.VITE_APP_VERSION
@@ -26,33 +29,48 @@ export function useUpdateCheck(appVersion: string | null) {
       (import.meta as any)?.env?.VITE_UPDATE_PROJECT ??
       (import.meta as any)?.env?.VITE_UPDATE_PROJECT_NAME ??
       "x-caption";
+
+    console.log("[UpdateCheck] Initializing:", {
+      updateUrl,
+      project: updateProject,
+      version: fallbackVersion
+    });
+
     let cancelled = false;
     const loadCachedUpdate = async () => {
       try {
+        console.log("[UpdateCheck] Loading cached update...");
         const response = await fetch(`/api/update/cache?project=${encodeURIComponent(updateProject)}`, {
           cache: "no-store"
         });
-        if (!response.ok) return;
+        if (!response.ok) {
+          console.log("[UpdateCheck] Cache not found or error:", response.status);
+          return;
+        }
         const cached = await response.json();
         if (cancelled || !cached) return;
         const cachedPayload = cached?.payload ?? null;
+        console.log("[UpdateCheck] Cached update loaded:", cachedPayload ? "yes" : "no");
         const info = buildUpdateModalInfo(cachedPayload, fallbackVersion, updateProject);
         if (info) {
+          console.log("[UpdateCheck] Update modal set:", info);
           setUpdateModal(info);
         }
-      } catch {
-        // Ignore cache errors.
+      } catch (error) {
+        console.error("[UpdateCheck] Error loading cache:", error);
       }
     };
     const storeCachedUpdate = async (payload: any) => {
       try {
+        console.log("[UpdateCheck] Storing update cache...");
         await fetch("/api/update/cache", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ project: updateProject, payload })
         });
-      } catch {
-        // Ignore cache write errors.
+        console.log("[UpdateCheck] Update cache stored successfully");
+      } catch (error) {
+        console.error("[UpdateCheck] Error storing cache:", error);
       }
     };
     const fetchLatestUpdate = async () => {
@@ -64,15 +82,24 @@ export function useUpdateCheck(appVersion: string | null) {
         if (fallbackVersion) {
           url.searchParams.set("current", fallbackVersion);
         }
-        const response = await fetch(url.toString(), { cache: "no-store" });
-        if (!response.ok) return;
+
+        // Use backend proxy to avoid CORS issues
+        const proxyUrl = `/api/update/fetch?url=${encodeURIComponent(url.toString())}`;
+        console.log("[UpdateCheck] Fetching latest update via proxy:", proxyUrl);
+
+        const response = await fetch(proxyUrl, { cache: "no-store" });
+        if (!response.ok) {
+          console.log("[UpdateCheck] Fetch failed:", response.status, response.statusText);
+          return;
+        }
         const payload = await response.json();
+        console.log("[UpdateCheck] Latest update fetched:", payload);
         if (cancelled || !payload) return;
         await storeCachedUpdate(payload);
         if (cancelled) return;
         await loadCachedUpdate();
-      } catch {
-        // Offline or blocked: skip update check silently.
+      } catch (error) {
+        console.error("[UpdateCheck] Error fetching update:", error);
       }
     };
     void loadCachedUpdate();

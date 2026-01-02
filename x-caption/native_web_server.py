@@ -1579,6 +1579,53 @@ def create_app():
             logger.error("Failed to load job history: %s", exc)
             return jsonify({"error": "Failed to load history"}), 500
 
+    @app.route('/api/update/fetch', methods=['GET'])
+    def fetch_update():
+        """Proxy update check API to avoid CORS issues."""
+        try:
+            update_url = request.args.get("url")
+            if not update_url:
+                return jsonify({"error": "URL parameter is required"}), 400
+
+            # Validate URL
+            try:
+                parsed = urlparse(update_url)
+                if not parsed.scheme or not parsed.netloc:
+                    return jsonify({"error": "Invalid URL"}), 400
+            except Exception:
+                return jsonify({"error": "Invalid URL"}), 400
+
+            # Fetch from external API
+            headers = {
+                'User-Agent': 'X-Caption/0.1.0',
+                'Accept': 'application/json',
+            }
+
+            req = urllib.request.Request(update_url, headers=headers)
+            if certifi:
+                ctx = ssl.create_default_context(cafile=certifi.where())
+            else:
+                ctx = ssl.create_default_context()
+
+            with urllib.request.urlopen(req, context=ctx, timeout=10) as response:
+                content_type = response.headers.get('Content-Type', '')
+                if 'application/json' not in content_type:
+                    return jsonify({"error": "Response is not JSON"}), 400
+
+                data = response.read()
+                payload = json.loads(data.decode('utf-8'))
+                return jsonify(payload), 200
+
+        except urllib.error.HTTPError as e:
+            logger.error("Update fetch HTTP error: %s", e)
+            return jsonify({"error": f"HTTP error: {e.code}"}), 502
+        except urllib.error.URLError as e:
+            logger.error("Update fetch URL error: %s", e)
+            return jsonify({"error": f"Network error: {e.reason}"}), 502
+        except Exception as exc:
+            logger.error("Update fetch failed: %s", exc, exc_info=True)
+            return jsonify({"error": "Failed to fetch update"}), 500
+
     @app.route('/api/update/cache', methods=['GET'])
     def get_update_cache():
         project = (request.args.get("project") or "").strip()
@@ -1595,6 +1642,40 @@ def create_app():
                 "fetched_at": entry.get("fetched_at")
             }), 200
         return jsonify(data), 200
+
+    @app.route('/api/debug/paths', methods=['GET'])
+    def debug_paths():
+        """Debug endpoint to verify path detection in bundled app."""
+        import native_config
+        from pathlib import Path
+
+        data_dir = native_config.get_data_dir()
+        bundle_dir = native_config.get_bundle_dir()
+
+        return jsonify({
+            "frozen_detection": {
+                "is_frozen": native_config.is_frozen(),
+                "sys_frozen": getattr(sys, 'frozen', False),
+                "sys_meipass_exists": hasattr(sys, '_MEIPASS'),
+                "sys_meipass_value": getattr(sys, '_MEIPASS', None),
+                "sys_executable": sys.executable,
+                "in_app_bundle": '.app/Contents/MacOS' in str(sys.executable),
+            },
+            "paths": {
+                "bundle_dir": str(bundle_dir),
+                "data_dir": str(data_dir),
+                "models_dir": str(native_config.get_models_dir()),
+                "transcriptions_dir": str(native_config.get_transcriptions_dir()),
+                "uploads_dir": str(native_config.get_uploads_dir()),
+            },
+            "expected_production_path": str(Path.home() / "Library" / "Application Support" / "X-Caption"),
+            "data_dir_matches_expected": str(data_dir) == str(Path.home() / "Library" / "Application Support" / "X-Caption"),
+            "data_dir_contents": {
+                "exists": data_dir.exists(),
+                "files": [f.name for f in data_dir.iterdir()] if data_dir.exists() else [],
+                "dll_files": [f.name for f in data_dir.glob("*.dll")] if data_dir.exists() else [],
+            }
+        }), 200
 
     @app.route('/api/update/cache', methods=['POST'])
     def set_update_cache():

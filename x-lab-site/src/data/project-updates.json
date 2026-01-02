@@ -1,11 +1,11 @@
 {
   "x-caption": [
     {
-      "version": "0.1.0",
+      "version": "0.1.1",
       "released_at": "2025-12-01",
       "download_url": "https://x-lab.hk/downloads#x-caption",
       "notes": "Initial release.",
-      "force_update": false,
+      "force_update": true,
       "min_supported": "0.1.0"
     }
   ],
