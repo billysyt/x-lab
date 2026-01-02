@@ -49,7 +49,7 @@
     ],
     "freeCta": "Selected",
     "premiumTag": "Upgrade",
-    "premiumBadge": "No credit card required",
+    "premiumBadge": "No card",
     "premiumPrice": "$19",
     "premiumPriceUnit": "USD",
     "premiumDesc": "Priority access to our products",
@@ -229,7 +229,7 @@
     "contact": "Contact Us",
     "terms": "Terms of Service",
     "privacyPolicy": "Privacy Policy",
-    "copyright": "Copyright 2025 X-Lab. All rights reserved.",
+    "copyright": "Copyright 2026 X-Lab. All rights reserved.",
     "offlinePrivacy": "Offline processing, privacy first"
   },
   "contactPage": {

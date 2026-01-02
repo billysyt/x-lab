@@ -39,7 +39,7 @@ export function AboutModalOverlay({ showAboutModal, setShowAboutModal, version }
 
           {/* Copyright */}
           <div className="mt-1 text-xs text-slate-500">
-            Copyright © 2025 X-Lab.HK
+            Copyright © 2026 X-Lab.HK
           </div>
 
           {/* Close Button */}
