@@ -11,7 +11,9 @@ export function useWindowState() {
     typeof window !== "undefined"
       ? /Mac/i.test(window.navigator.platform || "") || /Macintosh/i.test(window.navigator.userAgent || "")
       : false;
-  const showCustomWindowControls = isWindows || isMac;
+  // Only show custom window controls on macOS (frameless)
+  // Windows uses native titlebar with built-in controls
+  const showCustomWindowControls = isMac;
   const [useCustomDrag, setUseCustomDrag] = useState(false);
 
   // Custom drag for macOS using native window drag event to avoid cross-display drift.
@@ -181,15 +183,13 @@ export function useWindowState() {
     y?: number;
   } | null>(null);
 
+  const [isMaximized, setIsMaximized] = useState(false);
+
   const handleWindowZoomToggle = useCallback(async () => {
     const win = typeof window !== "undefined" ? (window as any) : null;
     const api = win?.pywebview?.api;
     if (!api) return;
-    const zoomNames = ["window_zoom", "windowZoom"];
-    const zoomResult = await Promise.resolve(callApiMethod(api, zoomNames));
-    if (zoomResult && zoomResult.success !== false) {
-      return;
-    }
+
     const getSizeNames = ["window_get_size", "windowGetSize", "window_getSize"];
     const setSizeNames = ["window_set_size", "windowSetSize", "window_setSize"];
     const getPosNames = ["window_get_position", "windowGetPosition", "window_getPosition"];
@@ -215,6 +215,7 @@ export function useWindowState() {
 
     const current = windowZoomStateRef.current;
     if (!current || !current.active) {
+      // Save current window size and position before maximizing
       const [sizeRes, posRes] = await Promise.all([
         Promise.resolve(callApiMethod(api, getSizeNames)),
         Promise.resolve(callApiMethod(api, getPosNames))
@@ -228,14 +229,18 @@ export function useWindowState() {
         x: pos?.x,
         y: pos?.y
       };
+      // Maximize the window
       await Promise.resolve(callApiMethod(api, toggleMaxNames));
+      setIsMaximized(true);
       return;
     }
 
+    // Restore to original size and position
     windowZoomStateRef.current = { ...current, active: false };
     const restoreResult = await Promise.resolve(callApiMethod(api, restoreNames));
     const restoreOk = Boolean(restoreResult && restoreResult.success !== false);
     if (!restoreOk) {
+      // Fallback: manually restore using toggle and then set size/position
       await Promise.resolve(callApiMethod(api, toggleMaxNames));
       if (typeof current.width === "number" && typeof current.height === "number") {
         await Promise.resolve(callApiMethod(api, setSizeNames, current.width, current.height));
@@ -244,6 +249,7 @@ export function useWindowState() {
         await Promise.resolve(callApiMethod(api, moveNames, current.x, current.y));
       }
     }
+    setIsMaximized(false);
   }, []);
 
   const handleWindowAction = useCallback(
@@ -325,6 +331,7 @@ export function useWindowState() {
     isHeaderMenuOpen,
     setIsHeaderMenuOpen,
     headerMenuRef,
-    headerMenuButtonRef
+    headerMenuButtonRef,
+    isMaximized
   };
 }

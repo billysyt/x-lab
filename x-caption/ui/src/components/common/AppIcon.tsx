@@ -105,6 +105,7 @@ const icons = {
   fileImport: FaFileImport,
   windowMinimize: FaMinus,
   windowMaximize: FaRegSquare,
+  windowRestore: FaCompress,
   video: FaVideo,
   volume: FaVolumeUp,
   captions: FaClosedCaptioning,

@@ -1286,10 +1286,8 @@ def open_browser(port: int = 11440, width: int = 1480, height: int = 900) -> str
                             native_window.setMovableByWindowBackground_(False)
                     except Exception:
                         pass
-                if IS_WINDOWS and hasattr(window, "maximize"):
-                    window.maximize()
             except Exception:
-                logger.debug("Failed to maximize window", exc_info=True)
+                logger.debug("Window initialization completed", exc_info=True)
 
         start_kwargs = {"debug": False, "func": on_webview_ready}
 

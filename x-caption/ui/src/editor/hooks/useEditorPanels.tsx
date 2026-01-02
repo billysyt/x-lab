@@ -312,6 +312,7 @@ export function useEditorPanels(params: EditorPanelsParams) {
     isExporting: exportHandlers.isExporting,
     isPremium: premiumState.isPremium,
     premiumStatusLoading: premiumState.premiumStatusLoading,
+    isMaximized: windowState.isMaximized,
     headerMenuRef: windowState.headerMenuRef,
     headerMenuButtonRef: windowState.headerMenuButtonRef,
     getHeaderDragProps: windowState.getHeaderDragProps,

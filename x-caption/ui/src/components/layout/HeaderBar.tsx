@@ -13,6 +13,7 @@ export type HeaderBarProps = {
   isExporting: boolean;
   isPremium: boolean;
   premiumStatusLoading: boolean;
+  isMaximized: boolean;
   headerMenuRef: RefObject<HTMLDivElement>;
   headerMenuButtonRef: RefObject<HTMLButtonElement>;
   getHeaderDragProps: (baseClass: string) => {
@@ -39,6 +40,7 @@ export function HeaderBar({
   isExporting,
   isPremium,
   premiumStatusLoading,
+  isMaximized,
   headerMenuRef,
   headerMenuButtonRef,
   getHeaderDragProps,
@@ -161,7 +163,7 @@ export function HeaderBar({
         {isHeaderCompact ? (
           <button
             ref={headerMenuButtonRef}
-            className="pywebview-no-drag inline-flex h-6 w-6 items-center justify-center rounded-md bg-[#1b1b22] text-[10px] text-slate-200 transition hover:bg-[#26262f]"
+            className="pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md bg-slate-800/40 text-[11px] text-slate-300 transition-colors hover:bg-slate-700/60 hover:text-slate-100"
             onClick={(event) => {
               event.stopPropagation();
               onToggleHeaderMenu();
@@ -170,7 +172,7 @@ export function HeaderBar({
             aria-label="Menu"
             title="Menu"
           >
-            <AppIcon name="bars" className="text-[11px]" />
+            <AppIcon name="bars" className="text-[12px]" />
           </button>
         ) : (
           <>
@@ -216,7 +218,7 @@ export function HeaderBar({
             {showCustomWindowControls && !isMac ? (
               <div className="ml-2 flex items-center gap-1 pl-2">
                 <button
-                  className="pywebview-no-drag inline-flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-[#151515] text-[10px] text-slate-200 hover:border-slate-500"
+                  className="pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md text-[10px] text-slate-400 transition-colors hover:bg-slate-700/50 hover:text-slate-200"
                   onClick={() => onWindowAction("minimize")}
                   type="button"
                   aria-label="Minimize"
@@ -225,16 +227,16 @@ export function HeaderBar({
                   <AppIcon name="windowMinimize" className="text-[10px]" />
                 </button>
                 <button
-                  className="pywebview-no-drag inline-flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-[#151515] text-[10px] text-slate-200 hover:border-slate-500"
+                  className="pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md text-[10px] text-slate-400 transition-colors hover:bg-blue-600/20 hover:text-blue-300"
                   onClick={() => onWindowAction("zoom")}
                   type="button"
-                  aria-label="Zoom"
-                  title="Zoom"
+                  aria-label={isMaximized ? "Restore" : "Maximize"}
+                  title={isMaximized ? "Restore" : "Maximize"}
                 >
-                  <AppIcon name="windowMaximize" className="text-[9px]" />
+                  <AppIcon name={isMaximized ? "windowRestore" : "windowMaximize"} className="text-[9px]" />
                 </button>
                 <button
-                  className="pywebview-no-drag inline-flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-[#151515] text-[10px] text-slate-200 hover:border-slate-500"
+                  className="pywebview-no-drag inline-flex h-7 w-7 items-center justify-center rounded-md text-[10px] text-slate-400 transition-colors hover:bg-red-600/20 hover:text-red-300"
                   onClick={() => onWindowAction("close")}
                   type="button"
                   aria-label="Close"
