@@ -157,7 +157,7 @@ export function HeaderBar({
         ) : null}
       </div>
       <div className="flex items-center justify-center gap-2">
-        <span className="text-[11px] font-semibold text-slate-200">X-Caption</span>
+        {isMac ? <span className="text-[11px] font-semibold text-slate-200">X-Caption</span> : null}
       </div>
       <div className="flex items-center justify-end gap-2">
         {isHeaderCompact ? (

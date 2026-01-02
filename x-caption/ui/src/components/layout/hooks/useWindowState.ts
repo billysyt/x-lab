@@ -157,12 +157,24 @@ export function useWindowState() {
     const api = win?.pywebview?.api;
     const setter = api?.window_set_on_top || api?.windowSetOnTop || api?.window_setOnTop;
     if (typeof setter === "function") {
+      // Optimistically update UI immediately for better UX
+      setIsPinned(next);
       return Promise.resolve(setter(next))
         .then((result: any) => {
-          if (result && result.success === false) return;
-          setIsPinned(next);
+          if (result && result.success === false) {
+            // Revert on failure
+            setIsPinned(!next);
+            return;
+          }
+          // Confirm with server response if available
+          if (result && typeof result.onTop === "boolean") {
+            setIsPinned(result.onTop);
+          }
         })
-        .catch(() => setIsPinned(next));
+        .catch(() => {
+          // Revert on error
+          setIsPinned(!next);
+        });
     }
     setIsPinned(next);
     return Promise.resolve();

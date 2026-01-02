@@ -1105,8 +1105,17 @@ def open_browser(port: int = 11440, width: int = 1480, height: int = 900) -> str
                     return {"success": False, "error": "window_not_ready"}
                 try:
                     if hasattr(self._window, "on_top"):
-                        setattr(self._window, "on_top", bool(value))
-                        return {"success": True}
+                        # Run in thread to prevent blocking/hanging on Windows
+                        def set_on_top_async():
+                            try:
+                                setattr(self._window, "on_top", bool(value))
+                            except Exception as e:
+                                logger.warning(f"Failed to set window on_top: {e}")
+
+                        import threading
+                        thread = threading.Thread(target=set_on_top_async, daemon=True)
+                        thread.start()
+                        return {"success": True, "onTop": bool(value)}
                 except Exception as exc:  # pragma: no cover - defensive
                     return {"success": False, "error": str(exc)}
                 return {"success": False, "error": "unsupported"}
